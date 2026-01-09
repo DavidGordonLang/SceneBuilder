@@ -2,6 +2,8 @@ import React from "react";
 import { NavLink, Route, Routes, Navigate } from "react-router-dom";
 import { ScenesHome, ToolsHome, JournalHome } from "./routes.jsx";
 
+const TAB_BAR_HEIGHT = 56;
+
 const navStyle = {
   position: "fixed",
   left: 0,
@@ -12,6 +14,7 @@ const navStyle = {
   borderTop: "1px solid rgba(255,255,255,0.08)",
   background: "rgba(11,11,15,0.92)",
   backdropFilter: "blur(10px)",
+  paddingBottom: "env(safe-area-inset-bottom)",
 };
 
 const linkBase = {
@@ -19,6 +22,7 @@ const linkBase = {
   textAlign: "center",
   fontSize: 12,
   letterSpacing: 0.3,
+  userSelect: "none",
 };
 
 function TabLink({ to, label }) {
@@ -38,7 +42,11 @@ function TabLink({ to, label }) {
 
 export default function App() {
   return (
-    <div style={{ paddingBottom: 56 }}>
+    <div
+      style={{
+        paddingBottom: `calc(${TAB_BAR_HEIGHT}px + env(safe-area-inset-bottom))`,
+      }}
+    >
       <Routes>
         <Route path="/" element={<Navigate to="/scenes" replace />} />
         <Route path="/scenes" element={<ScenesHome />} />
