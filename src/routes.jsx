@@ -1,5 +1,10 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { fetchToolVault, fetchUserTools } from "./lib/toolsApi";
+import {
+  addGlobalToolToUser,
+  fetchToolVault,
+  fetchUserTools,
+  updateUserToolStatus,
+} from "./lib/toolsApi";
 
 function TopBar({ title, onSignOut, rightSlot }) {
   return (
@@ -56,7 +61,30 @@ function Chip({ children }) {
   );
 }
 
-function ToolRow({ tool }) {
+function SmallButton({ children, onClick, disabled, title }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      style={{
+        padding: "8px 10px",
+        borderRadius: 10,
+        border: "1px solid rgba(255,255,255,0.14)",
+        background: disabled ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.08)",
+        color: "#f3f3f7",
+        cursor: disabled ? "not-allowed" : "pointer",
+        fontSize: 12,
+        fontWeight: 700,
+        opacity: disabled ? 0.55 : 1,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function ToolRow({ tool, actions }) {
   const icon = tool.icon || "🧰";
   const tags = Array.isArray(tool.tags) ? tool.tags : [];
   const safety = tool.safety_level ? tool.safety_level.toUpperCase() : null;
@@ -88,9 +116,26 @@ function ToolRow({ tool }) {
       </div>
 
       <div style={{ minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-          <div style={{ fontWeight: 700 }}>{tool.name}</div>
-          {safety ? <span style={{ opacity: 0.6, fontSize: 12 }}>{safety}</span> : null}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "baseline",
+            justifyContent: "space-between",
+            gap: 10,
+          }}
+        >
+          <div style={{ minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+              <div style={{ fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis" }}>
+                {tool.name}
+              </div>
+              {safety ? (
+                <span style={{ opacity: 0.6, fontSize: 12 }}>{safety}</span>
+              ) : null}
+            </div>
+          </div>
+
+          {actions ? <div style={{ display: "flex", gap: 8 }}>{actions}</div> : null}
         </div>
 
         {tags.length ? (
@@ -131,7 +176,7 @@ function Segmented({ value, onChange, options }) {
               color: "#f3f3f7",
               cursor: "pointer",
               fontSize: 12,
-              fontWeight: active ? 700 : 600,
+              fontWeight: active ? 800 : 650,
               opacity: active ? 1 : 0.75,
             }}
           >
@@ -167,44 +212,83 @@ export function ToolsHome({ supabase }) {
 
   const [tab, setTab] = useState("drawer"); // drawer | vault
   const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
   const [vault, setVault] = useState([]);
   const [userTools, setUserTools] = useState([]);
 
+  async function reload() {
+    setLoading(true);
+    setErr("");
+    try {
+      const [v, ut] = await Promise.all([fetchToolVault(), fetchUserTools()]);
+      setVault(v);
+      setUserTools(ut);
+    } catch (e) {
+      setErr(e?.message || "Failed to load tools.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   useEffect(() => {
     let alive = true;
-
-    async function load() {
-      setLoading(true);
-      setErr("");
-      try {
-        const [v, ut] = await Promise.all([fetchToolVault(), fetchUserTools()]);
-        if (!alive) return;
-        setVault(v);
-        setUserTools(ut);
-      } catch (e) {
-        if (!alive) return;
-        setErr(e?.message || "Failed to load tools.");
-      } finally {
-        if (alive) setLoading(false);
-      }
-    }
-
-    load();
+    (async () => {
+      if (!alive) return;
+      await reload();
+    })();
     return () => {
       alive = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const owned = useMemo(
-    () => userTools.filter((t) => t.status === "owned"),
-    [userTools]
-  );
+  const owned = useMemo(() => userTools.filter((t) => t.status === "owned"), [userTools]);
   const craving = useMemo(
     () => userTools.filter((t) => t.status === "craving"),
     [userTools]
   );
+
+  const ownedGlobalIds = useMemo(() => {
+    const s = new Set();
+    for (const t of owned) if (t.tool_global_id) s.add(t.tool_global_id);
+    return s;
+  }, [owned]);
+
+  const cravingGlobalIds = useMemo(() => {
+    const s = new Set();
+    for (const t of craving) if (t.tool_global_id) s.add(t.tool_global_id);
+    return s;
+  }, [craving]);
+
+  async function addTo(status, toolGlobalId) {
+    setErr("");
+    setBusy(true);
+    try {
+      await addGlobalToolToUser(toolGlobalId, status);
+      await reload();
+    } catch (e) {
+      // Unique constraint will throw if user tries to add duplicates
+      const msg = e?.message || "Could not add tool.";
+      setErr(msg);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function moveCravingToOwned(toolUserId) {
+    setErr("");
+    setBusy(true);
+    try {
+      await updateUserToolStatus(toolUserId, "owned");
+      await reload();
+    } catch (e) {
+      setErr(e?.message || "Could not move tool.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <div>
@@ -234,14 +318,17 @@ export function ToolsHome({ supabase }) {
               border: "1px solid rgba(255,80,80,0.35)",
               background: "rgba(255,80,80,0.10)",
               fontSize: 13,
+              marginBottom: 12,
             }}
           >
             {err}
           </div>
-        ) : tab === "drawer" ? (
+        ) : null}
+
+        {tab === "drawer" ? (
           <div style={{ display: "grid", gap: 14 }}>
             <div>
-              <div style={{ fontWeight: 800, marginBottom: 8 }}>Owned Tools</div>
+              <div style={{ fontWeight: 900, marginBottom: 8 }}>Owned Tools</div>
               {owned.length ? (
                 <div style={{ display: "grid", gap: 10 }}>
                   {owned.map((t) => {
@@ -253,12 +340,7 @@ export function ToolsHome({ supabase }) {
                     return (
                       <ToolRow
                         key={t.id}
-                        tool={{
-                          name,
-                          icon,
-                          tags,
-                          safety_level: safety,
-                        }}
+                        tool={{ name, icon, tags, safety_level: safety }}
                       />
                     );
                   })}
@@ -271,7 +353,7 @@ export function ToolsHome({ supabase }) {
             </div>
 
             <div>
-              <div style={{ fontWeight: 800, marginBottom: 8 }}>Craving Drawer</div>
+              <div style={{ fontWeight: 900, marginBottom: 8 }}>Craving Drawer</div>
               {craving.length ? (
                 <div style={{ display: "grid", gap: 10 }}>
                   {craving.map((t) => {
@@ -280,15 +362,20 @@ export function ToolsHome({ supabase }) {
                     const icon = g?.icon || t.custom_icon || "🧰";
                     const tags = g?.tags || t.tags_override || [];
                     const safety = g?.safety_level || null;
+
                     return (
                       <ToolRow
                         key={t.id}
-                        tool={{
-                          name,
-                          icon,
-                          tags,
-                          safety_level: safety,
-                        }}
+                        tool={{ name, icon, tags, safety_level: safety }}
+                        actions={
+                          <SmallButton
+                            disabled={busy}
+                            onClick={() => moveCravingToOwned(t.id)}
+                            title="Move this tool into Owned"
+                          >
+                            Move to Owned
+                          </SmallButton>
+                        }
                       />
                     );
                   })}
@@ -303,11 +390,44 @@ export function ToolsHome({ supabase }) {
         ) : (
           <div style={{ display: "grid", gap: 10 }}>
             <div style={{ opacity: 0.75, fontSize: 13, marginBottom: 6 }}>
-              Tool Vault (global catalogue). Next: add to Owned/Craving.
+              Tool Vault. Add items to Owned or Craving.
             </div>
-            {vault.map((t) => (
-              <ToolRow key={t.id} tool={t} />
-            ))}
+
+            {vault.map((t) => {
+              const inOwned = ownedGlobalIds.has(t.id);
+              const inCraving = cravingGlobalIds.has(t.id);
+
+              return (
+                <ToolRow
+                  key={t.id}
+                  tool={t}
+                  actions={
+                    <>
+                      <SmallButton
+                        disabled={busy || inCraving || inOwned}
+                        onClick={() => addTo("craving", t.id)}
+                        title={
+                          inOwned
+                            ? "Already in Owned"
+                            : inCraving
+                            ? "Already in Craving"
+                            : "Add to Craving Drawer"
+                        }
+                      >
+                        + Craving
+                      </SmallButton>
+                      <SmallButton
+                        disabled={busy || inOwned}
+                        onClick={() => addTo("owned", t.id)}
+                        title={inOwned ? "Already in Owned" : "Add to Owned Tools"}
+                      >
+                        + Owned
+                      </SmallButton>
+                    </>
+                  }
+                />
+              );
+            })}
           </div>
         )}
       </div>
