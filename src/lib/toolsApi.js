@@ -53,3 +53,11 @@ export async function updateUserToolStatus(toolUserId, status) {
 
   if (error) throw error;
 }
+
+/**
+ * Remove a tool from user's drawer (owned or craving).
+ */
+export async function deleteUserTool(toolUserId) {
+  const { error } = await supabase.from("tools_user").delete().eq("id", toolUserId);
+  if (error) throw error;
+}
