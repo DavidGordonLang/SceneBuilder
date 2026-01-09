@@ -28,3 +28,28 @@ export async function fetchUserTools() {
   if (error) throw error;
   return data ?? [];
 }
+
+/**
+ * Add a global tool to user's drawer.
+ * status: 'owned' | 'craving'
+ */
+export async function addGlobalToolToUser(toolGlobalId, status) {
+  const { error } = await supabase.from("tools_user").insert({
+    tool_global_id: toolGlobalId,
+    status,
+  });
+
+  if (error) throw error;
+}
+
+/**
+ * Update tool status (e.g. craving → owned).
+ */
+export async function updateUserToolStatus(toolUserId, status) {
+  const { error } = await supabase
+    .from("tools_user")
+    .update({ status })
+    .eq("id", toolUserId);
+
+  if (error) throw error;
+}
