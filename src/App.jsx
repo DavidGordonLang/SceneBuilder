@@ -1,7 +1,14 @@
 import React, { useEffect, useState } from "react";
 import { NavLink, Route, Routes, Navigate } from "react-router-dom";
 import { supabase } from "./lib/supabaseClient";
-import { ScenesHome, ToolsHome, JournalHome } from "./routes.jsx";
+import {
+  ScenesHome,
+  SceneCreate,
+  SceneView,
+  SceneEdit,
+  ToolsHome,
+  JournalHome,
+} from "./routes.jsx";
 
 const TAB_BAR_HEIGHT = 56;
 
@@ -162,9 +169,20 @@ export default function App() {
     >
       <Routes>
         <Route path="/" element={<Navigate to="/scenes" replace />} />
+
+        {/* Scenes */}
         <Route path="/scenes" element={<ScenesHome session={session} supabase={supabase} />} />
+        <Route path="/scenes/new" element={<SceneCreate session={session} supabase={supabase} />} />
+        <Route path="/scenes/:id" element={<SceneView session={session} supabase={supabase} />} />
+        <Route
+          path="/scenes/:id/edit"
+          element={<SceneEdit session={session} supabase={supabase} />}
+        />
+
+        {/* Tools + Journal */}
         <Route path="/tools" element={<ToolsHome session={session} supabase={supabase} />} />
         <Route path="/journal" element={<JournalHome session={session} supabase={supabase} />} />
+
         <Route path="*" element={<Navigate to="/scenes" replace />} />
       </Routes>
 
