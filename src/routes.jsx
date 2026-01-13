@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   addGlobalToolToUser,
   deleteUserTool,
@@ -6,6 +7,14 @@ import {
   fetchUserTools,
   updateUserToolStatus,
 } from "./lib/toolsApi";
+import {
+  createScene,
+  fetchOwnedToolsForPicker,
+  fetchParticipants,
+  fetchSceneById,
+  fetchScenes,
+  updateScene,
+} from "./lib/scenesApi";
 
 function TopBar({ title, onSignOut, rightSlot }) {
   return (
@@ -197,22 +206,778 @@ function Segmented({ value, onChange, options }) {
   );
 }
 
-export function ScenesHome({ supabase }) {
-  async function signOut() {
-    await supabase.auth.signOut();
+/* =========================
+   Scenes (MVP)
+   ========================= */
+
+function Card({ children, onClick, asLink, to }) {
+  const base = {
+    padding: 12,
+    borderRadius: 14,
+    border: "1px solid rgba(255,255,255,0.10)",
+    background: "rgba(255,255,255,0.03)",
+  };
+
+  if (asLink) {
+    return (
+      <Link
+        to={to}
+        style={{
+          ...base,
+          display: "block",
+          color: "inherit",
+          textDecoration: "none",
+        }}
+      >
+        {children}
+      </Link>
+    );
   }
 
   return (
-    <div>
-      <TopBar title="Scenes" onSignOut={signOut} />
-      <div style={{ padding: 16 }}>
-        <p style={{ opacity: 0.8 }}>
-          Next: New Scene flow, Scene detail, Run mode (timer + optional step cards).
-        </p>
+    <div
+      onClick={onClick}
+      style={{
+        ...base,
+        cursor: onClick ? "pointer" : "default",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function FieldLabel({ children }) {
+  return <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>{children}</div>;
+}
+
+function TextInput({ value, onChange, placeholder }) {
+  return (
+    <input
+      value={value}
+      placeholder={placeholder}
+      onChange={(e) => onChange(e.target.value)}
+      style={{
+        width: "100%",
+        padding: "11px 12px",
+        borderRadius: 12,
+        border: "1px solid rgba(255,255,255,0.14)",
+        background: "rgba(255,255,255,0.04)",
+        color: "#f3f3f7",
+        outline: "none",
+      }}
+    />
+  );
+}
+
+function TextArea({ value, onChange, placeholder }) {
+  return (
+    <textarea
+      value={value}
+      placeholder={placeholder}
+      onChange={(e) => onChange(e.target.value)}
+      rows={4}
+      style={{
+        width: "100%",
+        padding: "11px 12px",
+        borderRadius: 12,
+        border: "1px solid rgba(255,255,255,0.14)",
+        background: "rgba(255,255,255,0.04)",
+        color: "#f3f3f7",
+        outline: "none",
+        resize: "vertical",
+      }}
+    />
+  );
+}
+
+function parseDateTimeForInput(value) {
+  if (!value) return "";
+  try {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return "";
+    const pad = (n) => String(n).padStart(2, "0");
+    const yyyy = d.getFullYear();
+    const mm = pad(d.getMonth() + 1);
+    const dd = pad(d.getDate());
+    const hh = pad(d.getHours());
+    const mi = pad(d.getMinutes());
+    return `${yyyy}-${mm}-${dd}T${hh}:${mi}`;
+  } catch {
+    return "";
+  }
+}
+
+function formatDate(value) {
+  if (!value) return "";
+  try {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return "";
+    return d.toLocaleString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return "";
+  }
+}
+
+function pickParticipantLabel(p) {
+  return (
+    p?.name ||
+    p?.display_name ||
+    p?.nickname ||
+    p?.full_name ||
+    p?.label ||
+    `Participant ${String(p?.id ?? "").slice(0, 6)}`
+  );
+}
+
+function pickToolLabel(tu) {
+  const g = tu?.tools_global;
+  return g?.name || tu?.custom_name || "Untitled tool";
+}
+
+function pickToolIcon(tu) {
+  const g = tu?.tools_global;
+  return g?.icon || tu?.custom_icon || "🧰";
+}
+
+function SceneForm({
+  initial,
+  participants,
+  ownedTools,
+  onSubmit,
+  busy,
+  err,
+  submitLabel = "Save Draft",
+  backTo,
+}) {
+  const navigate = useNavigate();
+
+  const [title, setTitle] = useState(initial?.title ?? "");
+  const [intent, setIntent] = useState(initial?.intent ?? "");
+  const [notes, setNotes] = useState(initial?.notes ?? "");
+  const [scheduledAt, setScheduledAt] = useState(parseDateTimeForInput(initial?.scheduled_at ?? ""));
+
+  const [selectedParticipants, setSelectedParticipants] = useState(
+    new Set(initial?.participantIds ?? [])
+  );
+  const [selectedTools, setSelectedTools] = useState(new Set(initial?.toolUserIds ?? []));
+
+  const canSubmit = title.trim().length > 0 && !busy;
+
+  function toggleParticipant(id) {
+    setSelectedParticipants((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleTool(id) {
+    setSelectedTools((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function handleSubmit() {
+    if (!title.trim()) return;
+
+    const payload = {
+      title: title.trim(),
+      intent: intent.trim(),
+      notes: notes.trim(),
+      scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null,
+      participantIds: Array.from(selectedParticipants),
+      toolUserIds: Array.from(selectedTools),
+    };
+
+    const result = await onSubmit(payload);
+    if (result?.sceneId) {
+      navigate(`/scenes/${result.sceneId}`);
+    } else {
+      navigate(backTo || "/scenes");
+    }
+  }
+
+  return (
+    <div style={{ padding: 16, display: "grid", gap: 14 }}>
+      {err ? (
+        <div
+          style={{
+            padding: 12,
+            borderRadius: 12,
+            border: "1px solid rgba(255,80,80,0.35)",
+            background: "rgba(255,80,80,0.10)",
+            fontSize: 13,
+          }}
+        >
+          {err}
+        </div>
+      ) : null}
+
+      <div style={{ display: "grid", gap: 10 }}>
+        <div>
+          <FieldLabel>Title *</FieldLabel>
+          <TextInput value={title} onChange={setTitle} placeholder="e.g. Rope + sensory focus" />
+        </div>
+
+        <div>
+          <FieldLabel>Intent</FieldLabel>
+          <TextInput
+            value={intent}
+            onChange={setIntent}
+            placeholder="What are you aiming to create?"
+          />
+        </div>
+
+        <div>
+          <FieldLabel>Scheduled (optional)</FieldLabel>
+          <input
+            type="datetime-local"
+            value={scheduledAt}
+            onChange={(e) => setScheduledAt(e.target.value)}
+            style={{
+              width: "100%",
+              padding: "11px 12px",
+              borderRadius: 12,
+              border: "1px solid rgba(255,255,255,0.14)",
+              background: "rgba(255,255,255,0.04)",
+              color: "#f3f3f7",
+              outline: "none",
+            }}
+          />
+        </div>
+
+        <div>
+          <FieldLabel>Notes</FieldLabel>
+          <TextArea value={notes} onChange={setNotes} placeholder="Key constraints, boundaries, flow…" />
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gap: 10 }}>
+        <div style={{ fontWeight: 900 }}>Participants</div>
+        {participants.length ? (
+          <div style={{ display: "grid", gap: 10 }}>
+            {participants.map((p) => {
+              const label = pickParticipantLabel(p);
+              const checked = selectedParticipants.has(p.id);
+              return (
+                <Card key={p.id} onClick={() => toggleParticipant(p.id)}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                    <div style={{ fontWeight: 800 }}>{label}</div>
+                    <div style={{ opacity: 0.8, fontWeight: 800 }}>{checked ? "✓" : ""}</div>
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
+        ) : (
+          <div style={{ opacity: 0.7, fontSize: 13 }}>
+            No participants found yet. (Participants UI is next after Scenes.)
+          </div>
+        )}
+      </div>
+
+      <div style={{ display: "grid", gap: 10 }}>
+        <div style={{ fontWeight: 900 }}>Tools (Owned)</div>
+        {ownedTools.length ? (
+          <div style={{ display: "grid", gap: 10 }}>
+            {ownedTools.map((tu) => {
+              const name = pickToolLabel(tu);
+              const icon = pickToolIcon(tu);
+              const checked = selectedTools.has(tu.id);
+
+              return (
+                <Card key={tu.id} onClick={() => toggleTool(tu.id)}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                      <div
+                        style={{
+                          width: 34,
+                          height: 34,
+                          borderRadius: 12,
+                          display: "grid",
+                          placeItems: "center",
+                          background: "rgba(255,255,255,0.05)",
+                          fontSize: 18,
+                          flex: "0 0 auto",
+                        }}
+                      >
+                        {icon}
+                      </div>
+                      <div style={{ fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {name}
+                      </div>
+                    </div>
+
+                    <div style={{ opacity: 0.8, fontWeight: 800, flex: "0 0 auto" }}>
+                      {checked ? "✓" : ""}
+                    </div>
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
+        ) : (
+          <div style={{ opacity: 0.7, fontSize: 13 }}>
+            You don’t have any owned tools yet. Add some in Tools → Vault.
+          </div>
+        )}
+      </div>
+
+      <div style={{ display: "flex", gap: 10 }}>
+        <SmallButton disabled={busy} onClick={() => navigate(backTo || "/scenes")} title="Cancel">
+          Cancel
+        </SmallButton>
+        <SmallButton
+          disabled={!canSubmit}
+          onClick={handleSubmit}
+          title={title.trim() ? submitLabel : "Title is required"}
+        >
+          {busy ? "Saving…" : submitLabel}
+        </SmallButton>
       </div>
     </div>
   );
 }
+
+export function ScenesHome({ supabase }) {
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
+  const [scenes, setScenes] = useState([]);
+
+  async function signOut() {
+    await supabase.auth.signOut();
+  }
+
+  async function reload() {
+    setLoading(true);
+    setErr("");
+    try {
+      const data = await fetchScenes();
+      setScenes(data);
+    } catch (e) {
+      setErr(e?.message || "Failed to load scenes.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      if (!alive) return;
+      await reload();
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  return (
+    <div>
+      <TopBar
+        title="Scenes"
+        onSignOut={signOut}
+        rightSlot={
+          <Link
+            to="/scenes/new"
+            style={{
+              padding: "8px 10px",
+              borderRadius: 10,
+              border: "1px solid rgba(255,255,255,0.18)",
+              background: "rgba(255,255,255,0.08)",
+              color: "#f3f3f7",
+              textDecoration: "none",
+              fontSize: 12,
+              fontWeight: 800,
+            }}
+          >
+            + New
+          </Link>
+        }
+      />
+
+      <div style={{ padding: 16, display: "grid", gap: 12 }}>
+        {loading ? (
+          <div style={{ opacity: 0.8 }}>Loading scenes…</div>
+        ) : err ? (
+          <div
+            style={{
+              padding: 12,
+              borderRadius: 12,
+              border: "1px solid rgba(255,80,80,0.35)",
+              background: "rgba(255,80,80,0.10)",
+              fontSize: 13,
+            }}
+          >
+            {err}
+          </div>
+        ) : null}
+
+        {!loading && !err && scenes.length === 0 ? (
+          <div style={{ opacity: 0.75, fontSize: 13 }}>
+            No scenes yet. Create your first draft.
+          </div>
+        ) : null}
+
+        <div style={{ display: "grid", gap: 10 }}>
+          {scenes.map((s) => {
+            const title = s.title || s.name || "Untitled scene";
+            const status = (s.status || "draft").toUpperCase();
+            const when = formatDate(s.scheduled_at || s.created_at);
+
+            return (
+              <Card key={s.id} asLink to={`/scenes/${s.id}`}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {title}
+                    </div>
+                    <div style={{ marginTop: 6, opacity: 0.7, fontSize: 12 }}>
+                      {when ? when : "—"}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "flex-start" }}>
+                    <Chip>{status}</Chip>
+                  </div>
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function SceneCreate({ supabase }) {
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const [participants, setParticipants] = useState([]);
+  const [ownedTools, setOwnedTools] = useState([]);
+
+  async function signOut() {
+    await supabase.auth.signOut();
+  }
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      setLoading(true);
+      setErr("");
+      try {
+        const [ps, ot] = await Promise.all([fetchParticipants(), fetchOwnedToolsForPicker()]);
+        if (!alive) return;
+        setParticipants(ps);
+        setOwnedTools(ot);
+      } catch (e) {
+        if (!alive) return;
+        setErr(e?.message || "Failed to load form data.");
+      } finally {
+        if (!alive) return;
+        setLoading(false);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  async function handleSubmit(payload) {
+    setBusy(true);
+    setErr("");
+    try {
+      const scene = await createScene(payload);
+      return { sceneId: scene.id };
+    } catch (e) {
+      setErr(e?.message || "Could not create scene.");
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div>
+      <TopBar title="New Scene" onSignOut={signOut} />
+      {loading ? (
+        <div style={{ padding: 16, opacity: 0.8 }}>Loading…</div>
+      ) : (
+        <SceneForm
+          initial={{}}
+          participants={participants}
+          ownedTools={ownedTools}
+          onSubmit={handleSubmit}
+          busy={busy}
+          err={err}
+          submitLabel="Save Draft"
+          backTo="/scenes"
+        />
+      )}
+    </div>
+  );
+}
+
+export function SceneView({ supabase }) {
+  const { id } = useParams();
+  const navigate = useNavigate();
+
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
+  const [scene, setScene] = useState(null);
+
+  async function signOut() {
+    await supabase.auth.signOut();
+  }
+
+  async function reload() {
+    setLoading(true);
+    setErr("");
+    try {
+      const data = await fetchSceneById(id);
+      setScene(data);
+    } catch (e) {
+      setErr(e?.message || "Failed to load scene.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      if (!alive) return;
+      await reload();
+    })();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+
+  const title = scene?.title || scene?.name || "Untitled scene";
+  const status = (scene?.status || "draft").toUpperCase();
+
+  const participants =
+    scene?.scene_participants?.map((sp) => sp.participants).filter(Boolean) ?? [];
+  const tools =
+    scene?.scene_tools?.map((st) => st.tools_user).filter(Boolean) ?? [];
+
+  return (
+    <div>
+      <TopBar
+        title="Scene"
+        onSignOut={signOut}
+        rightSlot={
+          <SmallButton disabled={!scene} onClick={() => navigate(`/scenes/${id}/edit`)}>
+            Edit
+          </SmallButton>
+        }
+      />
+
+      <div style={{ padding: 16, display: "grid", gap: 12 }}>
+        {loading ? (
+          <div style={{ opacity: 0.8 }}>Loading…</div>
+        ) : err ? (
+          <div
+            style={{
+              padding: 12,
+              borderRadius: 12,
+              border: "1px solid rgba(255,80,80,0.35)",
+              background: "rgba(255,80,80,0.10)",
+              fontSize: 13,
+            }}
+          >
+            {err}
+          </div>
+        ) : null}
+
+        {!loading && scene ? (
+          <>
+            <Card>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 950, fontSize: 18, overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {title}
+                  </div>
+                  <div style={{ marginTop: 6, opacity: 0.7, fontSize: 12 }}>
+                    {formatDate(scene.scheduled_at || scene.created_at) || "—"}
+                  </div>
+                </div>
+                <div style={{ display: "flex", alignItems: "flex-start" }}>
+                  <Chip>{status}</Chip>
+                </div>
+              </div>
+
+              {scene.intent ? (
+                <div style={{ marginTop: 10, opacity: 0.9 }}>
+                  <div style={{ fontSize: 12, opacity: 0.7 }}>Intent</div>
+                  <div style={{ marginTop: 4, lineHeight: 1.35 }}>{scene.intent}</div>
+                </div>
+              ) : null}
+
+              {scene.notes ? (
+                <div style={{ marginTop: 10, opacity: 0.9 }}>
+                  <div style={{ fontSize: 12, opacity: 0.7 }}>Notes</div>
+                  <div style={{ marginTop: 4, lineHeight: 1.35, whiteSpace: "pre-wrap" }}>
+                    {scene.notes}
+                  </div>
+                </div>
+              ) : null}
+            </Card>
+
+            <Card>
+              <div style={{ fontWeight: 900 }}>Participants</div>
+              <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {participants.length ? (
+                  participants.map((p) => <Chip key={p.id}>{pickParticipantLabel(p)}</Chip>)
+                ) : (
+                  <div style={{ opacity: 0.7, fontSize: 13 }}>None selected</div>
+                )}
+              </div>
+            </Card>
+
+            <Card>
+              <div style={{ fontWeight: 900 }}>Tools</div>
+              <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
+                {tools.length ? (
+                  tools.map((tu) => {
+                    const name = pickToolLabel(tu);
+                    const icon = pickToolIcon(tu);
+                    const g = tu.tools_global;
+                    const tags = g?.tags || tu.tags_override || [];
+                    const safety = g?.safety_level || null;
+
+                    return (
+                      <ToolRow
+                        key={tu.id}
+                        tool={{ name, icon, tags, safety_level: safety }}
+                      />
+                    );
+                  })
+                ) : (
+                  <div style={{ opacity: 0.7, fontSize: 13 }}>None selected</div>
+                )}
+              </div>
+            </Card>
+
+            <SmallButton onClick={() => navigate("/scenes")}>Back to Scenes</SmallButton>
+          </>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+export function SceneEdit({ supabase }) {
+  const { id } = useParams();
+
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const [participants, setParticipants] = useState([]);
+  const [ownedTools, setOwnedTools] = useState([]);
+  const [initial, setInitial] = useState(null);
+
+  async function signOut() {
+    await supabase.auth.signOut();
+  }
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      setLoading(true);
+      setErr("");
+      try {
+        const [scene, ps, ot] = await Promise.all([
+          fetchSceneById(id),
+          fetchParticipants(),
+          fetchOwnedToolsForPicker(),
+        ]);
+
+        if (!alive) return;
+
+        const participantIds =
+          scene?.scene_participants?.map((sp) => sp.participant_id).filter(Boolean) ?? [];
+        const toolUserIds =
+          scene?.scene_tools?.map((st) => st.tool_user_id).filter(Boolean) ?? [];
+
+        setInitial({
+          title: scene?.title || scene?.name || "",
+          intent: scene?.intent || "",
+          notes: scene?.notes || "",
+          scheduled_at: scene?.scheduled_at || null,
+          participantIds,
+          toolUserIds,
+        });
+
+        setParticipants(ps);
+        setOwnedTools(ot);
+      } catch (e) {
+        if (!alive) return;
+        setErr(e?.message || "Failed to load scene.");
+      } finally {
+        if (!alive) return;
+        setLoading(false);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [id]);
+
+  async function handleSubmit(payload) {
+    setBusy(true);
+    setErr("");
+    try {
+      await updateScene(id, payload);
+      return { sceneId: id };
+    } catch (e) {
+      setErr(e?.message || "Could not update scene.");
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div>
+      <TopBar title="Edit Scene" onSignOut={signOut} />
+      {loading ? (
+        <div style={{ padding: 16, opacity: 0.8 }}>Loading…</div>
+      ) : (
+        <SceneForm
+          initial={initial || {}}
+          participants={participants}
+          ownedTools={ownedTools}
+          onSubmit={handleSubmit}
+          busy={busy}
+          err={err}
+          submitLabel="Save Changes"
+          backTo={`/scenes/${id}`}
+        />
+      )}
+    </div>
+  );
+}
+
+/* =========================
+   Tools (MVP complete) — unchanged
+   ========================= */
 
 export function ToolsHome({ supabase }) {
   async function signOut() {
@@ -254,10 +1019,7 @@ export function ToolsHome({ supabase }) {
   }, []);
 
   const owned = useMemo(() => userTools.filter((t) => t.status === "owned"), [userTools]);
-  const craving = useMemo(
-    () => userTools.filter((t) => t.status === "craving"),
-    [userTools]
-  );
+  const craving = useMemo(() => userTools.filter((t) => t.status === "craving"), [userTools]);
 
   const ownedGlobalIds = useMemo(() => {
     const s = new Set();
