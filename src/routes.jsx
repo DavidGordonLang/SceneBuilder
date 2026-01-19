@@ -30,8 +30,32 @@ function TopBar({ title, onSignOut, rightSlot }) {
       }}
     >
       <h1 style={{ margin: 0, fontSize: 22 }}>{title}</h1>
+
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        {/* Profile icon (top-right) */}
+        <Link
+          to="/profile"
+          aria-label="Profile"
+          title="Profile"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: 34,
+            height: 34,
+            borderRadius: 10,
+            border: "1px solid rgba(255,255,255,0.18)",
+            background: "rgba(255,255,255,0.06)",
+            color: "#f3f3f7",
+            textDecoration: "none",
+            fontSize: 16,
+          }}
+        >
+          👤
+        </Link>
+
         {rightSlot}
+
         <button
           onClick={onSignOut}
           style={{
