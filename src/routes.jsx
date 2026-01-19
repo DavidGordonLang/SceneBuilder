@@ -1,6 +1,15 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
+  TopBar,
+  Chip,
+  SmallButton,
+  Card,
+  FieldLabel,
+  TextInput,
+  TextArea,
+} from "./components/routesUi";
+import {
   addGlobalToolToUser,
   deleteUserTool,
   fetchToolVault,
@@ -15,118 +24,6 @@ import {
   fetchScenes,
   updateScene,
 } from "./lib/scenesApi";
-
-function TopBar({ title, onSignOut, rightSlot }) {
-  return (
-    <div
-      style={{
-        padding: 16,
-        paddingTop: 18,
-        borderBottom: "1px solid rgba(255,255,255,0.08)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: 12,
-      }}
-    >
-      <h1 style={{ margin: 0, fontSize: 22 }}>{title}</h1>
-
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        {/* Profile icon (top-right) */}
-        <Link
-          to="/profile"
-          aria-label="Profile"
-          title="Profile"
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            width: 34,
-            height: 34,
-            borderRadius: 10,
-            border: "1px solid rgba(255,255,255,0.18)",
-            background: "rgba(255,255,255,0.06)",
-            color: "#f3f3f7",
-            textDecoration: "none",
-            fontSize: 16,
-          }}
-        >
-          👤
-        </Link>
-
-        {rightSlot}
-
-        <button
-          onClick={onSignOut}
-          style={{
-            padding: "8px 10px",
-            borderRadius: 10,
-            border: "1px solid rgba(255,255,255,0.18)",
-            background: "rgba(255,255,255,0.06)",
-            color: "#f3f3f7",
-            cursor: "pointer",
-            fontSize: 12,
-            fontWeight: 650,
-          }}
-        >
-          Sign out
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function Chip({ children }) {
-  return (
-    <span
-      style={{
-        display: "inline-flex",
-        padding: "4px 8px",
-        borderRadius: 999,
-        border: "1px solid rgba(255,255,255,0.12)",
-        background: "rgba(255,255,255,0.04)",
-        fontSize: 12,
-        opacity: 0.9,
-        whiteSpace: "nowrap",
-      }}
-    >
-      {children}
-    </span>
-  );
-}
-
-function SmallButton({ children, onClick, disabled, title, tone = "neutral" }) {
-  const toneStyle =
-    tone === "danger"
-      ? {
-          border: "1px solid rgba(255,80,80,0.25)",
-          background: disabled ? "rgba(255,80,80,0.06)" : "rgba(255,80,80,0.10)",
-        }
-      : {
-          border: "1px solid rgba(255,255,255,0.14)",
-          background: disabled ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.08)",
-        };
-
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      style={{
-        padding: "8px 10px",
-        borderRadius: 10,
-        color: "#f3f3f7",
-        cursor: disabled ? "not-allowed" : "pointer",
-        fontSize: 12,
-        fontWeight: 700,
-        opacity: disabled ? 0.55 : 1,
-        ...toneStyle,
-      }}
-    >
-      {children}
-    </button>
-  );
-}
 
 function ToolRow({ tool, actions }) {
   const icon = tool.icon || "🧰";
@@ -233,87 +130,6 @@ function Segmented({ value, onChange, options }) {
 /* =========================
    Scenes (MVP)
    ========================= */
-
-function Card({ children, onClick, asLink, to }) {
-  const base = {
-    padding: 12,
-    borderRadius: 14,
-    border: "1px solid rgba(255,255,255,0.10)",
-    background: "rgba(255,255,255,0.03)",
-  };
-
-  if (asLink) {
-    return (
-      <Link
-        to={to}
-        style={{
-          ...base,
-          display: "block",
-          color: "inherit",
-          textDecoration: "none",
-        }}
-      >
-        {children}
-      </Link>
-    );
-  }
-
-  return (
-    <div
-      onClick={onClick}
-      style={{
-        ...base,
-        cursor: onClick ? "pointer" : "default",
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-function FieldLabel({ children }) {
-  return <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>{children}</div>;
-}
-
-function TextInput({ value, onChange, placeholder }) {
-  return (
-    <input
-      value={value}
-      placeholder={placeholder}
-      onChange={(e) => onChange(e.target.value)}
-      style={{
-        width: "100%",
-        padding: "11px 12px",
-        borderRadius: 12,
-        border: "1px solid rgba(255,255,255,0.14)",
-        background: "rgba(255,255,255,0.04)",
-        color: "#f3f3f7",
-        outline: "none",
-      }}
-    />
-  );
-}
-
-function TextArea({ value, onChange, placeholder }) {
-  return (
-    <textarea
-      value={value}
-      placeholder={placeholder}
-      onChange={(e) => onChange(e.target.value)}
-      rows={4}
-      style={{
-        width: "100%",
-        padding: "11px 12px",
-        borderRadius: 12,
-        border: "1px solid rgba(255,255,255,0.14)",
-        background: "rgba(255,255,255,0.04)",
-        color: "#f3f3f7",
-        outline: "none",
-        resize: "vertical",
-      }}
-    />
-  );
-}
 
 function parseDateTimeForInput(value) {
   if (!value) return "";
@@ -456,11 +272,7 @@ function SceneForm({
 
         <div>
           <FieldLabel>Intent</FieldLabel>
-          <TextInput
-            value={intent}
-            onChange={setIntent}
-            placeholder="What are you aiming to create?"
-          />
+          <TextInput value={intent} onChange={setIntent} placeholder="What are you aiming to create?" />
         </div>
 
         <div>
@@ -605,6 +417,7 @@ export function ScenesHome({ supabase }) {
     return () => {
       alive = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -649,9 +462,7 @@ export function ScenesHome({ supabase }) {
         ) : null}
 
         {!loading && !err && scenes.length === 0 ? (
-          <div style={{ opacity: 0.75, fontSize: 13 }}>
-            No scenes yet. Create your first draft.
-          </div>
+          <div style={{ opacity: 0.75, fontSize: 13 }}>No scenes yet. Create your first draft.</div>
         ) : null}
 
         <div style={{ display: "grid", gap: 10 }}>
@@ -794,10 +605,8 @@ export function SceneView({ supabase }) {
   const title = scene?.title || scene?.name || "Untitled scene";
   const status = (scene?.status || "draft").toUpperCase();
 
-  const participants =
-    scene?.scene_participants?.map((sp) => sp.participants).filter(Boolean) ?? [];
-  const tools =
-    scene?.scene_tools?.map((st) => st.tools_user).filter(Boolean) ?? [];
+  const participants = scene?.scene_participants?.map((sp) => sp.participants).filter(Boolean) ?? [];
+  const tools = scene?.scene_tools?.map((st) => st.tools_user).filter(Boolean) ?? [];
 
   return (
     <div>
@@ -833,7 +642,14 @@ export function SceneView({ supabase }) {
             <Card>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontWeight: 950, fontSize: 18, overflow: "hidden", textOverflow: "ellipsis" }}>
+                  <div
+                    style={{
+                      fontWeight: 950,
+                      fontSize: 18,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                  >
                     {title}
                   </div>
                   <div style={{ marginTop: 6, opacity: 0.7, fontSize: 12 }}>
@@ -884,12 +700,7 @@ export function SceneView({ supabase }) {
                     const tags = g?.tags || tu.tags_override || [];
                     const safety = g?.safety_level || null;
 
-                    return (
-                      <ToolRow
-                        key={tu.id}
-                        tool={{ name, icon, tags, safety_level: safety }}
-                      />
-                    );
+                    return <ToolRow key={tu.id} tool={{ name, icon, tags, safety_level: safety }} />;
                   })
                 ) : (
                   <div style={{ opacity: 0.7, fontSize: 13 }}>None selected</div>
@@ -936,8 +747,7 @@ export function SceneEdit({ supabase }) {
 
         const participantIds =
           scene?.scene_participants?.map((sp) => sp.participant_id).filter(Boolean) ?? [];
-        const toolUserIds =
-          scene?.scene_tools?.map((st) => st.tool_user_id).filter(Boolean) ?? [];
+        const toolUserIds = scene?.scene_tools?.map((st) => st.tool_user_id).filter(Boolean) ?? [];
 
         setInitial({
           title: scene?.title || scene?.name || "",
@@ -1000,7 +810,7 @@ export function SceneEdit({ supabase }) {
 }
 
 /* =========================
-   Tools (MVP complete) — unchanged
+   Tools (MVP complete)
    ========================= */
 
 export function ToolsHome({ supabase }) {
