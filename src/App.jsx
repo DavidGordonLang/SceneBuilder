@@ -8,6 +8,7 @@ import {
   SceneEdit,
   ToolsHome,
   JournalHome,
+  ActionVocabularyScreen,
 } from "./routes.jsx";
 
 import ProfileScreen from "./screens/ProfileScreen.jsx";
@@ -193,6 +194,12 @@ function AuthedApp({ session }) {
         <Route
           path="/profile/kinks"
           element={<KinkPreferencesScreen session={session} supabase={supabase} mode="edit" />}
+        />
+
+        {/* Vocabulary (Phase D scaffolding) */}
+        <Route
+          path="/vocabulary"
+          element={<ActionVocabularyScreen session={session} supabase={supabase} />}
         />
 
         {/* Onboarding */}
