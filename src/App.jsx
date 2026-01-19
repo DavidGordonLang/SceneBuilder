@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from "react";
-import { NavLink, Route, Routes, Navigate } from "react-router-dom";
+import React, { useEffect, useMemo, useState } from "react";
+import { NavLink, Route, Routes, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { supabase } from "./lib/supabaseClient";
 import {
   ScenesHome,
@@ -9,6 +9,10 @@ import {
   ToolsHome,
   JournalHome,
 } from "./routes.jsx";
+
+import ProfileScreen from "./screens/ProfileScreen.jsx";
+import KinkPreferencesScreen from "./screens/KinkPreferencesScreen.jsx";
+import { useProfile } from "./hooks/useProfile.js";
 
 const TAB_BAR_HEIGHT = 56;
 
@@ -126,6 +130,91 @@ function AuthScreen() {
   );
 }
 
+/**
+ * Handles:
+ * - app routes
+ * - onboarding auto-start (if profile.onboarding_complete === false)
+ */
+function AuthedApp({ session }) {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const userId = session?.user?.id;
+
+  const { profile, loading: profileLoading } = useProfile({ supabase, userId });
+
+  const pathname = location.pathname || "/";
+  const isOnboardingRoute = pathname === "/onboarding";
+  const isProfileRoute = pathname === "/profile" || pathname.startsWith("/profile/");
+
+  // If onboarding incomplete, auto-start onboarding.
+  // Allow access to /onboarding and /profile routes so users can dismiss or edit.
+  useEffect(() => {
+    if (profileLoading) return;
+    if (!profile) return;
+
+    if (profile.onboarding_complete === false) {
+      if (!isOnboardingRoute && !isProfileRoute) {
+        navigate("/onboarding", { replace: true });
+      }
+    }
+  }, [profileLoading, profile, isOnboardingRoute, isProfileRoute, navigate]);
+
+  // Hide bottom tabs during onboarding so "dismiss" is explicit (Skip/Save).
+  const showTabs = !isOnboardingRoute;
+
+  // Keep padding only when tabs are shown
+  const containerStyle = useMemo(() => {
+    if (!showTabs) return {};
+    return {
+      paddingBottom: `calc(${TAB_BAR_HEIGHT}px + env(safe-area-inset-bottom))`,
+    };
+  }, [showTabs]);
+
+  return (
+    <div style={containerStyle}>
+      <Routes>
+        <Route path="/" element={<Navigate to="/scenes" replace />} />
+
+        {/* Scenes */}
+        <Route path="/scenes" element={<ScenesHome session={session} supabase={supabase} />} />
+        <Route path="/scenes/new" element={<SceneCreate session={session} supabase={supabase} />} />
+        <Route path="/scenes/:id" element={<SceneView session={session} supabase={supabase} />} />
+        <Route
+          path="/scenes/:id/edit"
+          element={<SceneEdit session={session} supabase={supabase} />}
+        />
+
+        {/* Tools + Journal */}
+        <Route path="/tools" element={<ToolsHome session={session} supabase={supabase} />} />
+        <Route path="/journal" element={<JournalHome session={session} supabase={supabase} />} />
+
+        {/* Profile */}
+        <Route path="/profile" element={<ProfileScreen session={session} supabase={supabase} />} />
+        <Route
+          path="/profile/kinks"
+          element={<KinkPreferencesScreen session={session} supabase={supabase} mode="edit" />}
+        />
+
+        {/* Onboarding */}
+        <Route
+          path="/onboarding"
+          element={<KinkPreferencesScreen session={session} supabase={supabase} mode="onboarding" />}
+        />
+
+        <Route path="*" element={<Navigate to="/scenes" replace />} />
+      </Routes>
+
+      {showTabs ? (
+        <nav style={navStyle} aria-label="Primary">
+          <TabLink to="/scenes" label="Scenes" />
+          <TabLink to="/tools" label="Tools" />
+          <TabLink to="/journal" label="Journal" />
+        </nav>
+      ) : null}
+    </div>
+  );
+}
+
 export default function App() {
   const [session, setSession] = useState(null);
   const [booting, setBooting] = useState(true);
@@ -161,36 +250,5 @@ export default function App() {
     return <AuthScreen />;
   }
 
-  return (
-    <div
-      style={{
-        paddingBottom: `calc(${TAB_BAR_HEIGHT}px + env(safe-area-inset-bottom))`,
-      }}
-    >
-      <Routes>
-        <Route path="/" element={<Navigate to="/scenes" replace />} />
-
-        {/* Scenes */}
-        <Route path="/scenes" element={<ScenesHome session={session} supabase={supabase} />} />
-        <Route path="/scenes/new" element={<SceneCreate session={session} supabase={supabase} />} />
-        <Route path="/scenes/:id" element={<SceneView session={session} supabase={supabase} />} />
-        <Route
-          path="/scenes/:id/edit"
-          element={<SceneEdit session={session} supabase={supabase} />}
-        />
-
-        {/* Tools + Journal */}
-        <Route path="/tools" element={<ToolsHome session={session} supabase={supabase} />} />
-        <Route path="/journal" element={<JournalHome session={session} supabase={supabase} />} />
-
-        <Route path="*" element={<Navigate to="/scenes" replace />} />
-      </Routes>
-
-      <nav style={navStyle} aria-label="Primary">
-        <TabLink to="/scenes" label="Scenes" />
-        <TabLink to="/tools" label="Tools" />
-        <TabLink to="/journal" label="Journal" />
-      </nav>
-    </div>
-  );
+  return <AuthedApp session={session} />;
 }
