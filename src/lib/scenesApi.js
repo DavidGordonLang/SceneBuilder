@@ -82,6 +82,16 @@ export async function fetchOwnedToolsForPicker() {
   return data ?? [];
 }
 
+/**
+ * IMPORTANT: public.scenes schema (current):
+ * - has: title, status, scheduled_for, emotional_state, emotional_notes, etc.
+ * - does NOT have: intent, notes, scheduled_at
+ *
+ * We map:
+ * - form.intent -> emotional_state
+ * - form.notes  -> emotional_notes
+ * - scheduled_at -> scheduled_for
+ */
 export async function createScene({
   title,
   intent,
@@ -92,16 +102,15 @@ export async function createScene({
 }) {
   const uid = await getUserId();
 
-  // 1) create scene (always set user_id)
   const { data: scene, error: sceneErr } = await supabase
     .from("scenes")
     .insert({
       user_id: uid,
       title,
-      intent: intent || null,
-      notes: notes || null,
-      scheduled_for: scheduled_at || null, // your column is scheduled_for (not scheduled_at)
       status: "draft",
+      scheduled_for: scheduled_at || null,
+      emotional_state: intent ? String(intent).trim() : null,
+      emotional_notes: notes ? String(notes).trim() : null,
     })
     .select("*")
     .single();
@@ -110,14 +119,12 @@ export async function createScene({
 
   const sceneId = scene.id;
 
-  // 2) link participants
   if (Array.isArray(participantIds) && participantIds.length) {
     const rows = participantIds.map((pid) => ({ scene_id: sceneId, participant_id: pid }));
     const { error } = await supabase.from("scene_participants").insert(rows);
     if (error) throw error;
   }
 
-  // 3) link tools
   if (Array.isArray(toolUserIds) && toolUserIds.length) {
     const rows = toolUserIds.map((tid) => ({ scene_id: sceneId, tool_user_id: tid }));
     const { error } = await supabase.from("scene_tools").insert(rows);
@@ -131,14 +138,13 @@ export async function updateScene(
   sceneId,
   { title, intent, notes, scheduled_at, participantIds, toolUserIds }
 ) {
-  // Note: your column is scheduled_for, not scheduled_at
   const { error: upErr } = await supabase
     .from("scenes")
     .update({
       title,
-      intent: intent || null,
-      notes: notes || null,
       scheduled_for: scheduled_at || null,
+      emotional_state: intent ? String(intent).trim() : null,
+      emotional_notes: notes ? String(notes).trim() : null,
     })
     .eq("id", sceneId);
 
