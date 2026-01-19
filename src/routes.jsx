@@ -5,3 +5,4 @@ export { default as SceneEdit } from "./screens/scenes/SceneEdit.jsx";
 
 export { default as ToolsHome } from "./screens/tools/ToolsHome.jsx";
 export { default as JournalHome } from "./screens/journal/JournalHome.jsx";
+export { default as ActionVocabularyScreen } from "./screens/profile/ActionVocabularyScreen";
