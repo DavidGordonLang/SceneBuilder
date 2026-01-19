@@ -14,9 +14,12 @@ import { useActionVocabulary } from "../../hooks/useActionVocabulary";
  */
 export default function ActionVocabularyScreen() {
   const [userId, setUserId] = useState(null);
+
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
   const [search, setSearch] = useState("");
+
+  // Local draft text keyed by primitive id
   const [localText, setLocalText] = useState({}); // { [primitiveId]: string }
 
   const {
@@ -62,7 +65,7 @@ export default function ActionVocabularyScreen() {
     };
   }, []);
 
-  // Seed localText from saved vocab
+  // Seed localText from saved vocab (source of truth)
   useEffect(() => {
     const next = {};
     for (const r of vocabRows || []) {
@@ -84,14 +87,22 @@ export default function ActionVocabularyScreen() {
     });
   }, [primitives, search]);
 
-  const mappedCount = useMemo(() => {
-    let n = 0;
-    for (const p of primitives || []) {
-      const t = (localText[p.id] || "").trim();
-      if (t) n += 1;
-    }
-    return n;
-  }, [primitives, localText]);
+  // Saved mappings count (not drafts)
+  const savedCount = useMemo(() => {
+    return (vocabRows || []).filter((r) => (r?.display_text || "").trim()).length;
+  }, [vocabRows]);
+
+  // Quick check: per-row draft vs saved
+  function getRowStatus(primitiveId) {
+    const saved = (byPrimitiveId.get(primitiveId)?.display_text || "").trim();
+    const draft = (localText[primitiveId] || "").trim();
+
+    if (!saved && !draft) return "Not set";
+    if (saved && draft === saved) return "Saved";
+    if (!saved && draft) return "Unsaved changes";
+    if (saved && draft !== saved) return "Unsaved changes";
+    return "Not set";
+  }
 
   async function handleSave() {
     if (!userId) {
@@ -105,22 +116,22 @@ export default function ActionVocabularyScreen() {
     try {
       await saveBulk({ displayTextByPrimitiveId: localText });
       setSaveMsg("Saved.");
-      // keep it honest: reload primitives too in case catalogue updated
       await reloadPrimitives();
     } catch (e) {
       setSaveMsg(e?.message || "Save failed.");
     } finally {
       setSaving(false);
-      // Clear message after a short time (non-blocking)
       setTimeout(() => setSaveMsg(""), 2500);
     }
   }
 
-  function setDefault(primitiveId, fallbackLabel) {
+  function copyLabelIntoText(primitiveId, fallbackLabel) {
     setLocalText((prev) => ({
       ...prev,
-      [primitiveId]: (prev?.[primitiveId] || fallbackLabel || "").toString(),
+      [primitiveId]: (fallbackLabel || "").toString(),
     }));
+    setSaveMsg("Copied label into your wording. Click Save to keep it.");
+    setTimeout(() => setSaveMsg(""), 2500);
   }
 
   function clearText(primitiveId) {
@@ -129,6 +140,8 @@ export default function ActionVocabularyScreen() {
       next[primitiveId] = "";
       return next;
     });
+    setSaveMsg("Cleared. Click Save to persist the removal.");
+    setTimeout(() => setSaveMsg(""), 2500);
   }
 
   const isLoading = loadingPrimitives || (userId ? loadingVocab : false);
@@ -139,7 +152,7 @@ export default function ActionVocabularyScreen() {
       <div className="pageHeader">
         <h1>Action Vocabulary</h1>
         <p style={{ marginTop: 6, opacity: 0.8 }}>
-          Define your own wording for each action. The system stores your text; later plans can render using your voice.
+          Write your own wording for each action. <strong>Edits aren’t saved until you press Save.</strong>
         </p>
       </div>
 
@@ -162,7 +175,7 @@ export default function ActionVocabularyScreen() {
           />
 
           <div style={{ opacity: 0.8 }}>
-            Mapped: <strong>{mappedCount}</strong> / {primitives?.length || 0}
+            Saved: <strong>{savedCount}</strong> / {primitives?.length || 0}
           </div>
 
           <button onClick={handleSave} disabled={saving || isLoading || !userId}>
@@ -187,9 +200,15 @@ export default function ActionVocabularyScreen() {
 
       <div style={{ marginTop: 12, display: "grid", gap: 12 }}>
         {(filtered || []).map((p) => {
-          const existing = byPrimitiveId.get(p.id);
+          const status = getRowStatus(p.id);
           const val = localText[p.id] ?? "";
-          const hasSaved = Boolean(existing?.display_text);
+
+          const statusStyle =
+            status === "Saved"
+              ? { opacity: 0.85 }
+              : status === "Unsaved changes"
+              ? { color: "gold", opacity: 0.95 }
+              : { opacity: 0.6 };
 
           return (
             <div className="card" key={p.id}>
@@ -205,8 +224,8 @@ export default function ActionVocabularyScreen() {
                   </div>
                 </div>
 
-                <div style={{ textAlign: "right", opacity: 0.8, fontSize: 12 }}>
-                  {hasSaved ? "Saved" : "Not saved"}
+                <div style={{ textAlign: "right", fontSize: 12, ...statusStyle }}>
+                  {status}
                 </div>
               </div>
 
@@ -221,12 +240,12 @@ export default function ActionVocabularyScreen() {
                 />
 
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                  <button type="button" onClick={() => setDefault(p.id, p.label)}>
-                    Use label as default
+                  <button type="button" onClick={() => copyLabelIntoText(p.id, p.label)}>
+                    Copy label into my wording
                   </button>
 
                   <button type="button" onClick={() => clearText(p.id)}>
-                    Clear
+                    Clear wording
                   </button>
                 </div>
               </div>
