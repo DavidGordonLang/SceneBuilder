@@ -1,0 +1,211 @@
+import React, { useEffect, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { TopBar, Chip, Card, SmallButton } from "../../components/routesUi";
+import { fetchSceneById } from "../../lib/scenesApi";
+import { formatDate, pickParticipantLabel, pickToolIcon, pickToolLabel } from "../../lib/sceneHelpers";
+
+function ToolRow({ tool }) {
+  const icon = tool.icon || "🧰";
+  const tags = Array.isArray(tool.tags) ? tool.tags : [];
+  const safety = tool.safety_level ? String(tool.safety_level).toUpperCase() : null;
+
+  return (
+    <div
+      style={{
+        padding: 12,
+        borderRadius: 14,
+        border: "1px solid rgba(255,255,255,0.10)",
+        background: "rgba(255,255,255,0.03)",
+        display: "grid",
+        gridTemplateColumns: "36px 1fr",
+        gap: 10,
+      }}
+    >
+      <div
+        style={{
+          width: 36,
+          height: 36,
+          borderRadius: 12,
+          display: "grid",
+          placeItems: "center",
+          background: "rgba(255,255,255,0.05)",
+          fontSize: 18,
+        }}
+      >
+        {icon}
+      </div>
+
+      <div style={{ minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10 }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+              <div style={{ fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis" }}>
+                {tool.name}
+              </div>
+              {safety ? <span style={{ opacity: 0.6, fontSize: 12 }}>{safety}</span> : null}
+            </div>
+          </div>
+        </div>
+
+        {tags.length ? (
+          <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {tags.slice(0, 6).map((t) => (
+              <Chip key={t}>{t}</Chip>
+            ))}
+          </div>
+        ) : (
+          <div style={{ marginTop: 6, opacity: 0.6, fontSize: 12 }}>No tags</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default function SceneView({ supabase }) {
+  const { id } = useParams();
+  const navigate = useNavigate();
+
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
+  const [scene, setScene] = useState(null);
+
+  async function signOut() {
+    await supabase.auth.signOut();
+  }
+
+  async function reload() {
+    setLoading(true);
+    setErr("");
+    try {
+      const data = await fetchSceneById(id);
+      setScene(data);
+    } catch (e) {
+      setErr(e?.message || "Failed to load scene.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      if (!alive) return;
+      await reload();
+    })();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+
+  const title = scene?.title || scene?.name || "Untitled scene";
+  const status = (scene?.status || "draft").toUpperCase();
+
+  const participants = scene?.scene_participants?.map((sp) => sp.participants).filter(Boolean) ?? [];
+  const tools = scene?.scene_tools?.map((st) => st.tools_user).filter(Boolean) ?? [];
+
+  return (
+    <div>
+      <TopBar
+        title="Scene"
+        onSignOut={signOut}
+        rightSlot={
+          <SmallButton disabled={!scene} onClick={() => navigate(`/scenes/${id}/edit`)}>
+            Edit
+          </SmallButton>
+        }
+      />
+
+      <div style={{ padding: 16, display: "grid", gap: 12 }}>
+        {loading ? (
+          <div style={{ opacity: 0.8 }}>Loading…</div>
+        ) : err ? (
+          <div
+            style={{
+              padding: 12,
+              borderRadius: 12,
+              border: "1px solid rgba(255,80,80,0.35)",
+              background: "rgba(255,80,80,0.10)",
+              fontSize: 13,
+            }}
+          >
+            {err}
+          </div>
+        ) : null}
+
+        {!loading && scene ? (
+          <>
+            <Card>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 950, fontSize: 18, overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {title}
+                  </div>
+                  <div style={{ marginTop: 6, opacity: 0.7, fontSize: 12 }}>
+                    {formatDate(scene.scheduled_at || scene.created_at) || "—"}
+                  </div>
+                </div>
+                <div style={{ display: "flex", alignItems: "flex-start" }}>
+                  <Chip>{status}</Chip>
+                </div>
+              </div>
+
+              {scene.intent ? (
+                <div style={{ marginTop: 10, opacity: 0.9 }}>
+                  <div style={{ fontSize: 12, opacity: 0.7 }}>Intent</div>
+                  <div style={{ marginTop: 4, lineHeight: 1.35 }}>{scene.intent}</div>
+                </div>
+              ) : null}
+
+              {scene.notes ? (
+                <div style={{ marginTop: 10, opacity: 0.9 }}>
+                  <div style={{ fontSize: 12, opacity: 0.7 }}>Notes</div>
+                  <div style={{ marginTop: 4, lineHeight: 1.35, whiteSpace: "pre-wrap" }}>
+                    {scene.notes}
+                  </div>
+                </div>
+              ) : null}
+            </Card>
+
+            <Card>
+              <div style={{ fontWeight: 900 }}>Participants</div>
+              <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {participants.length ? (
+                  participants.map((p) => <Chip key={p.id}>{pickParticipantLabel(p)}</Chip>)
+                ) : (
+                  <div style={{ opacity: 0.7, fontSize: 13 }}>None selected</div>
+                )}
+              </div>
+            </Card>
+
+            <Card>
+              <div style={{ fontWeight: 900 }}>Tools</div>
+              <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
+                {tools.length ? (
+                  tools.map((tu) => {
+                    const name = pickToolLabel(tu);
+                    const icon = pickToolIcon(tu);
+                    const g = tu.tools_global;
+                    const tags = g?.tags || tu.tags_override || [];
+                    const safety = g?.safety_level || null;
+
+                    return (
+                      <ToolRow
+                        key={tu.id}
+                        tool={{ name, icon, tags, safety_level: safety }}
+                      />
+                    );
+                  })
+                ) : (
+                  <div style={{ opacity: 0.7, fontSize: 13 }}>None selected</div>
+                )}
+              </div>
+            </Card>
+
+            <SmallButton onClick={() => navigate("/scenes")}>Back to Scenes</SmallButton>
+          </>
+        ) : null}
+      </div>
+    </div>
+  );
+}
