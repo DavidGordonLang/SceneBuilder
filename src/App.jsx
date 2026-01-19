@@ -14,6 +14,7 @@ import {
 import ProfileScreen from "./screens/ProfileScreen.jsx";
 import KinkPreferencesScreen from "./screens/KinkPreferencesScreen.jsx";
 import { useProfile } from "./hooks/useProfile.js";
+import { ToastProvider } from "./ui/ToastContext.jsx";
 
 const TAB_BAR_HEIGHT = 56;
 
@@ -147,8 +148,6 @@ function AuthedApp({ session }) {
   const isOnboardingRoute = pathname === "/onboarding";
   const isProfileRoute = pathname === "/profile" || pathname.startsWith("/profile/");
 
-  // If onboarding incomplete, auto-start onboarding.
-  // Allow access to /onboarding and /profile routes so users can dismiss or edit.
   useEffect(() => {
     if (profileLoading) return;
     if (!profile) return;
@@ -160,10 +159,8 @@ function AuthedApp({ session }) {
     }
   }, [profileLoading, profile, isOnboardingRoute, isProfileRoute, navigate]);
 
-  // Hide bottom tabs during onboarding so "dismiss" is explicit (Skip/Save).
   const showTabs = !isOnboardingRoute;
 
-  // Keep padding only when tabs are shown
   const containerStyle = useMemo(() => {
     if (!showTabs) return {};
     return {
@@ -196,7 +193,7 @@ function AuthedApp({ session }) {
           element={<KinkPreferencesScreen session={session} supabase={supabase} mode="edit" />}
         />
 
-        {/* Vocabulary (Phase D scaffolding) */}
+        {/* Vocabulary */}
         <Route
           path="/vocabulary"
           element={<ActionVocabularyScreen session={session} supabase={supabase} />}
@@ -253,9 +250,9 @@ export default function App() {
     );
   }
 
-  if (!session) {
-    return <AuthScreen />;
-  }
-
-  return <AuthedApp session={session} />;
+  return (
+    <ToastProvider>
+      {!session ? <AuthScreen /> : <AuthedApp session={session} />}
+    </ToastProvider>
+  );
 }
