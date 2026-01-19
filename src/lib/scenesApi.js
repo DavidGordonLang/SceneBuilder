@@ -1,19 +1,20 @@
 import { supabase } from "./supabaseClient";
 
-/**
- * NOTE (schema assumptions):
- * - scenes: id, title, intent, notes, scheduled_at, status, created_at
- * - participants: id + some name field (name/display_name/etc.)
- * - scene_participants: scene_id, participant_id
- * - scene_tools: scene_id, tool_user_id
- *
- * FOUNDATION.md confirms: scene_tools references tools_user (not tools_global).
- */
+async function getUserId() {
+  const { data, error } = await supabase.auth.getUser();
+  if (error) throw error;
+  const uid = data?.user?.id;
+  if (!uid) throw new Error("Not signed in.");
+  return uid;
+}
 
 export async function fetchScenes() {
+  const uid = await getUserId();
+
   const { data, error } = await supabase
     .from("scenes")
     .select("*")
+    .eq("user_id", uid)
     .order("created_at", { ascending: false });
 
   if (error) throw error;
@@ -51,15 +52,16 @@ export async function fetchSceneById(sceneId) {
 }
 
 export async function fetchParticipants() {
-  const { data, error } = await supabase.from("participants").select("*").order("created_at", {
-    ascending: false,
-  });
+  const { data, error } = await supabase
+    .from("participants")
+    .select("*")
+    .order("created_at", { ascending: false });
+
   if (error) throw error;
   return data ?? [];
 }
 
 export async function fetchOwnedToolsForPicker() {
-  // Pull owned tools from tools_user, including joined tools_global for label/icon.
   const { data, error } = await supabase
     .from("tools_user")
     .select(
@@ -88,14 +90,17 @@ export async function createScene({
   participantIds,
   toolUserIds,
 }) {
-  // 1) create scene
+  const uid = await getUserId();
+
+  // 1) create scene (always set user_id)
   const { data: scene, error: sceneErr } = await supabase
     .from("scenes")
     .insert({
+      user_id: uid,
       title,
       intent: intent || null,
       notes: notes || null,
-      scheduled_at: scheduled_at || null,
+      scheduled_for: scheduled_at || null, // your column is scheduled_for (not scheduled_at)
       status: "draft",
     })
     .select("*")
@@ -112,7 +117,7 @@ export async function createScene({
     if (error) throw error;
   }
 
-  // 3) link tools (tool_user ids)
+  // 3) link tools
   if (Array.isArray(toolUserIds) && toolUserIds.length) {
     const rows = toolUserIds.map((tid) => ({ scene_id: sceneId, tool_user_id: tid }));
     const { error } = await supabase.from("scene_tools").insert(rows);
@@ -126,20 +131,20 @@ export async function updateScene(
   sceneId,
   { title, intent, notes, scheduled_at, participantIds, toolUserIds }
 ) {
-  // 1) update scene fields
+  // Note: your column is scheduled_for, not scheduled_at
   const { error: upErr } = await supabase
     .from("scenes")
     .update({
       title,
       intent: intent || null,
       notes: notes || null,
-      scheduled_at: scheduled_at || null,
+      scheduled_for: scheduled_at || null,
     })
     .eq("id", sceneId);
 
   if (upErr) throw upErr;
 
-  // 2) replace participants
+  // replace participants
   {
     const { error: delErr } = await supabase
       .from("scene_participants")
@@ -154,7 +159,7 @@ export async function updateScene(
     }
   }
 
-  // 3) replace tools
+  // replace tools
   {
     const { error: delErr } = await supabase.from("scene_tools").delete().eq("scene_id", sceneId);
     if (delErr) throw delErr;
