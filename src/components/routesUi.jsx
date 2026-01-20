@@ -10,12 +10,14 @@ function iconButtonStyle() {
     justifyContent: "center",
     width: TOPBAR_ICON_SIZE,
     height: TOPBAR_ICON_SIZE,
+    minWidth: TOPBAR_ICON_SIZE,
     borderRadius: 12,
     border: "1px solid rgba(255,255,255,0.18)",
     background: "rgba(255,255,255,0.06)",
     color: "#f3f3f7",
     textDecoration: "none",
     fontSize: 16,
+    flexShrink: 0, // critical: never shrink these
   };
 }
 
@@ -41,6 +43,13 @@ function IconButton({ onClick, label, title, children }) {
   );
 }
 
+/**
+ * TopBar now uses a 2-row layout:
+ * Row 1: Back + Title
+ * Row 2: rightSlot (left) + nav cluster (right)
+ *
+ * This prevents the nav cluster from shrinking when rightSlot varies by page.
+ */
 export function TopBar({ title, onSignOut, rightSlot, showBack = false, backTo }) {
   const navigate = useNavigate();
 
@@ -56,82 +65,100 @@ export function TopBar({ title, onSignOut, rightSlot, showBack = false, backTo }
         paddingTop: 18,
         borderBottom: "1px solid rgba(255,255,255,0.08)",
         display: "grid",
-        alignItems: "center",
-        gap: 12,
-        gridTemplateColumns: `${TOPBAR_ICON_SIZE}px 1fr auto`,
+        gap: 10,
       }}
     >
-      {/* Left: reserve fixed space so the title doesn't shift when back is absent */}
-      <div style={{ width: TOPBAR_ICON_SIZE, display: "flex", alignItems: "center" }}>
-        {showBack ? (
-          <IconButton onClick={handleBack} label="Back" title="Back">
-            ←
-          </IconButton>
-        ) : null}
+      {/* Row 1: Back + Title */}
+      <div
+        style={{
+          display: "grid",
+          alignItems: "center",
+          gap: 12,
+          gridTemplateColumns: `${TOPBAR_ICON_SIZE}px 1fr`,
+        }}
+      >
+        <div style={{ width: TOPBAR_ICON_SIZE, display: "flex", alignItems: "center" }}>
+          {showBack ? (
+            <IconButton onClick={handleBack} label="Back" title="Back">
+              ←
+            </IconButton>
+          ) : null}
+        </div>
+
+        <div style={{ minWidth: 0 }}>
+          <h1
+            style={{
+              margin: 0,
+              fontSize: 22,
+              lineHeight: 1.15,
+              // allow wrapping instead of truncating on mobile
+              whiteSpace: "normal",
+              overflowWrap: "anywhere",
+            }}
+          >
+            {title}
+          </h1>
+        </div>
       </div>
 
-      {/* Center: title */}
-      <div style={{ minWidth: 0 }}>
-        <h1
-          style={{
-            margin: 0,
-            fontSize: 22,
-            lineHeight: 1.15,
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-          }}
-        >
-          {title}
-        </h1>
-      </div>
-
-      {/* Right: actions + stable nav cluster */}
+      {/* Row 2: rightSlot + stable nav cluster */}
       <div
         style={{
           display: "flex",
           alignItems: "center",
-          justifyContent: "flex-end",
-          gap: 8,
-          minWidth: 0,
+          justifyContent: "space-between",
+          gap: 12,
         }}
       >
-        {rightSlot ? (
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>{rightSlot}</div>
-        ) : null}
-
-        {/* Home (routes to /home, which currently redirects to /scenes) */}
-        <IconLink to="/home" label="Home" title="Home">
-          ⌂
-        </IconLink>
-
-        {/* Settings */}
-        <IconLink to="/settings" label="Settings" title="Settings">
-          ⚙️
-        </IconLink>
-
-        {/* Profile */}
-        <IconLink to="/profile" label="Profile" title="Profile">
-          👤
-        </IconLink>
-
-        <button
-          onClick={onSignOut}
+        {/* rightSlot area: allowed to scroll horizontally if needed */}
+        <div
           style={{
-            padding: "10px 12px",
-            borderRadius: 12,
-            border: "1px solid rgba(255,255,255,0.18)",
-            background: "rgba(255,255,255,0.06)",
-            color: "#f3f3f7",
-            cursor: "pointer",
-            fontSize: 12,
-            fontWeight: 650,
-            lineHeight: 1,
-            whiteSpace: "nowrap",
+            flex: 1,
+            minWidth: 0,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            overflowX: rightSlot ? "auto" : "hidden",
+            paddingBottom: rightSlot ? 2 : 0,
           }}
         >
-          Sign out
-        </button>
+          {rightSlot ? <div style={{ display: "flex", alignItems: "center", gap: 8 }}>{rightSlot}</div> : null}
+        </div>
+
+        {/* Nav cluster: NEVER shrink */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+          <IconLink to="/home" label="Home" title="Home">
+            ⌂
+          </IconLink>
+
+          <IconLink to="/settings" label="Settings" title="Settings">
+            ⚙️
+          </IconLink>
+
+          <IconLink to="/profile" label="Profile" title="Profile">
+            👤
+          </IconLink>
+
+          <button
+            onClick={onSignOut}
+            style={{
+              padding: "10px 12px",
+              height: TOPBAR_ICON_SIZE,
+              borderRadius: 12,
+              border: "1px solid rgba(255,255,255,0.18)",
+              background: "rgba(255,255,255,0.06)",
+              color: "#f3f3f7",
+              cursor: "pointer",
+              fontSize: 12,
+              fontWeight: 650,
+              lineHeight: 1,
+              whiteSpace: "nowrap",
+              flexShrink: 0,
+            }}
+          >
+            Sign out
+          </button>
+        </div>
       </div>
     </div>
   );
