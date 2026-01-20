@@ -63,6 +63,7 @@ function AuthScreen() {
     setErr("");
     setBusy(true);
     try {
+      // Keep this stable. Supabase will return to /scenes with ?code=... in PKCE flow.
       const redirectTo = `${window.location.origin}/scenes`;
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
@@ -133,6 +134,11 @@ function AuthScreen() {
   );
 }
 
+/**
+ * Handles:
+ * - app routes
+ * - onboarding auto-start (if profile.onboarding_complete === false)
+ */
 function AuthedApp({ session }) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -233,12 +239,41 @@ export default function App() {
       setBooting(false);
     };
 
+    // Never allow infinite loading; mobile OAuth exchange can be slow, so give it time.
     const bootTimeout = setTimeout(() => {
       finishBoot();
-    }, 2500);
+    }, 12000);
+
+    const maybeExchangeOAuthCode = async () => {
+      // Supabase PKCE returns with ?code=... (and sometimes other params).
+      // On mobile, relying on implicit auto-detection can be flaky; do it explicitly.
+      try {
+        const url = new URL(window.location.href);
+        const code = url.searchParams.get("code");
+
+        if (!code) return;
+
+        const { error } = await supabase.auth.exchangeCodeForSession(window.location.href);
+        // Always clean the URL so we don’t re-process the code on refresh.
+        url.searchParams.delete("code");
+        url.searchParams.delete("state");
+        url.searchParams.delete("error");
+        url.searchParams.delete("error_description");
+        window.history.replaceState({}, document.title, url.toString());
+
+        if (error) {
+          // Soft landing: we’ll still proceed to getSession(), but session may be null.
+          // Leaving this silent is fine; the user will see the sign-in screen rather than a crash.
+        }
+      } catch (_e) {
+        // No hard failure; we’ll continue to getSession().
+      }
+    };
 
     (async () => {
       try {
+        await maybeExchangeOAuthCode();
+
         const { data, error } = await supabase.auth.getSession();
         if (!mounted) return;
 
