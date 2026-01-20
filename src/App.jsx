@@ -1,6 +1,15 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { NavLink, Route, Routes, Navigate, useLocation, useNavigate } from "react-router-dom";
+import {
+  NavLink,
+  Route,
+  Routes,
+  Navigate,
+  useLocation,
+  useNavigate,
+} from "react-router-dom";
 import { supabase } from "./lib/supabaseClient";
+
+import { ToastProvider } from "./ui/ToastContext.jsx";
 
 import ScenesHome from "./screens/scenes/ScenesHome";
 import SceneCreate from "./screens/scenes/SceneCreate";
@@ -29,7 +38,6 @@ class ErrorBoundary extends React.Component {
   }
 
   componentDidCatch(err, info) {
-    // Keep a breadcrumb in console for debugging (Vercel + browser console)
     // eslint-disable-next-line no-console
     console.error("UI crashed:", err, info);
   }
@@ -164,7 +172,9 @@ function MinimalAuthScreen() {
         }}
       >
         <div style={{ fontSize: 22, fontWeight: 900, marginBottom: 8 }}>SceneBuilder</div>
-        <div style={{ opacity: 0.75, lineHeight: 1.4, marginBottom: 14 }}>Sign in to continue.</div>
+        <div style={{ opacity: 0.75, lineHeight: 1.4, marginBottom: 14 }}>
+          Sign in to continue.
+        </div>
 
         {err ? (
           <div
@@ -354,17 +364,19 @@ export default function App() {
   if (loading) return <div style={{ padding: 16, opacity: 0.8 }}>Loading…</div>;
 
   return (
-    <Routes>
-      {!session ? (
-        <>
-          <Route path="/auth" element={<MinimalAuthScreen />} />
-          <Route path="*" element={<Navigate to="/auth" replace />} />
-        </>
-      ) : (
-        <>
-          <Route path="/*" element={<AuthedApp session={session} />} />
-        </>
-      )}
-    </Routes>
+    <ToastProvider>
+      <Routes>
+        {!session ? (
+          <>
+            <Route path="/auth" element={<MinimalAuthScreen />} />
+            <Route path="*" element={<Navigate to="/auth" replace />} />
+          </>
+        ) : (
+          <>
+            <Route path="/*" element={<AuthedApp session={session} />} />
+          </>
+        )}
+      </Routes>
+    </ToastProvider>
   );
 }
