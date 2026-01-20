@@ -167,8 +167,11 @@ function AuthedApp({ session }) {
   return (
     <div style={containerStyle}>
       <Routes>
-        <Route path="/" element={<Navigate to="/scenes" replace />} />
+        {/* Home (future dedicated screen). For now, route Home to Scenes. */}
+        <Route path="/" element={<Navigate to="/home" replace />} />
+        <Route path="/home" element={<Navigate to="/scenes" replace />} />
 
+        {/* Scenes */}
         <Route path="/scenes" element={<ScenesHome session={session} supabase={supabase} />} />
         <Route path="/scenes/new" element={<SceneCreate session={session} supabase={supabase} />} />
         <Route path="/scenes/:id" element={<SceneView session={session} supabase={supabase} />} />
@@ -177,28 +180,33 @@ function AuthedApp({ session }) {
           element={<SceneEdit session={session} supabase={supabase} />}
         />
 
+        {/* Tools + Journal */}
         <Route path="/tools" element={<ToolsHome session={session} supabase={supabase} />} />
         <Route path="/journal" element={<JournalHome session={session} supabase={supabase} />} />
 
+        {/* Settings */}
         <Route path="/settings" element={<SettingsHome session={session} supabase={supabase} />} />
 
+        {/* Profile */}
         <Route path="/profile" element={<ProfileScreen session={session} supabase={supabase} />} />
         <Route
           path="/profile/kinks"
           element={<KinkPreferencesScreen session={session} supabase={supabase} mode="edit" />}
         />
 
+        {/* Vocabulary */}
         <Route
           path="/vocabulary"
           element={<ActionVocabularyScreen session={session} supabase={supabase} />}
         />
 
+        {/* Onboarding */}
         <Route
           path="/onboarding"
           element={<KinkPreferencesScreen session={session} supabase={supabase} mode="onboarding" />}
         />
 
-        <Route path="*" element={<Navigate to="/scenes" replace />} />
+        <Route path="*" element={<Navigate to="/home" replace />} />
       </Routes>
 
       {showTabs ? (
@@ -227,15 +235,14 @@ export default function App() {
       setBooting(false);
     };
 
-    // Give mobile enough time to complete URL->session storage.
     const bootTimeout = setTimeout(() => {
       finishBoot();
     }, 12000);
 
     const ingestSessionFromUrlIfPresent = async () => {
-      // If Supabase returned tokens in the URL (hash) or code in query, ingest them.
       const href = window.location.href;
-      const hasHashTokens = typeof window !== "undefined" && window.location.hash?.includes("access_token");
+      const hasHashTokens =
+        typeof window !== "undefined" && window.location.hash?.includes("access_token");
       const hasCode = href.includes("?code=") || href.includes("&code=");
 
       if (!hasHashTokens && !hasCode) return;
@@ -243,7 +250,6 @@ export default function App() {
       try {
         await supabase.auth.getSessionFromUrl({ storeSession: true });
 
-        // Clean URL: remove hash/query auth artifacts so refresh doesn't re-process
         const url = new URL(window.location.href);
         url.hash = "";
         url.searchParams.delete("code");
@@ -252,7 +258,7 @@ export default function App() {
         url.searchParams.delete("error_description");
         window.history.replaceState({}, document.title, url.toString());
       } catch (_e) {
-        // Soft fail; we’ll still proceed to getSession().
+        // soft fail
       }
     };
 
