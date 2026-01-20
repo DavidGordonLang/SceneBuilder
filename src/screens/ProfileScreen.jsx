@@ -1,58 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
+import { TopBar, SmallButton } from "../components/routesUi";
 import { useAvatarUpload } from "../hooks/useAvatarUpload";
 import { useProfile } from "../hooks/useProfile";
-
-function TopBarLite({ title, rightSlot }) {
-  return (
-    <div
-      style={{
-        padding: 16,
-        paddingTop: 18,
-        borderBottom: "1px solid rgba(255,255,255,0.08)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: 12,
-      }}
-    >
-      <h1 style={{ margin: 0, fontSize: 22 }}>{title}</h1>
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>{rightSlot}</div>
-    </div>
-  );
-}
-
-function SmallButton({ children, onClick, disabled, asLink, to }) {
-  const base = {
-    padding: "8px 10px",
-    borderRadius: 10,
-    border: "1px solid rgba(255,255,255,0.14)",
-    background: disabled ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.08)",
-    color: "#f3f3f7",
-    cursor: disabled ? "not-allowed" : "pointer",
-    fontSize: 12,
-    fontWeight: 700,
-    opacity: disabled ? 0.55 : 1,
-    textDecoration: "none",
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 6,
-  };
-
-  if (asLink) {
-    return (
-      <Link to={to} style={base}>
-        {children}
-      </Link>
-    );
-  }
-
-  return (
-    <button type="button" onClick={onClick} disabled={disabled} style={base}>
-      {children}
-    </button>
-  );
-}
 
 function Field({ label, children, hint }) {
   return (
@@ -107,7 +57,6 @@ export default function ProfileScreen({ session, supabase }) {
   const location = useLocation();
 
   const userId = session?.user?.id;
-
   const { profile, loading, error, updateProfile } = useProfile({ supabase, userId });
   const { uploadAvatar, uploading } = useAvatarUpload({ supabase, userId });
 
@@ -124,7 +73,6 @@ export default function ProfileScreen({ session, supabase }) {
   const searchParams = new URLSearchParams(location.search || "");
   const from = searchParams.get("from") || "";
   const shouldStartEditing = searchParams.get("edit") === "1";
-
   const [editing, setEditing] = useState(shouldStartEditing);
 
   useEffect(() => {
@@ -169,6 +117,10 @@ export default function ProfileScreen({ session, supabase }) {
       cancelled = true;
     };
   }, [supabase, profile?.avatar_url]);
+
+  async function signOut() {
+    await supabase.auth.signOut();
+  }
 
   async function handleSave() {
     setLocalErr("");
@@ -215,7 +167,7 @@ export default function ProfileScreen({ session, supabase }) {
     }
   }
 
-  async function handlePickAvatar() {
+  function handlePickAvatar() {
     setLocalErr("");
     setLocalOk("");
     fileRef.current?.click?.();
@@ -247,29 +199,26 @@ export default function ProfileScreen({ session, supabase }) {
 
   return (
     <div style={{ minHeight: "100vh" }}>
-      <TopBarLite
+      <TopBar
         title="Profile"
+        onSignOut={signOut}
+        showBack
+        backTo={backTo}
         rightSlot={
-          <div style={{ display: "flex", gap: 8 }}>
-            <SmallButton asLink to={backTo}>
-              Back
+          !editing ? (
+            <SmallButton onClick={handleStartEdit} disabled={busy} title="Edit profile">
+              Edit
             </SmallButton>
-
-            {!editing ? (
-              <SmallButton onClick={handleStartEdit} disabled={busy}>
-                Edit profile
+          ) : (
+            <>
+              <SmallButton onClick={handleCancelEdit} disabled={busy} title="Cancel editing">
+                Cancel
               </SmallButton>
-            ) : (
-              <>
-                <SmallButton onClick={handleCancelEdit} disabled={busy}>
-                  Cancel
-                </SmallButton>
-                <SmallButton onClick={handleSave} disabled={busy}>
-                  {busySave ? "Saving..." : "Save"}
-                </SmallButton>
-              </>
-            )}
-          </div>
+              <SmallButton onClick={handleSave} disabled={busy} title="Save changes">
+                {busySave ? "Saving..." : "Save"}
+              </SmallButton>
+            </>
+          )
         }
       />
 
@@ -348,11 +297,11 @@ export default function ProfileScreen({ session, supabase }) {
             </div>
 
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <SmallButton onClick={handlePickAvatar} disabled={busy}>
+              <SmallButton onClick={handlePickAvatar} disabled={busy} title="Change avatar">
                 {uploading ? "Uploading..." : "Change avatar"}
               </SmallButton>
 
-              <SmallButton asLink to="/profile/kinks">
+              <SmallButton asLink to="/profile/kinks" title="Edit kink preferences">
                 Edit kink preferences
               </SmallButton>
             </div>
@@ -421,7 +370,7 @@ export default function ProfileScreen({ session, supabase }) {
           >
             Your onboarding isn’t marked complete yet. You can do it now, or later.
             <div style={{ marginTop: 10 }}>
-              <SmallButton asLink to="/onboarding">
+              <SmallButton asLink to="/onboarding" title="Start onboarding">
                 Start onboarding
               </SmallButton>
             </div>
