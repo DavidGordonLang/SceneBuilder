@@ -50,7 +50,29 @@ export function TopBar({ title, onSignOut, rightSlot, showBack = false, backTo }
       </div>
 
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        {/* Settings icon */}
+        {/* Home (routes to /home, which currently redirects to /scenes) */}
+        <Link
+          to="/home"
+          aria-label="Home"
+          title="Home"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: 34,
+            height: 34,
+            borderRadius: 10,
+            border: "1px solid rgba(255,255,255,0.18)",
+            background: "rgba(255,255,255,0.06)",
+            color: "#f3f3f7",
+            textDecoration: "none",
+            fontSize: 16,
+          }}
+        >
+          ⌂
+        </Link>
+
+        {/* Settings */}
         <Link
           to="/settings"
           aria-label="Settings"
@@ -72,7 +94,7 @@ export function TopBar({ title, onSignOut, rightSlot, showBack = false, backTo }
           ⚙️
         </Link>
 
-        {/* Profile icon */}
+        {/* Profile */}
         <Link
           to="/profile"
           aria-label="Profile"
