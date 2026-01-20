@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { TopBar, SmallButton, Chip, Card } from "../../components/routesUi";
 import Page from "../../components/Page";
 import { useToast } from "../../ui/ToastContext.jsx";
@@ -108,9 +109,7 @@ function EntryEditor({ initial, onCancel, onSave, saving }) {
             <div style={{ fontWeight: 900, letterSpacing: 0.2 }}>
               {initial?.id ? "Edit entry" : "New entry"}
             </div>
-            <Chip>
-              {ENTRY_TYPES.find((t) => t.value === entryType)?.label || entryType}
-            </Chip>
+            <Chip>{ENTRY_TYPES.find((t) => t.value === entryType)?.label || entryType}</Chip>
           </div>
 
           <div style={{ display: "flex", gap: 8 }}>
@@ -183,6 +182,9 @@ function EntryEditor({ initial, onCancel, onSave, saving }) {
 
 export default function JournalHome({ supabase, session }) {
   const { showToast } = useToast();
+  const navigate = useNavigate();
+  const location = useLocation();
+
   const userId = session?.user?.id;
 
   const [loading, setLoading] = useState(true);
@@ -191,7 +193,9 @@ export default function JournalHome({ supabase, session }) {
 
   const [entries, setEntries] = useState([]);
   const [search, setSearch] = useState("");
+
   const [editing, setEditing] = useState(null); // null | entry object | { mode: 'new' }
+  const handledEditStateRef = useRef(false);
 
   async function signOut() {
     await supabase.auth.signOut();
@@ -218,6 +222,24 @@ export default function JournalHome({ supabase, session }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
+  // Allow JournalEntryView to send user back here and open editor immediately.
+  useEffect(() => {
+    const editId = location?.state?.editId;
+    if (!editId) return;
+    if (handledEditStateRef.current) return;
+
+    handledEditStateRef.current = true;
+
+    // If entries already loaded, open immediately. If not, we'll try again after load.
+    const found = (entries || []).find((e) => e.id === editId);
+    if (found) {
+      setEditing(found);
+      // Clear state so refresh/back doesn't re-trigger.
+      navigate("/journal", { replace: true, state: {} });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location?.state, entries]);
+
   const filtered = useMemo(() => {
     const q = (search || "").trim().toLowerCase();
     if (!q) return entries;
@@ -239,10 +261,10 @@ export default function JournalHome({ supabase, session }) {
     try {
       if (editing?.id) {
         await updateJournalEntry({ supabase, id: editing.id, patch: payload });
-        showToast("Saved");
+        showToast?.("Saved");
       } else {
         await createJournalEntry({ supabase, userId, entry: payload });
-        showToast("Created");
+        showToast?.("Created");
       }
 
       setEditing(null);
@@ -261,11 +283,15 @@ export default function JournalHome({ supabase, session }) {
     setErr("");
     try {
       await deleteJournalEntry({ supabase, id });
-      showToast("Deleted");
+      showToast?.("Deleted");
       await load();
     } catch (e) {
       setErr(e?.message || "Delete failed.");
     }
+  }
+
+  function openEntry(id) {
+    navigate(`/journal/${id}`);
   }
 
   return (
@@ -315,7 +341,11 @@ export default function JournalHome({ supabase, session }) {
 
         {editing ? (
           <EntryEditor
-            initial={editing?.id ? editing : { entry_type: "reflection", title: "", body: "", scene_id: "" }}
+            initial={
+              editing?.id
+                ? editing
+                : { entry_type: "reflection", title: "", body: "", scene_id: "" }
+            }
             saving={saving}
             onCancel={() => setEditing(null)}
             onSave={handleSave}
@@ -329,51 +359,85 @@ export default function JournalHome({ supabase, session }) {
             const preview = e.body ? (e.body.length > 240 ? `${e.body.slice(0, 240)}…` : e.body) : "";
 
             return (
-              <Card key={e.id}>
-                <div style={{ display: "grid", gap: 10 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
-                    <div style={{ minWidth: 0 }}>
-                      <div
-                        style={{
-                          fontWeight: 900,
-                          letterSpacing: 0.2,
-                          whiteSpace: "nowrap",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                        }}
-                      >
-                        {title}
+              <div
+                key={e.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => openEntry(e.id)}
+                onKeyDown={(ev) => {
+                  if (ev.key === "Enter" || ev.key === " ") openEntry(e.id);
+                }}
+                style={{ cursor: "pointer" }}
+                title="Open entry"
+              >
+                <Card>
+                  <div style={{ display: "grid", gap: 10 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div
+                          style={{
+                            fontWeight: 900,
+                            letterSpacing: 0.2,
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                          }}
+                        >
+                          {title}
+                        </div>
+                        <div style={{ marginTop: 4, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                          <Chip>{typeLabel}</Chip>
+                          <span style={{ fontSize: 12, opacity: 0.65 }}>{formatDate(e.created_at)}</span>
+                        </div>
                       </div>
-                      <div style={{ marginTop: 4, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                        <Chip>{typeLabel}</Chip>
-                        <span style={{ fontSize: 12, opacity: 0.65 }}>{formatDate(e.created_at)}</span>
+
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                        <SmallButton
+                          onClick={(ev) => {
+                            ev.stopPropagation();
+                            openEntry(e.id);
+                          }}
+                          disabled={saving}
+                          title="Open entry"
+                        >
+                          Open
+                        </SmallButton>
+                        <SmallButton
+                          onClick={(ev) => {
+                            ev.stopPropagation();
+                            setEditing(e);
+                          }}
+                          disabled={saving}
+                          title="Edit entry"
+                        >
+                          Edit
+                        </SmallButton>
+                        <SmallButton
+                          tone="danger"
+                          onClick={(ev) => {
+                            ev.stopPropagation();
+                            handleDelete(e.id);
+                          }}
+                          disabled={saving}
+                          title="Delete entry"
+                        >
+                          Delete
+                        </SmallButton>
                       </div>
                     </div>
 
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                      <SmallButton onClick={() => setEditing(e)} disabled={saving} title="Edit entry">
-                        Edit
-                      </SmallButton>
-                      <SmallButton
-                        tone="danger"
-                        onClick={() => handleDelete(e.id)}
-                        disabled={saving}
-                        title="Delete entry"
-                      >
-                        Delete
-                      </SmallButton>
-                    </div>
+                    {preview ? (
+                      <div style={{ opacity: 0.88, whiteSpace: "pre-wrap", lineHeight: 1.45 }}>
+                        {preview}
+                      </div>
+                    ) : null}
+
+                    {e.scene_id ? (
+                      <div style={{ fontSize: 12, opacity: 0.65 }}>Linked scene: {e.scene_id}</div>
+                    ) : null}
                   </div>
-
-                  {preview ? (
-                    <div style={{ opacity: 0.88, whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{preview}</div>
-                  ) : null}
-
-                  {e.scene_id ? (
-                    <div style={{ fontSize: 12, opacity: 0.65 }}>Linked scene: {e.scene_id}</div>
-                  ) : null}
-                </div>
-              </Card>
+                </Card>
+              </div>
             );
           })}
 
