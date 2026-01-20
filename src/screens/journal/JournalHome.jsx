@@ -223,22 +223,32 @@ export default function JournalHome({ supabase, session }) {
   }, [userId]);
 
   // Allow JournalEntryView to send user back here and open editor immediately.
-  useEffect(() => {
+   useEffect(() => {
     const editId = location?.state?.editId;
     if (!editId) return;
     if (handledEditStateRef.current) return;
 
     handledEditStateRef.current = true;
 
-    // If entries already loaded, open immediately. If not, we'll try again after load.
-    const found = (entries || []).find((e) => e.id === editId);
-    if (found) {
-      setEditing(found);
+    (async () => {
+      // Ensure we have data to find the entry.
+      if (!entries || entries.length === 0) {
+        await load();
+      }
+
+      const found = (entries || []).find((e) => e.id === editId);
+      if (found) {
+        setEditing(found);
+      } else {
+        // Fallback: open a new editor if entry isn't in the list (rare).
+        setEditing({ mode: "new" });
+      }
+
       // Clear state so refresh/back doesn't re-trigger.
       navigate("/journal", { replace: true, state: {} });
-    }
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location?.state, entries]);
+  }, [location?.state]);
 
   const filtered = useMemo(() => {
     const q = (search || "").trim().toLowerCase();
