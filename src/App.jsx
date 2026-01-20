@@ -225,19 +225,51 @@ export default function App() {
 
   useEffect(() => {
     let mounted = true;
+    let bootFinished = false;
 
-    supabase.auth.getSession().then(({ data }) => {
+    const finishBoot = () => {
       if (!mounted) return;
-      setSession(data.session ?? null);
+      if (bootFinished) return;
+      bootFinished = true;
       setBooting(false);
-    });
+    };
+
+    // Hard fallback: never allow infinite loading
+    const bootTimeout = setTimeout(() => {
+      finishBoot();
+    }, 2500);
+
+    (async () => {
+      try {
+        const { data, error } = await supabase.auth.getSession();
+        if (!mounted) return;
+
+        if (error) {
+          // Soft landing: show AuthScreen rather than infinite Loading
+          setSession(null);
+          finishBoot();
+          return;
+        }
+
+        setSession(data.session ?? null);
+        finishBoot();
+      } catch (_e) {
+        if (!mounted) return;
+        setSession(null);
+        finishBoot();
+      }
+    })();
 
     const { data: sub } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      if (!mounted) return;
       setSession(newSession ?? null);
+      // auth events are authoritative; also end boot here
+      finishBoot();
     });
 
     return () => {
       mounted = false;
+      clearTimeout(bootTimeout);
       sub?.subscription?.unsubscribe?.();
     };
   }, []);
