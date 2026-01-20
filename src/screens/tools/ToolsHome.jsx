@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { TopBar, Chip, SmallButton } from "../../components/routesUi";
+import Page from "../../components/Page";
 import {
   addGlobalToolToUser,
   deleteUserTool,
@@ -50,14 +51,21 @@ function ToolRow({ tool, actions }) {
         >
           <div style={{ minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-              <div style={{ fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis" }}>
+              <div
+                style={{
+                  fontWeight: 800,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
                 {tool.name}
               </div>
               {safety ? <span style={{ opacity: 0.6, fontSize: 12 }}>{safety}</span> : null}
             </div>
           </div>
 
-          {actions ? <div style={{ display: "flex", gap: 8 }}>{actions}</div> : null}
+          {actions ? <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>{actions}</div> : null}
         </div>
 
         {tags.length ? (
@@ -107,6 +115,18 @@ function Segmented({ value, onChange, options }) {
           </button>
         );
       })}
+    </div>
+  );
+}
+
+function Section({ title, subtitle, children }) {
+  return (
+    <div style={{ display: "grid", gap: 10 }}>
+      <div style={{ display: "grid", gap: 4 }}>
+        <div style={{ fontWeight: 900, letterSpacing: 0.2 }}>{title}</div>
+        {subtitle ? <div style={{ opacity: 0.7, fontSize: 13, lineHeight: 1.35 }}>{subtitle}</div> : null}
+      </div>
+      {children}
     </div>
   );
 }
@@ -224,7 +244,7 @@ export default function ToolsHome({ supabase }) {
         }
       />
 
-      <div style={{ padding: 16 }}>
+      <Page style={{ display: "grid", gap: 14 }}>
         {loading ? (
           <div style={{ opacity: 0.8 }}>Loading tools…</div>
         ) : err ? (
@@ -235,7 +255,7 @@ export default function ToolsHome({ supabase }) {
               border: "1px solid rgba(255,80,80,0.35)",
               background: "rgba(255,80,80,0.10)",
               fontSize: 13,
-              marginBottom: 12,
+              lineHeight: 1.4,
             }}
           >
             {err}
@@ -243,9 +263,11 @@ export default function ToolsHome({ supabase }) {
         ) : null}
 
         {tab === "drawer" ? (
-          <div style={{ display: "grid", gap: 14 }}>
-            <div>
-              <div style={{ fontWeight: 900, marginBottom: 8 }}>Owned Tools</div>
+          <div style={{ display: "grid", gap: 16 }}>
+            <Section
+              title="Owned tools"
+              subtitle={owned.length ? null : "No owned tools yet. Add some from the Vault."}
+            >
               {owned.length ? (
                 <div style={{ display: "grid", gap: 10 }}>
                   {owned.map((t) => {
@@ -273,15 +295,13 @@ export default function ToolsHome({ supabase }) {
                     );
                   })}
                 </div>
-              ) : (
-                <div style={{ opacity: 0.7, fontSize: 13 }}>
-                  No owned tools yet. Add some from the Vault.
-                </div>
-              )}
-            </div>
+              ) : null}
+            </Section>
 
-            <div>
-              <div style={{ fontWeight: 900, marginBottom: 8 }}>Craving Drawer</div>
+            <Section
+              title="Craving drawer"
+              subtitle={craving.length ? null : "Nothing in craving yet. Add items from the Vault."}
+            >
               {craving.length ? (
                 <div style={{ display: "grid", gap: 10 }}>
                   {craving.map((t) => {
@@ -318,57 +338,65 @@ export default function ToolsHome({ supabase }) {
                     );
                   })}
                 </div>
-              ) : (
-                <div style={{ opacity: 0.7, fontSize: 13 }}>
-                  Nothing in craving yet. Add items from the Vault.
-                </div>
-              )}
-            </div>
+              ) : null}
+            </Section>
           </div>
         ) : (
-          <div style={{ display: "grid", gap: 10 }}>
-            <div style={{ opacity: 0.75, fontSize: 13, marginBottom: 6 }}>
+          <div style={{ display: "grid", gap: 12 }}>
+            <div
+              style={{
+                opacity: 0.75,
+                fontSize: 13,
+                lineHeight: 1.4,
+                padding: 12,
+                borderRadius: 14,
+                border: "1px solid rgba(255,255,255,0.10)",
+                background: "rgba(255,255,255,0.03)",
+              }}
+            >
               Tool Vault. Add items to Owned or Craving.
             </div>
 
-            {vault.map((t) => {
-              const inOwned = ownedGlobalIds.has(t.id);
-              const inCraving = cravingGlobalIds.has(t.id);
+            <div style={{ display: "grid", gap: 10 }}>
+              {vault.map((t) => {
+                const inOwned = ownedGlobalIds.has(t.id);
+                const inCraving = cravingGlobalIds.has(t.id);
 
-              return (
-                <ToolRow
-                  key={t.id}
-                  tool={t}
-                  actions={
-                    <>
-                      <SmallButton
-                        disabled={busy || inCraving || inOwned}
-                        onClick={() => addTo("craving", t.id)}
-                        title={
-                          inOwned
-                            ? "Already in Owned"
-                            : inCraving
-                            ? "Already in Craving"
-                            : "Add to Craving Drawer"
-                        }
-                      >
-                        + Craving
-                      </SmallButton>
-                      <SmallButton
-                        disabled={busy || inOwned}
-                        onClick={() => addTo("owned", t.id)}
-                        title={inOwned ? "Already in Owned" : "Add to Owned Tools"}
-                      >
-                        + Owned
-                      </SmallButton>
-                    </>
-                  }
-                />
-              );
-            })}
+                return (
+                  <ToolRow
+                    key={t.id}
+                    tool={t}
+                    actions={
+                      <>
+                        <SmallButton
+                          disabled={busy || inCraving || inOwned}
+                          onClick={() => addTo("craving", t.id)}
+                          title={
+                            inOwned
+                              ? "Already in Owned"
+                              : inCraving
+                              ? "Already in Craving"
+                              : "Add to Craving Drawer"
+                          }
+                        >
+                          + Craving
+                        </SmallButton>
+                        <SmallButton
+                          disabled={busy || inOwned}
+                          onClick={() => addTo("owned", t.id)}
+                          title={inOwned ? "Already in Owned" : "Add to Owned Tools"}
+                        >
+                          + Owned
+                        </SmallButton>
+                      </>
+                    }
+                  />
+                );
+              })}
+            </div>
           </div>
         )}
-      </div>
+      </Page>
     </div>
   );
 }
