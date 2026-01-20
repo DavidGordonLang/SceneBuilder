@@ -8,7 +8,8 @@ export default function SettingsHome({ supabase }) {
 
   return (
     <div>
-      <TopBar title="Settings" onSignOut={signOut} />
+      <TopBar title="Settings" onSignOut={signOut} showBack />
+
       <div style={{ padding: 16, display: "grid", gap: 12 }}>
         <Card asLink to="/vocabulary">
           <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
@@ -22,7 +23,7 @@ export default function SettingsHome({ supabase }) {
           </div>
         </Card>
 
-        <Card asLink to="/profile">
+        <Card asLink to="/profile?edit=1&from=settings">
           <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
             <div>
               <div style={{ fontWeight: 700 }}>Profile</div>
