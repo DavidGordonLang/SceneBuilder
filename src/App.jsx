@@ -8,7 +8,6 @@ import {
   useNavigate,
 } from "react-router-dom";
 import { supabase } from "./lib/supabaseClient";
-
 import { ToastProvider } from "./ui/ToastContext.jsx";
 
 import ScenesHome from "./screens/scenes/ScenesHome";
@@ -81,7 +80,7 @@ class ErrorBoundary extends React.Component {
 
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <a
-              href="/scenes"
+              href="/home"
               style={{
                 padding: "10px 12px",
                 borderRadius: 12,
@@ -92,7 +91,7 @@ class ErrorBoundary extends React.Component {
                 textDecoration: "none",
               }}
             >
-              Go to Scenes
+              Go Home
             </a>
             <button
               type="button"
@@ -116,22 +115,25 @@ class ErrorBoundary extends React.Component {
   }
 }
 
-function TabLink({ to, label }) {
+function PillLink({ to, label, end = false }) {
   return (
     <NavLink
       to={to}
+      end={end}
       style={({ isActive }) => ({
         textDecoration: "none",
         color: "#f3f3f7",
-        opacity: isActive ? 1 : 0.7,
-        fontWeight: isActive ? 800 : 650,
+        opacity: isActive ? 1 : 0.75,
+        fontWeight: isActive ? 900 : 750,
         fontSize: 12,
         padding: "10px 12px",
-        borderRadius: 12,
+        borderRadius: 999,
+        border: "1px solid rgba(255,255,255,0.12)",
+        background: isActive ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.04)",
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
-        gap: 8,
+        whiteSpace: "nowrap",
       })}
     >
       {label}
@@ -172,9 +174,7 @@ function MinimalAuthScreen() {
         }}
       >
         <div style={{ fontSize: 22, fontWeight: 900, marginBottom: 8 }}>SceneBuilder</div>
-        <div style={{ opacity: 0.75, lineHeight: 1.4, marginBottom: 14 }}>
-          Sign in to continue.
-        </div>
+        <div style={{ opacity: 0.75, lineHeight: 1.4, marginBottom: 14 }}>Sign in to continue.</div>
 
         {err ? (
           <div
@@ -214,120 +214,140 @@ function MinimalAuthScreen() {
   );
 }
 
-function PartnersPlaceholder() {
-  const navigate = useNavigate();
-
-  return (
-    <div style={{ minHeight: "60vh", padding: 16, color: "#f3f3f7" }}>
-      <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 8 }}>Partners</div>
-      <div style={{ lineHeight: 1.4, opacity: 0.75, marginBottom: 14 }}>Coming soon.</div>
-      <button
-        type="button"
-        onClick={() => navigate("/settings")}
-        style={{
-          padding: "10px 12px",
-          borderRadius: 12,
-          border: "1px solid rgba(255,255,255,0.18)",
-          background: "rgba(255,255,255,0.06)",
-          color: "#f3f3f7",
-          cursor: "pointer",
-          fontWeight: 800,
-        }}
-      >
-        Back to Settings
-      </button>
-    </div>
-  );
+function HomeRedirect() {
+  // Keep /home stable; point it at /scenes for now.
+  return <Navigate to="/scenes" replace />;
 }
 
-function AuthedApp({ session }) {
+function AuthedShell({ session }) {
   const location = useLocation();
 
-  const showTabs = useMemo(() => {
+  const showShell = useMemo(() => {
     const p = location.pathname || "";
     if (p.startsWith("/auth")) return false;
-    if (p.startsWith("/onboarding")) return false;
     return true;
   }, [location.pathname]);
 
   return (
-    <div style={{ minHeight: "100vh", paddingBottom: showTabs ? 74 : 0 }}>
-      <ErrorBoundary>
-        <Routes>
-          <Route path="/home" element={<Navigate to="/scenes" replace />} />
-
-          {/* Scenes */}
-          <Route path="/scenes" element={<ScenesHome supabase={supabase} />} />
-          <Route path="/scenes/new" element={<SceneCreate supabase={supabase} session={session} />} />
-          <Route path="/scenes/:id" element={<SceneView supabase={supabase} session={session} />} />
-          <Route path="/scenes/:id/edit" element={<SceneEdit supabase={supabase} session={session} />} />
-
-          {/* Tools */}
-          <Route path="/tools" element={<ToolsHome supabase={supabase} />} />
-
-          {/* Journal */}
-          <Route path="/journal" element={<JournalHome supabase={supabase} session={session} />} />
-          <Route path="/journal/:id" element={<JournalEntryView supabase={supabase} session={session} />} />
-
-          {/* Settings */}
-          <Route path="/settings" element={<SettingsHome supabase={supabase} />} />
-          <Route
-            path="/settings/action-vocabulary"
-            element={<ActionVocabularyScreen supabase={supabase} session={session} />}
-          />
-          <Route
-            path="/settings/kink-preferences"
-            element={<KinkPreferencesScreen supabase={supabase} session={session} mode="settings" />}
-          />
-          <Route path="/settings/partners" element={<PartnersPlaceholder />} />
-
-          {/* Profile */}
-          <Route path="/profile" element={<ProfileScreen supabase={supabase} session={session} />} />
-          <Route
-            path="/profile/kinks"
-            element={<KinkPreferencesScreen supabase={supabase} session={session} mode="profile" />}
-          />
-
-          {/* Onboarding */}
-          <Route
-            path="/onboarding"
-            element={<KinkPreferencesScreen supabase={supabase} session={session} mode="onboarding" />}
-          />
-
-          {/* Default */}
-          <Route path="/" element={<Navigate to="/scenes" replace />} />
-          <Route path="*" element={<Navigate to="/scenes" replace />} />
-        </Routes>
-      </ErrorBoundary>
-
-      {showTabs ? (
-        <nav
-          style={{
-            position: "fixed",
-            left: 0,
-            right: 0,
-            bottom: 0,
-            padding: "10px 12px",
-            borderTop: "1px solid rgba(255,255,255,0.08)",
-            background: "rgba(0,0,0,0.55)",
-            backdropFilter: "blur(10px)",
-            WebkitBackdropFilter: "blur(10px)",
-          }}
-        >
+    <div style={{ minHeight: "100vh" }}>
+      {showShell ? (
+        <>
+          {/* TOP: primary tabs (always) */}
           <div
             style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr 1fr",
-              gap: 10,
-              maxWidth: 720,
-              margin: "0 auto",
+              position: "sticky",
+              top: 0,
+              zIndex: 50,
+              padding: "10px 12px",
+              borderBottom: "1px solid rgba(255,255,255,0.08)",
+              background: "rgba(0,0,0,0.60)",
+              backdropFilter: "blur(10px)",
+              WebkitBackdropFilter: "blur(10px)",
             }}
           >
-            <TabLink to="/scenes" label="Scenes" />
-            <TabLink to="/tools" label="Tools" />
-            <TabLink to="/journal" label="Journal" />
+            <div
+              style={{
+                maxWidth: 720,
+                margin: "0 auto",
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr 1fr",
+                gap: 10,
+              }}
+            >
+              <PillLink to="/scenes" label="Scenes" end />
+              <PillLink to="/tools" label="Tools" end />
+              <PillLink to="/journal" label="Journal" end />
+            </div>
+
+            {/* Contextual actions row will live inside each screen for now.
+                Later we can lift it into the shell once we migrate TopBar usage. */}
           </div>
-        </nav>
+        </>
+      ) : null}
+
+      {/* Content */}
+      <div style={{ paddingBottom: showShell ? 74 : 0 }}>
+        <ErrorBoundary>
+          <Routes>
+            <Route path="/home" element={<HomeRedirect />} />
+
+            {/* Scenes */}
+            <Route path="/scenes" element={<ScenesHome supabase={supabase} />} />
+            <Route path="/scenes/new" element={<SceneCreate supabase={supabase} session={session} />} />
+            <Route path="/scenes/:id" element={<SceneView supabase={supabase} session={session} />} />
+            <Route path="/scenes/:id/edit" element={<SceneEdit supabase={supabase} session={session} />} />
+
+            {/* Tools */}
+            <Route path="/tools" element={<ToolsHome supabase={supabase} />} />
+
+            {/* Journal */}
+            <Route path="/journal" element={<JournalHome supabase={supabase} session={session} />} />
+            <Route path="/journal/:id" element={<JournalEntryView supabase={supabase} session={session} />} />
+
+            {/* Settings */}
+            <Route path="/settings" element={<SettingsHome supabase={supabase} />} />
+            <Route
+              path="/settings/action-vocabulary"
+              element={<ActionVocabularyScreen supabase={supabase} session={session} />}
+            />
+            <Route
+              path="/settings/kink-preferences"
+              element={<KinkPreferencesScreen supabase={supabase} session={session} mode="settings" />}
+            />
+            <Route path="/settings/partners" element={<div style={{ padding: 16, opacity: 0.75 }}>Coming soon.</div>} />
+
+            {/* Profile */}
+            <Route path="/profile" element={<ProfileScreen supabase={supabase} session={session} />} />
+            <Route
+              path="/profile/kinks"
+              element={<KinkPreferencesScreen supabase={supabase} session={session} mode="profile" />}
+            />
+
+            {/* Onboarding */}
+            <Route
+              path="/onboarding"
+              element={<KinkPreferencesScreen supabase={supabase} session={session} mode="onboarding" />}
+            />
+
+            {/* Default */}
+            <Route path="/" element={<Navigate to="/home" replace />} />
+            <Route path="*" element={<Navigate to="/home" replace />} />
+          </Routes>
+        </ErrorBoundary>
+      </div>
+
+      {showShell ? (
+        <>
+          {/* BOTTOM: utility nav */}
+          <nav
+            style={{
+              position: "fixed",
+              left: 0,
+              right: 0,
+              bottom: 0,
+              zIndex: 60,
+              padding: "10px 12px",
+              borderTop: "1px solid rgba(255,255,255,0.08)",
+              background: "rgba(0,0,0,0.55)",
+              backdropFilter: "blur(10px)",
+              WebkitBackdropFilter: "blur(10px)",
+            }}
+          >
+            <div
+              style={{
+                maxWidth: 720,
+                margin: "0 auto",
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr 1fr",
+                gap: 10,
+              }}
+            >
+              <PillLink to="/home" label="Home" end />
+              <PillLink to="/settings" label="Settings" end />
+              <PillLink to="/profile" label="Profile" end />
+            </div>
+          </nav>
+        </>
       ) : null}
     </div>
   );
@@ -373,7 +393,7 @@ export default function App() {
           </>
         ) : (
           <>
-            <Route path="/*" element={<AuthedApp session={session} />} />
+            <Route path="/*" element={<AuthedShell session={session} />} />
           </>
         )}
       </Routes>
