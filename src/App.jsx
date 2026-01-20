@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { NavLink, Route, Routes, Navigate, useLocation } from "react-router-dom";
+import { NavLink, Route, Routes, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { supabase } from "./lib/supabaseClient";
 
 import ScenesHome from "./screens/scenes/ScenesHome";
@@ -17,6 +17,96 @@ import ActionVocabularyScreen from "./screens/profile/ActionVocabularyScreen";
 import KinkPreferencesScreen from "./screens/KinkPreferencesScreen";
 
 import ProfileScreen from "./screens/ProfileScreen";
+
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, message: "" };
+  }
+
+  static getDerivedStateFromError(err) {
+    return { hasError: true, message: err?.message || String(err) };
+  }
+
+  componentDidCatch(err, info) {
+    // Keep a breadcrumb in console for debugging (Vercel + browser console)
+    // eslint-disable-next-line no-console
+    console.error("UI crashed:", err, info);
+  }
+
+  render() {
+    if (!this.state.hasError) return this.props.children;
+
+    return (
+      <div style={{ minHeight: "100vh", padding: 16, display: "grid", placeItems: "center" }}>
+        <div
+          style={{
+            width: "100%",
+            maxWidth: 720,
+            borderRadius: 16,
+            border: "1px solid rgba(255,80,80,0.30)",
+            background: "rgba(255,80,80,0.08)",
+            padding: 16,
+            color: "#f3f3f7",
+          }}
+        >
+          <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 8 }}>Something broke</div>
+          <div style={{ opacity: 0.9, lineHeight: 1.4, marginBottom: 14 }}>
+            The UI hit an error and stopped rendering.
+          </div>
+
+          <div
+            style={{
+              fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+              fontSize: 12,
+              opacity: 0.95,
+              whiteSpace: "pre-wrap",
+              padding: 12,
+              borderRadius: 12,
+              border: "1px solid rgba(255,255,255,0.12)",
+              background: "rgba(0,0,0,0.30)",
+              marginBottom: 14,
+            }}
+          >
+            {this.state.message}
+          </div>
+
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <a
+              href="/scenes"
+              style={{
+                padding: "10px 12px",
+                borderRadius: 12,
+                border: "1px solid rgba(255,255,255,0.18)",
+                background: "rgba(255,255,255,0.06)",
+                color: "#f3f3f7",
+                fontWeight: 800,
+                textDecoration: "none",
+              }}
+            >
+              Go to Scenes
+            </a>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              style={{
+                padding: "10px 12px",
+                borderRadius: 12,
+                border: "1px solid rgba(255,255,255,0.18)",
+                background: "rgba(255,255,255,0.06)",
+                color: "#f3f3f7",
+                fontWeight: 800,
+                cursor: "pointer",
+              }}
+            >
+              Reload
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+}
 
 function TabLink({ to, label }) {
   return (
@@ -51,9 +141,7 @@ function MinimalAuthScreen() {
     try {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
-        options: {
-          redirectTo: window.location.origin,
-        },
+        options: { redirectTo: window.location.origin },
       });
       if (error) throw error;
     } catch (e) {
@@ -72,12 +160,11 @@ function MinimalAuthScreen() {
           border: "1px solid rgba(255,255,255,0.10)",
           background: "rgba(255,255,255,0.03)",
           padding: 16,
+          color: "#f3f3f7",
         }}
       >
         <div style={{ fontSize: 22, fontWeight: 900, marginBottom: 8 }}>SceneBuilder</div>
-        <div style={{ opacity: 0.75, lineHeight: 1.4, marginBottom: 14 }}>
-          Sign in to continue.
-        </div>
+        <div style={{ opacity: 0.75, lineHeight: 1.4, marginBottom: 14 }}>Sign in to continue.</div>
 
         {err ? (
           <div
@@ -117,22 +204,16 @@ function MinimalAuthScreen() {
   );
 }
 
-function PartnersPlaceholder({ supabase: sb }) {
-  async function signOut() {
-    await sb.auth.signOut();
-  }
+function PartnersPlaceholder() {
+  const navigate = useNavigate();
 
-  // Using your existing TopBar via SettingsHome navigation is enough;
-  // keep this page simple to avoid extra imports.
   return (
-    <div style={{ padding: 16, opacity: 0.85 }}>
+    <div style={{ minHeight: "60vh", padding: 16, color: "#f3f3f7" }}>
       <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 8 }}>Partners</div>
-      <div style={{ lineHeight: 1.4, opacity: 0.75, marginBottom: 14 }}>
-        Coming soon.
-      </div>
+      <div style={{ lineHeight: 1.4, opacity: 0.75, marginBottom: 14 }}>Coming soon.</div>
       <button
         type="button"
-        onClick={signOut}
+        onClick={() => navigate("/settings")}
         style={{
           padding: "10px 12px",
           borderRadius: 12,
@@ -143,7 +224,7 @@ function PartnersPlaceholder({ supabase: sb }) {
           fontWeight: 800,
         }}
       >
-        Sign out
+        Back to Settings
       </button>
     </div>
   );
@@ -161,51 +242,53 @@ function AuthedApp({ session }) {
 
   return (
     <div style={{ minHeight: "100vh", paddingBottom: showTabs ? 74 : 0 }}>
-      <Routes>
-        <Route path="/home" element={<Navigate to="/scenes" replace />} />
+      <ErrorBoundary>
+        <Routes>
+          <Route path="/home" element={<Navigate to="/scenes" replace />} />
 
-        {/* Scenes */}
-        <Route path="/scenes" element={<ScenesHome supabase={supabase} />} />
-        <Route path="/scenes/new" element={<SceneCreate supabase={supabase} session={session} />} />
-        <Route path="/scenes/:id" element={<SceneView supabase={supabase} session={session} />} />
-        <Route path="/scenes/:id/edit" element={<SceneEdit supabase={supabase} session={session} />} />
+          {/* Scenes */}
+          <Route path="/scenes" element={<ScenesHome supabase={supabase} />} />
+          <Route path="/scenes/new" element={<SceneCreate supabase={supabase} session={session} />} />
+          <Route path="/scenes/:id" element={<SceneView supabase={supabase} session={session} />} />
+          <Route path="/scenes/:id/edit" element={<SceneEdit supabase={supabase} session={session} />} />
 
-        {/* Tools */}
-        <Route path="/tools" element={<ToolsHome supabase={supabase} />} />
+          {/* Tools */}
+          <Route path="/tools" element={<ToolsHome supabase={supabase} />} />
 
-        {/* Journal */}
-        <Route path="/journal" element={<JournalHome supabase={supabase} session={session} />} />
-        <Route path="/journal/:id" element={<JournalEntryView supabase={supabase} session={session} />} />
+          {/* Journal */}
+          <Route path="/journal" element={<JournalHome supabase={supabase} session={session} />} />
+          <Route path="/journal/:id" element={<JournalEntryView supabase={supabase} session={session} />} />
 
-        {/* Settings */}
-        <Route path="/settings" element={<SettingsHome supabase={supabase} />} />
-        <Route
-          path="/settings/action-vocabulary"
-          element={<ActionVocabularyScreen supabase={supabase} session={session} />}
-        />
-        <Route
-          path="/settings/kink-preferences"
-          element={<KinkPreferencesScreen supabase={supabase} session={session} mode="settings" />}
-        />
-        <Route path="/settings/partners" element={<PartnersPlaceholder supabase={supabase} />} />
+          {/* Settings */}
+          <Route path="/settings" element={<SettingsHome supabase={supabase} />} />
+          <Route
+            path="/settings/action-vocabulary"
+            element={<ActionVocabularyScreen supabase={supabase} session={session} />}
+          />
+          <Route
+            path="/settings/kink-preferences"
+            element={<KinkPreferencesScreen supabase={supabase} session={session} mode="settings" />}
+          />
+          <Route path="/settings/partners" element={<PartnersPlaceholder />} />
 
-        {/* Profile */}
-        <Route path="/profile" element={<ProfileScreen supabase={supabase} session={session} />} />
-        <Route
-          path="/profile/kinks"
-          element={<KinkPreferencesScreen supabase={supabase} session={session} mode="profile" />}
-        />
+          {/* Profile */}
+          <Route path="/profile" element={<ProfileScreen supabase={supabase} session={session} />} />
+          <Route
+            path="/profile/kinks"
+            element={<KinkPreferencesScreen supabase={supabase} session={session} mode="profile" />}
+          />
 
-        {/* Onboarding */}
-        <Route
-          path="/onboarding"
-          element={<KinkPreferencesScreen supabase={supabase} session={session} mode="onboarding" />}
-        />
+          {/* Onboarding */}
+          <Route
+            path="/onboarding"
+            element={<KinkPreferencesScreen supabase={supabase} session={session} mode="onboarding" />}
+          />
 
-        {/* Default */}
-        <Route path="/" element={<Navigate to="/scenes" replace />} />
-        <Route path="*" element={<Navigate to="/scenes" replace />} />
-      </Routes>
+          {/* Default */}
+          <Route path="/" element={<Navigate to="/scenes" replace />} />
+          <Route path="*" element={<Navigate to="/scenes" replace />} />
+        </Routes>
+      </ErrorBoundary>
 
       {showTabs ? (
         <nav
@@ -268,9 +351,7 @@ export default function App() {
     };
   }, []);
 
-  if (loading) {
-    return <div style={{ padding: 16, opacity: 0.8 }}>Loading…</div>;
-  }
+  if (loading) return <div style={{ padding: 16, opacity: 0.8 }}>Loading…</div>;
 
   return (
     <Routes>
