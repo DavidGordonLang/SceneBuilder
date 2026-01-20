@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAvatarUpload } from "../hooks/useAvatarUpload";
 import { useProfile } from "../hooks/useProfile";
 
@@ -104,6 +104,8 @@ function TextArea(props) {
 
 export default function ProfileScreen({ session, supabase }) {
   const navigate = useNavigate();
+  const location = useLocation();
+
   const userId = session?.user?.id;
 
   const { profile, loading, error, updateProfile } = useProfile({ supabase, userId });
@@ -118,6 +120,19 @@ export default function ProfileScreen({ session, supabase }) {
   const [localErr, setLocalErr] = useState("");
   const [localOk, setLocalOk] = useState("");
 
+  // View vs Edit mode
+  const searchParams = new URLSearchParams(location.search || "");
+  const from = searchParams.get("from") || "";
+  const shouldStartEditing = searchParams.get("edit") === "1";
+
+  const [editing, setEditing] = useState(shouldStartEditing);
+
+  useEffect(() => {
+    setEditing(shouldStartEditing);
+  }, [shouldStartEditing]);
+
+  const backTo = from === "settings" ? "/settings" : "/scenes";
+
   const initials = useMemo(() => {
     const base = (profile?.display_name || session?.user?.email || "U").trim();
     return base.slice(0, 1).toUpperCase();
@@ -128,7 +143,6 @@ export default function ProfileScreen({ session, supabase }) {
     setBio(profile?.bio || "");
   }, [profile?.display_name, profile?.bio]);
 
-  // Create signed URL for private avatar bucket
   useEffect(() => {
     let cancelled = false;
 
@@ -141,7 +155,7 @@ export default function ProfileScreen({ session, supabase }) {
       try {
         const { data, error: sErr } = await supabase.storage
           .from("avatars")
-          .createSignedUrl(path, 60 * 60); // 1 hour
+          .createSignedUrl(path, 60 * 60);
 
         if (sErr) throw sErr;
         if (!cancelled) setSignedAvatarUrl(data?.signedUrl || "");
@@ -168,10 +182,36 @@ export default function ProfileScreen({ session, supabase }) {
       });
 
       setLocalOk("Saved.");
+      setEditing(false);
+
+      // Strip edit params after save so refresh stays clean
+      if (location.search) {
+        navigate("/profile", { replace: true });
+      }
     } catch (e) {
       setLocalErr(e?.message || "Save failed.");
     } finally {
       setBusySave(false);
+    }
+  }
+
+  function handleStartEdit() {
+    setLocalErr("");
+    setLocalOk("");
+    setEditing(true);
+  }
+
+  function handleCancelEdit() {
+    setLocalErr("");
+    setLocalOk("");
+    // revert drafts to stored profile values
+    setDisplayName(profile?.display_name || "");
+    setBio(profile?.bio || "");
+    setEditing(false);
+
+    // If we came in via settings intent, clean URL to standard /profile
+    if (location.search) {
+      navigate("/profile", { replace: true });
     }
   }
 
@@ -192,7 +232,6 @@ export default function ProfileScreen({ session, supabase }) {
       const path = await uploadAvatar(file);
       await updateProfile({ avatar_url: path });
 
-      // Refresh signed URL immediately
       const { data } = await supabase.storage.from("avatars").createSignedUrl(path, 60 * 60);
       setSignedAvatarUrl(data?.signedUrl || "");
 
@@ -200,7 +239,6 @@ export default function ProfileScreen({ session, supabase }) {
     } catch (err) {
       setLocalErr(err?.message || "Avatar update failed.");
     } finally {
-      // allow re-selecting same file
       e.target.value = "";
     }
   }
@@ -213,12 +251,24 @@ export default function ProfileScreen({ session, supabase }) {
         title="Profile"
         rightSlot={
           <div style={{ display: "flex", gap: 8 }}>
-            <SmallButton asLink to="/scenes">
+            <SmallButton asLink to={backTo}>
               Back
             </SmallButton>
-            <SmallButton onClick={handleSave} disabled={busy}>
-              {busySave ? "Saving..." : "Save"}
-            </SmallButton>
+
+            {!editing ? (
+              <SmallButton onClick={handleStartEdit} disabled={busy}>
+                Edit profile
+              </SmallButton>
+            ) : (
+              <>
+                <SmallButton onClick={handleCancelEdit} disabled={busy}>
+                  Cancel
+                </SmallButton>
+                <SmallButton onClick={handleSave} disabled={busy}>
+                  {busySave ? "Saving..." : "Save"}
+                </SmallButton>
+              </>
+            )}
           </div>
         }
       />
@@ -302,17 +352,13 @@ export default function ProfileScreen({ session, supabase }) {
                 {uploading ? "Uploading..." : "Change avatar"}
               </SmallButton>
 
-              <SmallButton
-                asLink
-                to="/profile/kinks"
-              >
+              <SmallButton asLink to="/profile/kinks">
                 Edit kink preferences
               </SmallButton>
             </div>
 
             <div style={{ fontSize: 12, opacity: 0.6 }}>
-              Onboarding:{" "}
-              <b>{profile?.onboarding_complete ? "Complete" : "Not complete"}</b>
+              Onboarding: <b>{profile?.onboarding_complete ? "Complete" : "Not complete"}</b>
             </div>
           </div>
 
@@ -325,25 +371,40 @@ export default function ProfileScreen({ session, supabase }) {
           />
         </div>
 
-        <div style={{ display: "grid", gap: 12 }}>
-          <Field label="Display name">
-            <Input
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              placeholder="e.g. David"
-              maxLength={120}
-            />
-          </Field>
+        {/* Edit fields */}
+        {editing ? (
+          <div style={{ display: "grid", gap: 12 }}>
+            <Field label="Display name">
+              <Input
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                placeholder="e.g. David"
+                maxLength={120}
+              />
+            </Field>
 
-          <Field label="Short bio" hint={`${(bio || "").length}/140`}>
-            <TextArea
-              value={bio}
-              onChange={(e) => setBio(e.target.value)}
-              placeholder="Optional. Max 140 characters."
-              maxLength={140}
-            />
-          </Field>
-        </div>
+            <Field label="Short bio" hint={`${(bio || "").length}/140`}>
+              <TextArea
+                value={bio}
+                onChange={(e) => setBio(e.target.value)}
+                placeholder="Optional. Max 140 characters."
+                maxLength={140}
+              />
+            </Field>
+          </div>
+        ) : (
+          <div style={{ display: "grid", gap: 10, opacity: 0.9 }}>
+            <div>
+              <div style={{ fontSize: 12, opacity: 0.7, fontWeight: 700 }}>Display name</div>
+              <div style={{ marginTop: 4 }}>{profile?.display_name || "—"}</div>
+            </div>
+
+            <div>
+              <div style={{ fontSize: 12, opacity: 0.7, fontWeight: 700 }}>Bio</div>
+              <div style={{ marginTop: 4, opacity: 0.9 }}>{profile?.bio || "—"}</div>
+            </div>
+          </div>
+        )}
 
         {!profile?.onboarding_complete ? (
           <div
