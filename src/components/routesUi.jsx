@@ -1,6 +1,46 @@
 import React from "react";
 import { Link, useNavigate } from "react-router-dom";
 
+const TOPBAR_ICON_SIZE = 40;
+
+function iconButtonStyle() {
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: TOPBAR_ICON_SIZE,
+    height: TOPBAR_ICON_SIZE,
+    borderRadius: 12,
+    border: "1px solid rgba(255,255,255,0.18)",
+    background: "rgba(255,255,255,0.06)",
+    color: "#f3f3f7",
+    textDecoration: "none",
+    fontSize: 16,
+  };
+}
+
+function IconLink({ to, label, title, children }) {
+  return (
+    <Link to={to} aria-label={label} title={title} style={iconButtonStyle()}>
+      {children}
+    </Link>
+  );
+}
+
+function IconButton({ onClick, label, title, children }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      title={title}
+      style={{ ...iconButtonStyle(), cursor: "pointer" }}
+    >
+      {children}
+    </button>
+  );
+}
+
 export function TopBar({ title, onSignOut, rightSlot, showBack = false, backTo }) {
   const navigate = useNavigate();
 
@@ -15,120 +55,79 @@ export function TopBar({ title, onSignOut, rightSlot, showBack = false, backTo }
         padding: 16,
         paddingTop: 18,
         borderBottom: "1px solid rgba(255,255,255,0.08)",
-        display: "flex",
+        display: "grid",
         alignItems: "center",
-        justifyContent: "space-between",
         gap: 12,
+        gridTemplateColumns: `${TOPBAR_ICON_SIZE}px 1fr auto`,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      {/* Left: reserve fixed space so the title doesn't shift when back is absent */}
+      <div style={{ width: TOPBAR_ICON_SIZE, display: "flex", alignItems: "center" }}>
         {showBack ? (
-          <button
-            type="button"
-            onClick={handleBack}
-            aria-label="Back"
-            title="Back"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: 34,
-              height: 34,
-              borderRadius: 10,
-              border: "1px solid rgba(255,255,255,0.18)",
-              background: "rgba(255,255,255,0.06)",
-              color: "#f3f3f7",
-              cursor: "pointer",
-              fontSize: 16,
-            }}
-          >
+          <IconButton onClick={handleBack} label="Back" title="Back">
             ←
-          </button>
+          </IconButton>
         ) : null}
-
-        <h1 style={{ margin: 0, fontSize: 22 }}>{title}</h1>
       </div>
 
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        {/* Home (routes to /home, which currently redirects to /scenes) */}
-        <Link
-          to="/home"
-          aria-label="Home"
-          title="Home"
+      {/* Center: title */}
+      <div style={{ minWidth: 0 }}>
+        <h1
           style={{
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            width: 34,
-            height: 34,
-            borderRadius: 10,
-            border: "1px solid rgba(255,255,255,0.18)",
-            background: "rgba(255,255,255,0.06)",
-            color: "#f3f3f7",
-            textDecoration: "none",
-            fontSize: 16,
+            margin: 0,
+            fontSize: 22,
+            lineHeight: 1.15,
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
           }}
         >
+          {title}
+        </h1>
+      </div>
+
+      {/* Right: actions + stable nav cluster */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "flex-end",
+          gap: 8,
+          minWidth: 0,
+        }}
+      >
+        {rightSlot ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>{rightSlot}</div>
+        ) : null}
+
+        {/* Home (routes to /home, which currently redirects to /scenes) */}
+        <IconLink to="/home" label="Home" title="Home">
           ⌂
-        </Link>
+        </IconLink>
 
         {/* Settings */}
-        <Link
-          to="/settings"
-          aria-label="Settings"
-          title="Settings"
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            width: 34,
-            height: 34,
-            borderRadius: 10,
-            border: "1px solid rgba(255,255,255,0.18)",
-            background: "rgba(255,255,255,0.06)",
-            color: "#f3f3f7",
-            textDecoration: "none",
-            fontSize: 16,
-          }}
-        >
+        <IconLink to="/settings" label="Settings" title="Settings">
           ⚙️
-        </Link>
+        </IconLink>
 
         {/* Profile */}
-        <Link
-          to="/profile"
-          aria-label="Profile"
-          title="Profile"
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            width: 34,
-            height: 34,
-            borderRadius: 10,
-            border: "1px solid rgba(255,255,255,0.18)",
-            background: "rgba(255,255,255,0.06)",
-            color: "#f3f3f7",
-            textDecoration: "none",
-            fontSize: 16,
-          }}
-        >
+        <IconLink to="/profile" label="Profile" title="Profile">
           👤
-        </Link>
-
-        {rightSlot}
+        </IconLink>
 
         <button
           onClick={onSignOut}
           style={{
-            padding: "8px 10px",
-            borderRadius: 10,
+            padding: "10px 12px",
+            borderRadius: 12,
             border: "1px solid rgba(255,255,255,0.18)",
             background: "rgba(255,255,255,0.06)",
             color: "#f3f3f7",
             cursor: "pointer",
             fontSize: 12,
             fontWeight: 650,
+            lineHeight: 1,
+            whiteSpace: "nowrap",
           }}
         >
           Sign out
@@ -157,7 +156,15 @@ export function Chip({ children }) {
   );
 }
 
-export function SmallButton({ children, onClick, disabled, title, tone = "neutral" }) {
+export function SmallButton({
+  children,
+  onClick,
+  disabled,
+  title,
+  tone = "neutral",
+  asLink = false,
+  to,
+}) {
   const toneStyle =
     tone === "danger"
       ? {
@@ -169,22 +176,39 @@ export function SmallButton({ children, onClick, disabled, title, tone = "neutra
           background: disabled ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.08)",
         };
 
+  const baseStyle = {
+    padding: "8px 10px",
+    borderRadius: 10,
+    color: "#f3f3f7",
+    cursor: disabled ? "not-allowed" : "pointer",
+    fontSize: 12,
+    fontWeight: 700,
+    opacity: disabled ? 0.55 : 1,
+    textDecoration: "none",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    ...toneStyle,
+  };
+
+  if (asLink) {
+    return (
+      <Link
+        to={to}
+        title={title}
+        style={baseStyle}
+        aria-disabled={disabled ? "true" : "false"}
+        onClick={(e) => {
+          if (disabled) e.preventDefault();
+        }}
+      >
+        {children}
+      </Link>
+    );
+  }
+
   return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      style={{
-        padding: "8px 10px",
-        borderRadius: 10,
-        color: "#f3f3f7",
-        cursor: disabled ? "not-allowed" : "pointer",
-        fontSize: 12,
-        fontWeight: 700,
-        opacity: disabled ? 0.55 : 1,
-        ...toneStyle,
-      }}
-    >
+    <button onClick={onClick} disabled={disabled} title={title} style={baseStyle}>
       {children}
     </button>
   );
