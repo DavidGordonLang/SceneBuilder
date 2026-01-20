@@ -1,17 +1,13 @@
 import React, { useEffect, useState } from "react";
-import { TopBar, Chip, Card, SmallButton } from "../../components/routesUi";
+import { Chip, Card, SmallButton } from "../../components/routesUi";
 import Page from "../../components/Page";
 import { fetchScenes } from "../../lib/scenesApi";
 import { formatDate } from "../../lib/sceneHelpers";
 
-export default function ScenesHome({ supabase }) {
+export default function ScenesHome() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [scenes, setScenes] = useState([]);
-
-  async function signOut() {
-    await supabase.auth.signOut();
-  }
 
   async function reload() {
     setLoading(true);
@@ -40,16 +36,24 @@ export default function ScenesHome({ supabase }) {
 
   return (
     <div>
-      <TopBar
-        title="Scenes"
-        onSignOut={signOut}
-        rightSlot={<SmallButton asLink to="/scenes/new">+ New</SmallButton>}
-      />
-
       <Page style={{ display: "grid", gap: 12 }}>
-        {loading ? (
-          <div style={{ opacity: 0.8 }}>Loading scenes…</div>
-        ) : err ? (
+        {/* Contextual actions row (no page title) */}
+        <div style={{ display: "flex", gap: 10, justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <SmallButton asLink to="/scenes/new">
+              + New scene
+            </SmallButton>
+            <SmallButton onClick={reload} disabled={loading}>
+              {loading ? "Loading…" : "Refresh"}
+            </SmallButton>
+          </div>
+
+          <div style={{ fontSize: 12, opacity: 0.7 }}>
+            {loading ? "Loading scenes…" : `${scenes.length} scene${scenes.length === 1 ? "" : "s"}`}
+          </div>
+        </div>
+
+        {err ? (
           <div
             style={{
               padding: 12,
@@ -61,7 +65,9 @@ export default function ScenesHome({ supabase }) {
           >
             {err}
           </div>
-        ) : scenes.length === 0 ? (
+        ) : null}
+
+        {!loading && !err && scenes.length === 0 ? (
           <div
             style={{
               padding: 12,
@@ -74,48 +80,57 @@ export default function ScenesHome({ supabase }) {
           >
             No scenes yet.
             <div style={{ marginTop: 10 }}>
-              <SmallButton asLink to="/scenes/new">
-                Create your first scene
-              </SmallButton>
+              <SmallButton asLink to="/scenes/new">Create your first scene</SmallButton>
             </div>
           </div>
         ) : (
           <div style={{ display: "grid", gap: 12 }}>
-            {scenes.map((s) => {
-              const title = s.title || "Untitled scene";
-              const status = (s.status || "DRAFT").toUpperCase();
-              const when =
-                s.scheduled_for ? formatDate(s.scheduled_for) : s.started_at ? formatDate(s.started_at) : "";
+            {loading ? <div style={{ opacity: 0.8 }}>Loading scenes…</div> : null}
 
-              return (
-                <Card key={s.id} asLink to={`/scenes/${s.id}`}>
-                  <div style={{ display: "grid", gap: 6 }}>
-                    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
-                      <div style={{ minWidth: 0 }}>
+            {!loading
+              ? scenes.map((s) => {
+                  const title = s.title || "Untitled scene";
+                  const status = (s.status || "DRAFT").toUpperCase();
+                  const when =
+                    s.scheduled_for ? formatDate(s.scheduled_for) : s.started_at ? formatDate(s.started_at) : "";
+
+                  return (
+                    <Card key={s.id} asLink to={`/scenes/${s.id}`}>
+                      <div style={{ display: "grid", gap: 6 }}>
                         <div
                           style={{
-                            fontSize: 16,
-                            fontWeight: 800,
-                            letterSpacing: 0.2,
-                            whiteSpace: "nowrap",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
+                            display: "flex",
+                            alignItems: "flex-start",
+                            justifyContent: "space-between",
+                            gap: 12,
                           }}
                         >
-                          {title}
-                        </div>
-                        <div style={{ marginTop: 2, fontSize: 12, opacity: 0.7 }}>
-                          {when ? when : "—"}
+                          <div style={{ minWidth: 0 }}>
+                            <div
+                              style={{
+                                fontSize: 16,
+                                fontWeight: 800,
+                                letterSpacing: 0.2,
+                                whiteSpace: "nowrap",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                              }}
+                            >
+                              {title}
+                            </div>
+                            <div style={{ marginTop: 2, fontSize: 12, opacity: 0.7 }}>
+                              {when ? when : "—"}
+                            </div>
+                          </div>
+                          <div style={{ display: "flex", alignItems: "flex-start" }}>
+                            <Chip>{status}</Chip>
+                          </div>
                         </div>
                       </div>
-                      <div style={{ display: "flex", alignItems: "flex-start" }}>
-                        <Chip>{status}</Chip>
-                      </div>
-                    </div>
-                  </div>
-                </Card>
-              );
-            })}
+                    </Card>
+                  );
+                })
+              : null}
           </div>
         )}
       </Page>
