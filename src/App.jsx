@@ -13,7 +13,6 @@ import JournalHome from "./screens/journal/JournalHome";
 import JournalEntryView from "./screens/journal/JournalEntryView";
 
 import SettingsHome from "./screens/settings/SettingsHome";
-import ActionVocabularyScreen from "./screens/settings/ActionVocabularyScreen";
 import KinkPreferencesScreen from "./screens/settings/KinkPreferencesScreen";
 import PartnersScreen from "./screens/settings/PartnersScreen";
 
@@ -48,7 +47,6 @@ function AuthedApp({ session }) {
 
   const showTabs = useMemo(() => {
     const p = location.pathname || "";
-    // Hide tabs on login or onboarding flows if needed
     if (p.startsWith("/auth")) return false;
     if (p.startsWith("/onboarding")) return false;
     return true;
@@ -57,7 +55,6 @@ function AuthedApp({ session }) {
   return (
     <div style={{ minHeight: "100vh", paddingBottom: showTabs ? 74 : 0 }}>
       <Routes>
-        {/* Home is stable and can be repointed later */}
         <Route path="/home" element={<Navigate to="/scenes" replace />} />
 
         {/* Scenes */}
@@ -75,7 +72,6 @@ function AuthedApp({ session }) {
 
         {/* Settings */}
         <Route path="/settings" element={<SettingsHome supabase={supabase} />} />
-        <Route path="/settings/action-vocabulary" element={<ActionVocabularyScreen supabase={supabase} session={session} />} />
         <Route
           path="/settings/kink-preferences"
           element={<KinkPreferencesScreen supabase={supabase} session={session} mode="settings" />}
@@ -156,11 +152,7 @@ export default function App() {
   }, []);
 
   if (loading) {
-    return (
-      <div style={{ padding: 16, opacity: 0.8 }}>
-        Loading…
-      </div>
-    );
+    return <div style={{ padding: 16, opacity: 0.8 }}>Loading…</div>;
   }
 
   return (
