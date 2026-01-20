@@ -1,70 +1,10 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
+import { TopBar, Card, SmallButton } from "../components/routesUi";
 import { useKinkCatalogue } from "../hooks/useKinkCatalogue";
 import { useKinkPreferences } from "../hooks/useKinkPreferences";
 import { useProfile } from "../hooks/useProfile";
 import KinkChecklist from "../components/KinkChecklist";
-
-function TopBarLite({ title, rightSlot }) {
-  return (
-    <div
-      style={{
-        padding: 16,
-        paddingTop: 18,
-        borderBottom: "1px solid rgba(255,255,255,0.08)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: 12,
-      }}
-    >
-      <h1 style={{ margin: 0, fontSize: 22 }}>{title}</h1>
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>{rightSlot}</div>
-    </div>
-  );
-}
-
-function SmallButton({ children, onClick, disabled, asLink, to, tone = "neutral" }) {
-  const toneStyle =
-    tone === "danger"
-      ? {
-          border: "1px solid rgba(255,80,80,0.25)",
-          background: disabled ? "rgba(255,80,80,0.06)" : "rgba(255,80,80,0.10)",
-        }
-      : {
-          border: "1px solid rgba(255,255,255,0.14)",
-          background: disabled ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.08)",
-        };
-
-  const base = {
-    padding: "8px 10px",
-    borderRadius: 10,
-    color: "#f3f3f7",
-    cursor: disabled ? "not-allowed" : "pointer",
-    fontSize: 12,
-    fontWeight: 700,
-    opacity: disabled ? 0.55 : 1,
-    ...toneStyle,
-    textDecoration: "none",
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 6,
-  };
-
-  if (asLink) {
-    return (
-      <Link to={to} style={base}>
-        {children}
-      </Link>
-    );
-  }
-
-  return (
-    <button type="button" onClick={onClick} disabled={disabled} style={base}>
-      {children}
-    </button>
-  );
-}
 
 /**
  * mode:
@@ -76,12 +16,10 @@ export default function KinkPreferencesScreen({ session, supabase, mode = "edit"
   const userId = session?.user?.id;
 
   const { items, loading: loadingCat, error: catErr } = useKinkCatalogue({ supabase });
-  const {
-    prefsByItemId,
-    loading: loadingPrefs,
-    error: prefsErr,
-    saveBulk,
-  } = useKinkPreferences({ supabase, userId });
+  const { prefsByItemId, loading: loadingPrefs, error: prefsErr, saveBulk } = useKinkPreferences({
+    supabase,
+    userId,
+  });
 
   const { profile, updateProfile } = useProfile({ supabase, userId });
 
@@ -119,16 +57,14 @@ export default function KinkPreferencesScreen({ session, supabase, mode = "edit"
     try {
       await saveBulk({ nextStatusByItemId: statusByItemId, notesByItemId: {} });
 
-      // If we're onboarding, mark complete.
       if (mode === "onboarding") {
         await updateProfile({ onboarding_complete: true });
       }
 
       setLocalOk("Saved.");
 
-      // Navigate out (onboarding -> scenes, edit -> profile)
       if (mode === "onboarding") navigate("/scenes", { replace: true });
-      else navigate("/profile", { replace: true });
+      else navigate("/settings", { replace: true });
     } catch (e) {
       setLocalErr(e?.message || "Save failed.");
     } finally {
@@ -151,22 +87,26 @@ export default function KinkPreferencesScreen({ session, supabase, mode = "edit"
     }
   }
 
+  async function signOut() {
+    await supabase.auth.signOut();
+  }
+
   return (
     <div style={{ minHeight: "100vh" }}>
-      <TopBarLite
+      <TopBar
         title={mode === "onboarding" ? "Quick preferences" : "Kink preferences"}
+        onSignOut={signOut}
+        showBack={mode !== "onboarding"}
+        backTo={mode !== "onboarding" ? "/settings" : undefined}
         rightSlot={
           <div style={{ display: "flex", gap: 8 }}>
-            {mode !== "onboarding" ? (
-              <SmallButton asLink to="/profile">
-                Back
+            {mode === "onboarding" ? (
+              <SmallButton onClick={handleSkip} disabled={busy} title="Skip for now">
+                Skip
               </SmallButton>
-            ) : (
-              <SmallButton onClick={handleSkip} disabled={busy} tone="neutral">
-                Skip for now
-              </SmallButton>
-            )}
-            <SmallButton onClick={handleSave} disabled={busy} tone="neutral">
+            ) : null}
+
+            <SmallButton onClick={handleSave} disabled={busy} title="Save preferences">
               {saving ? "Saving..." : "Save"}
             </SmallButton>
           </div>
@@ -175,26 +115,18 @@ export default function KinkPreferencesScreen({ session, supabase, mode = "edit"
 
       <div style={{ padding: 16, maxWidth: 920, margin: "0 auto" }}>
         {mode === "onboarding" ? (
-          <div
-            style={{
-              marginBottom: 12,
-              padding: 12,
-              borderRadius: 12,
-              border: "1px solid rgba(255,255,255,0.10)",
-              background: "rgba(255,255,255,0.03)",
-              fontSize: 13,
-              opacity: 0.9,
-              lineHeight: 1.4,
-            }}
-          >
-            Mark each item as <b>Into</b>, <b>Curious</b>, or <b>Limit</b>. You can skip and complete this
-            later from your Profile.
-          </div>
+          <Card>
+            <div style={{ fontSize: 13, opacity: 0.9, lineHeight: 1.4 }}>
+              Mark each item as <b>Into</b>, <b>Curious</b>, or <b>Limit</b>. You can skip and complete
+              this later from Settings.
+            </div>
+          </Card>
         ) : null}
 
         {localErr || catErr || prefsErr ? (
           <div
             style={{
+              marginTop: 12,
               marginBottom: 12,
               padding: 10,
               borderRadius: 10,
