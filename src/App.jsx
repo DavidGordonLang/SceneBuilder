@@ -13,6 +13,7 @@ import {
 
 import ProfileScreen from "./screens/ProfileScreen.jsx";
 import KinkPreferencesScreen from "./screens/KinkPreferencesScreen.jsx";
+import SettingsHome from "./screens/settings/SettingsHome.jsx";
 import { useProfile } from "./hooks/useProfile.js";
 import { ToastProvider } from "./ui/ToastContext.jsx";
 
@@ -132,11 +133,6 @@ function AuthScreen() {
   );
 }
 
-/**
- * Handles:
- * - app routes
- * - onboarding auto-start (if profile.onboarding_complete === false)
- */
 function AuthedApp({ session }) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -186,6 +182,9 @@ function AuthedApp({ session }) {
         <Route path="/tools" element={<ToolsHome session={session} supabase={supabase} />} />
         <Route path="/journal" element={<JournalHome session={session} supabase={supabase} />} />
 
+        {/* Settings */}
+        <Route path="/settings" element={<SettingsHome session={session} supabase={supabase} />} />
+
         {/* Profile */}
         <Route path="/profile" element={<ProfileScreen session={session} supabase={supabase} />} />
         <Route
@@ -234,7 +233,6 @@ export default function App() {
       setBooting(false);
     };
 
-    // Hard fallback: never allow infinite loading
     const bootTimeout = setTimeout(() => {
       finishBoot();
     }, 2500);
@@ -245,7 +243,6 @@ export default function App() {
         if (!mounted) return;
 
         if (error) {
-          // Soft landing: show AuthScreen rather than infinite Loading
           setSession(null);
           finishBoot();
           return;
@@ -263,7 +260,6 @@ export default function App() {
     const { data: sub } = supabase.auth.onAuthStateChange((_event, newSession) => {
       if (!mounted) return;
       setSession(newSession ?? null);
-      // auth events are authoritative; also end boot here
       finishBoot();
     });
 
