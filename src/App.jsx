@@ -63,7 +63,6 @@ function AuthScreen() {
     setErr("");
     setBusy(true);
     try {
-      // Keep this stable. Supabase will return to /scenes with ?code=... in PKCE flow.
       const redirectTo = `${window.location.origin}/scenes`;
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
@@ -134,11 +133,6 @@ function AuthScreen() {
   );
 }
 
-/**
- * Handles:
- * - app routes
- * - onboarding auto-start (if profile.onboarding_complete === false)
- */
 function AuthedApp({ session }) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -175,7 +169,6 @@ function AuthedApp({ session }) {
       <Routes>
         <Route path="/" element={<Navigate to="/scenes" replace />} />
 
-        {/* Scenes */}
         <Route path="/scenes" element={<ScenesHome session={session} supabase={supabase} />} />
         <Route path="/scenes/new" element={<SceneCreate session={session} supabase={supabase} />} />
         <Route path="/scenes/:id" element={<SceneView session={session} supabase={supabase} />} />
@@ -184,27 +177,22 @@ function AuthedApp({ session }) {
           element={<SceneEdit session={session} supabase={supabase} />}
         />
 
-        {/* Tools + Journal */}
         <Route path="/tools" element={<ToolsHome session={session} supabase={supabase} />} />
         <Route path="/journal" element={<JournalHome session={session} supabase={supabase} />} />
 
-        {/* Settings */}
         <Route path="/settings" element={<SettingsHome session={session} supabase={supabase} />} />
 
-        {/* Profile */}
         <Route path="/profile" element={<ProfileScreen session={session} supabase={supabase} />} />
         <Route
           path="/profile/kinks"
           element={<KinkPreferencesScreen session={session} supabase={supabase} mode="edit" />}
         />
 
-        {/* Vocabulary */}
         <Route
           path="/vocabulary"
           element={<ActionVocabularyScreen session={session} supabase={supabase} />}
         />
 
-        {/* Onboarding */}
         <Route
           path="/onboarding"
           element={<KinkPreferencesScreen session={session} supabase={supabase} mode="onboarding" />}
@@ -239,40 +227,38 @@ export default function App() {
       setBooting(false);
     };
 
-    // Never allow infinite loading; mobile OAuth exchange can be slow, so give it time.
+    // Give mobile enough time to complete URL->session storage.
     const bootTimeout = setTimeout(() => {
       finishBoot();
     }, 12000);
 
-    const maybeExchangeOAuthCode = async () => {
-      // Supabase PKCE returns with ?code=... (and sometimes other params).
-      // On mobile, relying on implicit auto-detection can be flaky; do it explicitly.
+    const ingestSessionFromUrlIfPresent = async () => {
+      // If Supabase returned tokens in the URL (hash) or code in query, ingest them.
+      const href = window.location.href;
+      const hasHashTokens = typeof window !== "undefined" && window.location.hash?.includes("access_token");
+      const hasCode = href.includes("?code=") || href.includes("&code=");
+
+      if (!hasHashTokens && !hasCode) return;
+
       try {
+        await supabase.auth.getSessionFromUrl({ storeSession: true });
+
+        // Clean URL: remove hash/query auth artifacts so refresh doesn't re-process
         const url = new URL(window.location.href);
-        const code = url.searchParams.get("code");
-
-        if (!code) return;
-
-        const { error } = await supabase.auth.exchangeCodeForSession(window.location.href);
-        // Always clean the URL so we don’t re-process the code on refresh.
+        url.hash = "";
         url.searchParams.delete("code");
         url.searchParams.delete("state");
         url.searchParams.delete("error");
         url.searchParams.delete("error_description");
         window.history.replaceState({}, document.title, url.toString());
-
-        if (error) {
-          // Soft landing: we’ll still proceed to getSession(), but session may be null.
-          // Leaving this silent is fine; the user will see the sign-in screen rather than a crash.
-        }
       } catch (_e) {
-        // No hard failure; we’ll continue to getSession().
+        // Soft fail; we’ll still proceed to getSession().
       }
     };
 
     (async () => {
       try {
-        await maybeExchangeOAuthCode();
+        await ingestSessionFromUrlIfPresent();
 
         const { data, error } = await supabase.auth.getSession();
         if (!mounted) return;
