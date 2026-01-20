@@ -1,7 +1,14 @@
 import React from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
-export function TopBar({ title, onSignOut, rightSlot }) {
+export function TopBar({ title, onSignOut, rightSlot, showBack = false, backTo }) {
+  const navigate = useNavigate();
+
+  function handleBack() {
+    if (backTo) navigate(backTo);
+    else navigate(-1);
+  }
+
   return (
     <div
       style={{
@@ -14,7 +21,33 @@ export function TopBar({ title, onSignOut, rightSlot }) {
         gap: 12,
       }}
     >
-      <h1 style={{ margin: 0, fontSize: 22 }}>{title}</h1>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        {showBack ? (
+          <button
+            type="button"
+            onClick={handleBack}
+            aria-label="Back"
+            title="Back"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 34,
+              height: 34,
+              borderRadius: 10,
+              border: "1px solid rgba(255,255,255,0.18)",
+              background: "rgba(255,255,255,0.06)",
+              color: "#f3f3f7",
+              cursor: "pointer",
+              fontSize: 16,
+            }}
+          >
+            ←
+          </button>
+        ) : null}
+
+        <h1 style={{ margin: 0, fontSize: 22 }}>{title}</h1>
+      </div>
 
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         {/* Settings icon */}
