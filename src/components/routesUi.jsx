@@ -17,7 +17,7 @@ function iconButtonStyle() {
     color: "#f3f3f7",
     textDecoration: "none",
     fontSize: 16,
-    flexShrink: 0, // critical: never shrink these
+    flexShrink: 0,
   };
 }
 
@@ -44,11 +44,9 @@ function IconButton({ onClick, label, title, children }) {
 }
 
 /**
- * TopBar now uses a 2-row layout:
- * Row 1: Back + Title
- * Row 2: rightSlot (left) + nav cluster (right)
- *
- * This prevents the nav cluster from shrinking when rightSlot varies by page.
+ * TopBar layout:
+ * Row 1: Title only (clean page title)
+ * Row 2: Back + rightSlot (left) | nav cluster (right)
  */
 export function TopBar({ title, onSignOut, rightSlot, showBack = false, backTo }) {
   const navigate = useNavigate();
@@ -68,40 +66,22 @@ export function TopBar({ title, onSignOut, rightSlot, showBack = false, backTo }
         gap: 10,
       }}
     >
-      {/* Row 1: Back + Title */}
-      <div
-        style={{
-          display: "grid",
-          alignItems: "center",
-          gap: 12,
-          gridTemplateColumns: `${TOPBAR_ICON_SIZE}px 1fr`,
-        }}
-      >
-        <div style={{ width: TOPBAR_ICON_SIZE, display: "flex", alignItems: "center" }}>
-          {showBack ? (
-            <IconButton onClick={handleBack} label="Back" title="Back">
-              ←
-            </IconButton>
-          ) : null}
-        </div>
-
-        <div style={{ minWidth: 0 }}>
-          <h1
-            style={{
-              margin: 0,
-              fontSize: 22,
-              lineHeight: 1.15,
-              // allow wrapping instead of truncating on mobile
-              whiteSpace: "normal",
-              overflowWrap: "anywhere",
-            }}
-          >
-            {title}
-          </h1>
-        </div>
+      {/* Row 1: Title */}
+      <div style={{ minWidth: 0 }}>
+        <h1
+          style={{
+            margin: 0,
+            fontSize: 22,
+            lineHeight: 1.15,
+            whiteSpace: "normal",
+            overflowWrap: "anywhere",
+          }}
+        >
+          {title}
+        </h1>
       </div>
 
-      {/* Row 2: rightSlot + stable nav cluster */}
+      {/* Row 2: controls */}
       <div
         style={{
           display: "flex",
@@ -110,7 +90,7 @@ export function TopBar({ title, onSignOut, rightSlot, showBack = false, backTo }
           gap: 12,
         }}
       >
-        {/* rightSlot area: allowed to scroll horizontally if needed */}
+        {/* Left: Back + rightSlot (can scroll if crowded) */}
         <div
           style={{
             flex: 1,
@@ -118,14 +98,22 @@ export function TopBar({ title, onSignOut, rightSlot, showBack = false, backTo }
             display: "flex",
             alignItems: "center",
             gap: 8,
-            overflowX: rightSlot ? "auto" : "hidden",
-            paddingBottom: rightSlot ? 2 : 0,
+            overflowX: showBack || rightSlot ? "auto" : "hidden",
+            paddingBottom: showBack || rightSlot ? 2 : 0,
           }}
         >
-          {rightSlot ? <div style={{ display: "flex", alignItems: "center", gap: 8 }}>{rightSlot}</div> : null}
+          {showBack ? (
+            <IconButton onClick={handleBack} label="Back" title="Back">
+              ←
+            </IconButton>
+          ) : null}
+
+          {rightSlot ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>{rightSlot}</div>
+          ) : null}
         </div>
 
-        {/* Nav cluster: NEVER shrink */}
+        {/* Right: Nav cluster (never shrink) */}
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
           <IconLink to="/home" label="Home" title="Home">
             ⌂
