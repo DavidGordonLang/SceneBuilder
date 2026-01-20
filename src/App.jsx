@@ -3,7 +3,7 @@ import { NavLink, Route, Routes, Navigate, useLocation } from "react-router-dom"
 import { supabase } from "./lib/supabaseClient";
 
 import ScenesHome from "./screens/scenes/ScenesHome";
-import SceneNew from "./screens/scenes/SceneNew";
+import SceneCreate from "./screens/scenes/SceneCreate";
 import SceneView from "./screens/scenes/SceneView";
 import SceneEdit from "./screens/scenes/SceneEdit";
 
@@ -13,11 +13,10 @@ import JournalHome from "./screens/journal/JournalHome";
 import JournalEntryView from "./screens/journal/JournalEntryView";
 
 import SettingsHome from "./screens/settings/SettingsHome";
-import KinkPreferencesScreen from "./screens/settings/KinkPreferencesScreen";
-import PartnersScreen from "./screens/settings/PartnersScreen";
+import ActionVocabularyScreen from "./screens/profile/ActionVocabularyScreen";
+import KinkPreferencesScreen from "./screens/KinkPreferencesScreen";
 
 import ProfileScreen from "./screens/ProfileScreen";
-import AuthScreen from "./screens/AuthScreen";
 
 function TabLink({ to, label }) {
   return (
@@ -42,6 +41,114 @@ function TabLink({ to, label }) {
   );
 }
 
+function MinimalAuthScreen() {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  async function signInWithGoogle() {
+    setBusy(true);
+    setErr("");
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: window.location.origin,
+        },
+      });
+      if (error) throw error;
+    } catch (e) {
+      setErr(e?.message || "Sign-in failed.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ minHeight: "100vh", padding: 16, display: "grid", placeItems: "center" }}>
+      <div
+        style={{
+          width: "100%",
+          maxWidth: 520,
+          borderRadius: 16,
+          border: "1px solid rgba(255,255,255,0.10)",
+          background: "rgba(255,255,255,0.03)",
+          padding: 16,
+        }}
+      >
+        <div style={{ fontSize: 22, fontWeight: 900, marginBottom: 8 }}>SceneBuilder</div>
+        <div style={{ opacity: 0.75, lineHeight: 1.4, marginBottom: 14 }}>
+          Sign in to continue.
+        </div>
+
+        {err ? (
+          <div
+            style={{
+              padding: 10,
+              borderRadius: 12,
+              border: "1px solid rgba(255,80,80,0.30)",
+              background: "rgba(255,80,80,0.08)",
+              marginBottom: 12,
+              lineHeight: 1.4,
+              fontSize: 13,
+            }}
+          >
+            {err}
+          </div>
+        ) : null}
+
+        <button
+          type="button"
+          onClick={signInWithGoogle}
+          disabled={busy}
+          style={{
+            width: "100%",
+            height: 44,
+            borderRadius: 12,
+            border: "1px solid rgba(255,255,255,0.18)",
+            background: "rgba(255,255,255,0.06)",
+            color: "#f3f3f7",
+            fontWeight: 800,
+            cursor: busy ? "not-allowed" : "pointer",
+          }}
+        >
+          {busy ? "Opening Google…" : "Continue with Google"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PartnersPlaceholder({ supabase: sb }) {
+  async function signOut() {
+    await sb.auth.signOut();
+  }
+
+  // Using your existing TopBar via SettingsHome navigation is enough;
+  // keep this page simple to avoid extra imports.
+  return (
+    <div style={{ padding: 16, opacity: 0.85 }}>
+      <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 8 }}>Partners</div>
+      <div style={{ lineHeight: 1.4, opacity: 0.75, marginBottom: 14 }}>
+        Coming soon.
+      </div>
+      <button
+        type="button"
+        onClick={signOut}
+        style={{
+          padding: "10px 12px",
+          borderRadius: 12,
+          border: "1px solid rgba(255,255,255,0.18)",
+          background: "rgba(255,255,255,0.06)",
+          color: "#f3f3f7",
+          cursor: "pointer",
+          fontWeight: 800,
+        }}
+      >
+        Sign out
+      </button>
+    </div>
+  );
+}
+
 function AuthedApp({ session }) {
   const location = useLocation();
 
@@ -59,7 +166,7 @@ function AuthedApp({ session }) {
 
         {/* Scenes */}
         <Route path="/scenes" element={<ScenesHome supabase={supabase} />} />
-        <Route path="/scenes/new" element={<SceneNew supabase={supabase} session={session} />} />
+        <Route path="/scenes/new" element={<SceneCreate supabase={supabase} session={session} />} />
         <Route path="/scenes/:id" element={<SceneView supabase={supabase} session={session} />} />
         <Route path="/scenes/:id/edit" element={<SceneEdit supabase={supabase} session={session} />} />
 
@@ -73,17 +180,27 @@ function AuthedApp({ session }) {
         {/* Settings */}
         <Route path="/settings" element={<SettingsHome supabase={supabase} />} />
         <Route
+          path="/settings/action-vocabulary"
+          element={<ActionVocabularyScreen supabase={supabase} session={session} />}
+        />
+        <Route
           path="/settings/kink-preferences"
           element={<KinkPreferencesScreen supabase={supabase} session={session} mode="settings" />}
         />
-        <Route path="/settings/partners" element={<PartnersScreen supabase={supabase} session={session} />} />
+        <Route path="/settings/partners" element={<PartnersPlaceholder supabase={supabase} />} />
 
         {/* Profile */}
         <Route path="/profile" element={<ProfileScreen supabase={supabase} session={session} />} />
-        <Route path="/profile/kinks" element={<KinkPreferencesScreen supabase={supabase} session={session} mode="profile" />} />
+        <Route
+          path="/profile/kinks"
+          element={<KinkPreferencesScreen supabase={supabase} session={session} mode="profile" />}
+        />
 
         {/* Onboarding */}
-        <Route path="/onboarding" element={<KinkPreferencesScreen supabase={supabase} session={session} mode="onboarding" />} />
+        <Route
+          path="/onboarding"
+          element={<KinkPreferencesScreen supabase={supabase} session={session} mode="onboarding" />}
+        />
 
         {/* Default */}
         <Route path="/" element={<Navigate to="/scenes" replace />} />
@@ -159,7 +276,7 @@ export default function App() {
     <Routes>
       {!session ? (
         <>
-          <Route path="/auth" element={<AuthScreen supabase={supabase} />} />
+          <Route path="/auth" element={<MinimalAuthScreen />} />
           <Route path="*" element={<Navigate to="/auth" replace />} />
         </>
       ) : (
