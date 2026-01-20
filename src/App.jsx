@@ -1,53 +1,41 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { NavLink, Route, Routes, Navigate, useLocation, useNavigate } from "react-router-dom";
+import { NavLink, Route, Routes, Navigate, useLocation } from "react-router-dom";
 import { supabase } from "./lib/supabaseClient";
-import {
-  ScenesHome,
-  SceneCreate,
-  SceneView,
-  SceneEdit,
-  ToolsHome,
-  JournalHome,
-  ActionVocabularyScreen,
-} from "./routes.jsx";
 
-import ProfileScreen from "./screens/ProfileScreen.jsx";
-import KinkPreferencesScreen from "./screens/KinkPreferencesScreen.jsx";
-import SettingsHome from "./screens/settings/SettingsHome.jsx";
-import { useProfile } from "./hooks/useProfile.js";
-import { ToastProvider } from "./ui/ToastContext.jsx";
+import ScenesHome from "./screens/scenes/ScenesHome";
+import SceneNew from "./screens/scenes/SceneNew";
+import SceneView from "./screens/scenes/SceneView";
+import SceneEdit from "./screens/scenes/SceneEdit";
 
-const TAB_BAR_HEIGHT = 56;
+import ToolsHome from "./screens/tools/ToolsHome";
 
-const navStyle = {
-  position: "fixed",
-  left: 0,
-  right: 0,
-  bottom: 0,
-  display: "grid",
-  gridTemplateColumns: "1fr 1fr 1fr",
-  borderTop: "1px solid rgba(255,255,255,0.08)",
-  background: "rgba(11,11,15,0.92)",
-  backdropFilter: "blur(10px)",
-  paddingBottom: "env(safe-area-inset-bottom)",
-};
+import JournalHome from "./screens/journal/JournalHome";
+import JournalEntryView from "./screens/journal/JournalEntryView";
 
-const linkBase = {
-  padding: "12px 10px",
-  textAlign: "center",
-  fontSize: 12,
-  letterSpacing: 0.3,
-  userSelect: "none",
-};
+import SettingsHome from "./screens/settings/SettingsHome";
+import ActionVocabularyScreen from "./screens/settings/ActionVocabularyScreen";
+import KinkPreferencesScreen from "./screens/settings/KinkPreferencesScreen";
+import PartnersScreen from "./screens/settings/PartnersScreen";
+
+import ProfileScreen from "./screens/ProfileScreen";
+import AuthScreen from "./screens/AuthScreen";
 
 function TabLink({ to, label }) {
   return (
     <NavLink
       to={to}
       style={({ isActive }) => ({
-        ...linkBase,
-        opacity: isActive ? 1 : 0.65,
-        fontWeight: isActive ? 650 : 500,
+        textDecoration: "none",
+        color: "#f3f3f7",
+        opacity: isActive ? 1 : 0.7,
+        fontWeight: isActive ? 800 : 650,
+        fontSize: 12,
+        padding: "10px 12px",
+        borderRadius: 12,
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 8,
       })}
     >
       {label}
@@ -55,165 +43,84 @@ function TabLink({ to, label }) {
   );
 }
 
-function AuthScreen() {
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-
-  async function signInWithGoogle() {
-    setErr("");
-    setBusy(true);
-    try {
-      const redirectTo = `${window.location.origin}/scenes`;
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: "google",
-        options: { redirectTo },
-      });
-      if (error) setErr(error.message);
-    } catch (e) {
-      setErr(e?.message || "Sign-in failed.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div style={{ minHeight: "100vh", display: "grid", placeItems: "center" }}>
-      <div
-        style={{
-          width: "min(420px, 92vw)",
-          padding: 16,
-          border: "1px solid rgba(255,255,255,0.10)",
-          borderRadius: 14,
-          background: "rgba(255,255,255,0.03)",
-        }}
-      >
-        <h1 style={{ margin: 0, fontSize: 22 }}>SceneBuilder</h1>
-        <p style={{ marginTop: 8, opacity: 0.8, lineHeight: 1.4 }}>
-          Sign in to plan scenes, manage tools, and journal reflections.
-        </p>
-
-        {err ? (
-          <div
-            style={{
-              marginTop: 10,
-              padding: 10,
-              borderRadius: 10,
-              border: "1px solid rgba(255,80,80,0.35)",
-              background: "rgba(255,80,80,0.10)",
-              fontSize: 13,
-            }}
-          >
-            {err}
-          </div>
-        ) : null}
-
-        <button
-          onClick={signInWithGoogle}
-          disabled={busy}
-          style={{
-            marginTop: 12,
-            width: "100%",
-            padding: "12px 12px",
-            borderRadius: 12,
-            border: "1px solid rgba(255,255,255,0.18)",
-            background: busy ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.10)",
-            color: "#f3f3f7",
-            cursor: busy ? "not-allowed" : "pointer",
-            fontWeight: 650,
-          }}
-        >
-          {busy ? "Signing in..." : "Sign in with Google"}
-        </button>
-
-        <p style={{ marginTop: 10, opacity: 0.6, fontSize: 12 }}>
-          Apple and email sign-in will be added later.
-        </p>
-      </div>
-    </div>
-  );
-}
-
 function AuthedApp({ session }) {
   const location = useLocation();
-  const navigate = useNavigate();
-  const userId = session?.user?.id;
 
-  const { profile, loading: profileLoading } = useProfile({ supabase, userId });
-
-  const pathname = location.pathname || "/";
-  const isOnboardingRoute = pathname === "/onboarding";
-  const isProfileRoute = pathname === "/profile" || pathname.startsWith("/profile/");
-
-  useEffect(() => {
-    if (profileLoading) return;
-    if (!profile) return;
-
-    if (profile.onboarding_complete === false) {
-      if (!isOnboardingRoute && !isProfileRoute) {
-        navigate("/onboarding", { replace: true });
-      }
-    }
-  }, [profileLoading, profile, isOnboardingRoute, isProfileRoute, navigate]);
-
-  const showTabs = !isOnboardingRoute;
-
-  const containerStyle = useMemo(() => {
-    if (!showTabs) return {};
-    return {
-      paddingBottom: `calc(${TAB_BAR_HEIGHT}px + env(safe-area-inset-bottom))`,
-    };
-  }, [showTabs]);
+  const showTabs = useMemo(() => {
+    const p = location.pathname || "";
+    // Hide tabs on login or onboarding flows if needed
+    if (p.startsWith("/auth")) return false;
+    if (p.startsWith("/onboarding")) return false;
+    return true;
+  }, [location.pathname]);
 
   return (
-    <div style={containerStyle}>
+    <div style={{ minHeight: "100vh", paddingBottom: showTabs ? 74 : 0 }}>
       <Routes>
-        {/* Home (future dedicated screen). For now, route Home to Scenes. */}
-        <Route path="/" element={<Navigate to="/home" replace />} />
+        {/* Home is stable and can be repointed later */}
         <Route path="/home" element={<Navigate to="/scenes" replace />} />
 
         {/* Scenes */}
-        <Route path="/scenes" element={<ScenesHome session={session} supabase={supabase} />} />
-        <Route path="/scenes/new" element={<SceneCreate session={session} supabase={supabase} />} />
-        <Route path="/scenes/:id" element={<SceneView session={session} supabase={supabase} />} />
-        <Route
-          path="/scenes/:id/edit"
-          element={<SceneEdit session={session} supabase={supabase} />}
-        />
+        <Route path="/scenes" element={<ScenesHome supabase={supabase} />} />
+        <Route path="/scenes/new" element={<SceneNew supabase={supabase} session={session} />} />
+        <Route path="/scenes/:id" element={<SceneView supabase={supabase} session={session} />} />
+        <Route path="/scenes/:id/edit" element={<SceneEdit supabase={supabase} session={session} />} />
 
-        {/* Tools + Journal */}
-        <Route path="/tools" element={<ToolsHome session={session} supabase={supabase} />} />
-        <Route path="/journal" element={<JournalHome session={session} supabase={supabase} />} />
+        {/* Tools */}
+        <Route path="/tools" element={<ToolsHome supabase={supabase} />} />
+
+        {/* Journal */}
+        <Route path="/journal" element={<JournalHome supabase={supabase} session={session} />} />
+        <Route path="/journal/:id" element={<JournalEntryView supabase={supabase} session={session} />} />
 
         {/* Settings */}
-        <Route path="/settings" element={<SettingsHome session={session} supabase={supabase} />} />
+        <Route path="/settings" element={<SettingsHome supabase={supabase} />} />
+        <Route path="/settings/action-vocabulary" element={<ActionVocabularyScreen supabase={supabase} session={session} />} />
+        <Route
+          path="/settings/kink-preferences"
+          element={<KinkPreferencesScreen supabase={supabase} session={session} mode="settings" />}
+        />
+        <Route path="/settings/partners" element={<PartnersScreen supabase={supabase} session={session} />} />
 
         {/* Profile */}
-        <Route path="/profile" element={<ProfileScreen session={session} supabase={supabase} />} />
-        <Route
-          path="/profile/kinks"
-          element={<KinkPreferencesScreen session={session} supabase={supabase} mode="edit" />}
-        />
-
-        {/* Vocabulary */}
-        <Route
-          path="/vocabulary"
-          element={<ActionVocabularyScreen session={session} supabase={supabase} />}
-        />
+        <Route path="/profile" element={<ProfileScreen supabase={supabase} session={session} />} />
+        <Route path="/profile/kinks" element={<KinkPreferencesScreen supabase={supabase} session={session} mode="profile" />} />
 
         {/* Onboarding */}
-        <Route
-          path="/onboarding"
-          element={<KinkPreferencesScreen session={session} supabase={supabase} mode="onboarding" />}
-        />
+        <Route path="/onboarding" element={<KinkPreferencesScreen supabase={supabase} session={session} mode="onboarding" />} />
 
-        <Route path="*" element={<Navigate to="/home" replace />} />
+        {/* Default */}
+        <Route path="/" element={<Navigate to="/scenes" replace />} />
+        <Route path="*" element={<Navigate to="/scenes" replace />} />
       </Routes>
 
       {showTabs ? (
-        <nav style={navStyle} aria-label="Primary">
-          <TabLink to="/scenes" label="Scenes" />
-          <TabLink to="/tools" label="Tools" />
-          <TabLink to="/journal" label="Journal" />
+        <nav
+          style={{
+            position: "fixed",
+            left: 0,
+            right: 0,
+            bottom: 0,
+            padding: "10px 12px",
+            borderTop: "1px solid rgba(255,255,255,0.08)",
+            background: "rgba(0,0,0,0.55)",
+            backdropFilter: "blur(10px)",
+            WebkitBackdropFilter: "blur(10px)",
+          }}
+        >
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr 1fr",
+              gap: 10,
+              maxWidth: 720,
+              margin: "0 auto",
+            }}
+          >
+            <TabLink to="/scenes" label="Scenes" />
+            <TabLink to="/tools" label="Tools" />
+            <TabLink to="/journal" label="Journal" />
+          </div>
         </nav>
       ) : null}
     </div>
@@ -222,92 +129,52 @@ function AuthedApp({ session }) {
 
 export default function App() {
   const [session, setSession] = useState(null);
-  const [booting, setBooting] = useState(true);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let mounted = true;
-    let bootFinished = false;
 
-    const finishBoot = () => {
+    async function init() {
+      const {
+        data: { session: s },
+      } = await supabase.auth.getSession();
       if (!mounted) return;
-      if (bootFinished) return;
-      bootFinished = true;
-      setBooting(false);
-    };
+      setSession(s || null);
+      setLoading(false);
+    }
 
-    const bootTimeout = setTimeout(() => {
-      finishBoot();
-    }, 12000);
+    init();
 
-    const ingestSessionFromUrlIfPresent = async () => {
-      const href = window.location.href;
-      const hasHashTokens =
-        typeof window !== "undefined" && window.location.hash?.includes("access_token");
-      const hasCode = href.includes("?code=") || href.includes("&code=");
-
-      if (!hasHashTokens && !hasCode) return;
-
-      try {
-        await supabase.auth.getSessionFromUrl({ storeSession: true });
-
-        const url = new URL(window.location.href);
-        url.hash = "";
-        url.searchParams.delete("code");
-        url.searchParams.delete("state");
-        url.searchParams.delete("error");
-        url.searchParams.delete("error_description");
-        window.history.replaceState({}, document.title, url.toString());
-      } catch (_e) {
-        // soft fail
-      }
-    };
-
-    (async () => {
-      try {
-        await ingestSessionFromUrlIfPresent();
-
-        const { data, error } = await supabase.auth.getSession();
-        if (!mounted) return;
-
-        if (error) {
-          setSession(null);
-          finishBoot();
-          return;
-        }
-
-        setSession(data.session ?? null);
-        finishBoot();
-      } catch (_e) {
-        if (!mounted) return;
-        setSession(null);
-        finishBoot();
-      }
-    })();
-
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, newSession) => {
-      if (!mounted) return;
-      setSession(newSession ?? null);
-      finishBoot();
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
+      setSession(s || null);
     });
 
     return () => {
       mounted = false;
-      clearTimeout(bootTimeout);
       sub?.subscription?.unsubscribe?.();
     };
   }, []);
 
-  if (booting) {
+  if (loading) {
     return (
-      <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", opacity: 0.8 }}>
-        Loading...
+      <div style={{ padding: 16, opacity: 0.8 }}>
+        Loading…
       </div>
     );
   }
 
   return (
-    <ToastProvider>
-      {!session ? <AuthScreen /> : <AuthedApp session={session} />}
-    </ToastProvider>
+    <Routes>
+      {!session ? (
+        <>
+          <Route path="/auth" element={<AuthScreen supabase={supabase} />} />
+          <Route path="*" element={<Navigate to="/auth" replace />} />
+        </>
+      ) : (
+        <>
+          <Route path="/*" element={<AuthedApp session={session} />} />
+        </>
+      )}
+    </Routes>
   );
 }
