@@ -211,7 +211,7 @@ function ToolRow({ tool, menuItems, open, onToggle, expandedContent }) {
               userSelect: "text",
             }}
             onClick={(e) => {
-              // Allow text selection inside expanded area without collapsing on every click.
+              // Allow interaction inside expanded area without collapsing on every click.
               e.stopPropagation();
             }}
           >
@@ -272,6 +272,17 @@ function Section({ title, subtitle, children }) {
   );
 }
 
+// ---- multiple-open helpers ----
+function has(set, id) {
+  return set.has(id);
+}
+function toggleInSet(prevSet, id) {
+  const next = new Set(prevSet);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  return next;
+}
+
 export default function ToolsHome() {
   const [tab, setTab] = useState("drawer"); // drawer | vault
   const [loading, setLoading] = useState(true);
@@ -281,10 +292,10 @@ export default function ToolsHome() {
   const [vault, setVault] = useState([]);
   const [userTools, setUserTools] = useState([]);
 
-  // Expand/collapse state (Option A)
-  const [openOwnedId, setOpenOwnedId] = useState(null);
-  const [openCravingId, setOpenCravingId] = useState(null);
-  const [openVaultId, setOpenVaultId] = useState(null);
+  // Expand/collapse state (Option A) — MULTIPLE open per section
+  const [openOwned, setOpenOwned] = useState(() => new Set());
+  const [openCraving, setOpenCraving] = useState(() => new Set());
+  const [openVault, setOpenVault] = useState(() => new Set());
 
   async function reload() {
     setLoading(true);
@@ -396,8 +407,7 @@ export default function ToolsHome() {
               value={tab}
               onChange={(next) => {
                 setTab(next);
-                // keep expands scoped to each tab; no hard reset required, but this avoids odd carry-over.
-                setOpenVaultId(null);
+                // Keep open states per section; no reset needed for multiple-open browsing.
               }}
               options={[
                 { value: "drawer", label: "Drawer" },
@@ -438,14 +448,14 @@ export default function ToolsHome() {
                     const icon = g?.icon || t.custom_icon || "🧰";
                     const safety = g?.safety_level || null;
 
-                    const open = openOwnedId === t.id;
+                    const open = has(openOwned, t.id);
 
                     return (
                       <ToolRow
                         key={t.id}
                         tool={{ name, icon, safety_level: safety }}
                         open={open}
-                        onToggle={() => setOpenOwnedId((prev) => (prev === t.id ? null : t.id))}
+                        onToggle={() => setOpenOwned((prev) => toggleInSet(prev, t.id))}
                         expandedContent={
                           <div style={{ display: "grid", gap: 8 }}>
                             <div style={{ opacity: 0.75 }}>
@@ -477,14 +487,14 @@ export default function ToolsHome() {
                     const icon = g?.icon || t.custom_icon || "🧰";
                     const safety = g?.safety_level || null;
 
-                    const open = openCravingId === t.id;
+                    const open = has(openCraving, t.id);
 
                     return (
                       <ToolRow
                         key={t.id}
                         tool={{ name, icon, safety_level: safety }}
                         open={open}
-                        onToggle={() => setOpenCravingId((prev) => (prev === t.id ? null : t.id))}
+                        onToggle={() => setOpenCraving((prev) => toggleInSet(prev, t.id))}
                         expandedContent={
                           <div style={{ display: "grid", gap: 8 }}>
                             <div style={{ opacity: 0.75 }}>
@@ -532,15 +542,14 @@ export default function ToolsHome() {
               {vault.map((t) => {
                 const inOwned = ownedGlobalIds.has(t.id);
                 const inCraving = cravingGlobalIds.has(t.id);
-                const open = openVaultId === t.id;
+                const open = has(openVault, t.id);
 
                 return (
                   <ToolRow
                     key={t.id}
                     tool={{ name: t.name, icon: t.icon || "🧰", safety_level: t.safety_level || null }}
                     open={open}
-                    onToggle={() => setOpenVaultId((prev) => (prev === t.id ? null : t.id))}
-                    // Expanded content shows the add actions (buttons stop propagation).
+                    onToggle={() => setOpenVault((prev) => toggleInSet(prev, t.id))}
                     expandedContent={
                       <div style={{ display: "grid", gap: 10 }}>
                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -571,7 +580,6 @@ export default function ToolsHome() {
                         </div>
                       </div>
                     }
-                    // No kebab menu in Vault for now (actions live in expanded area).
                     menuItems={null}
                   />
                 );
