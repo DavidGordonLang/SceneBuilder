@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { TopBar, Chip, Card, SmallButton } from "../../components/routesUi";
+import { Chip, Card, SmallButton } from "../../components/routesUi";
+import Page from "../../components/Page";
 import { fetchSceneById } from "../../lib/scenesApi";
 import { formatDate, pickParticipantLabel, pickToolIcon, pickToolLabel } from "../../lib/sceneHelpers";
 
@@ -39,7 +40,7 @@ function ToolRow({ tool }) {
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10 }}>
           <div style={{ minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-              <div style={{ fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis" }}>
+              <div style={{ fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {tool.name}
               </div>
               {safety ? <span style={{ opacity: 0.6, fontSize: 12 }}>{safety}</span> : null}
@@ -68,10 +69,6 @@ export default function SceneView({ supabase }) {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [scene, setScene] = useState(null);
-
-  async function signOut() {
-    await supabase.auth.signOut();
-  }
 
   async function reload() {
     setLoading(true);
@@ -106,31 +103,43 @@ export default function SceneView({ supabase }) {
 
   return (
     <div>
-      <TopBar
-        title="Scene"
-        onSignOut={signOut}
-        rightSlot={
-          <SmallButton disabled={!scene} onClick={() => navigate(`/scenes/${id}/edit`)}>
+      <Page style={{ display: "grid", gap: 14 }}>
+        {/* Sub-route contextual row: Back + actions */}
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 10,
+            flexWrap: "wrap",
+          }}
+        >
+          <SmallButton onClick={() => navigate("/scenes")} title="Back to Scenes">
+            ← Back
+          </SmallButton>
+
+          <SmallButton disabled={!scene} onClick={() => navigate(`/scenes/${id}/edit`)} title="Edit scene">
             Edit
           </SmallButton>
-        }
-      />
+        </div>
 
-      <div style={{ padding: 16, display: "grid", gap: 12 }}>
-        {loading ? (
-          <div style={{ opacity: 0.8 }}>Loading…</div>
-        ) : err ? (
-          <div
-            style={{
-              padding: 12,
-              borderRadius: 12,
-              border: "1px solid rgba(255,80,80,0.35)",
-              background: "rgba(255,80,80,0.10)",
-              fontSize: 13,
-            }}
-          >
-            {err}
-          </div>
+        {loading ? <div style={{ opacity: 0.8 }}>Loading…</div> : null}
+
+        {err ? (
+          <Card>
+            <div
+              style={{
+                padding: 12,
+                borderRadius: 12,
+                border: "1px solid rgba(255,80,80,0.35)",
+                background: "rgba(255,80,80,0.10)",
+                fontSize: 13,
+                lineHeight: 1.4,
+              }}
+            >
+              {err}
+            </div>
+          </Card>
         ) : null}
 
         {!loading && scene ? (
@@ -160,9 +169,7 @@ export default function SceneView({ supabase }) {
               {scene.notes ? (
                 <div style={{ marginTop: 10, opacity: 0.9 }}>
                   <div style={{ fontSize: 12, opacity: 0.7 }}>Notes</div>
-                  <div style={{ marginTop: 4, lineHeight: 1.35, whiteSpace: "pre-wrap" }}>
-                    {scene.notes}
-                  </div>
+                  <div style={{ marginTop: 4, lineHeight: 1.35, whiteSpace: "pre-wrap" }}>{scene.notes}</div>
                 </div>
               ) : null}
             </Card>
@@ -189,23 +196,16 @@ export default function SceneView({ supabase }) {
                     const tags = g?.tags || tu.tags_override || [];
                     const safety = g?.safety_level || null;
 
-                    return (
-                      <ToolRow
-                        key={tu.id}
-                        tool={{ name, icon, tags, safety_level: safety }}
-                      />
-                    );
+                    return <ToolRow key={tu.id} tool={{ name, icon, tags, safety_level: safety }} />;
                   })
                 ) : (
                   <div style={{ opacity: 0.7, fontSize: 13 }}>None selected</div>
                 )}
               </div>
             </Card>
-
-            <SmallButton onClick={() => navigate("/scenes")}>Back to Scenes</SmallButton>
           </>
         ) : null}
-      </div>
+      </Page>
     </div>
   );
 }
