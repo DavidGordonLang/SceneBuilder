@@ -342,9 +342,10 @@ function AuthedShell({ session }) {
                 gap: 10,
               }}
             >
+                           <PillLink to="/settings" label="Settings" end />
               <PillLink to="/home" label="Home" end />
-              <PillLink to="/settings" label="Settings" end />
               <PillLink to="/profile" label="Profile" end />
+
             </div>
           </nav>
         </>
