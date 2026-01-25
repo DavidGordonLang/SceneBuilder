@@ -44,9 +44,9 @@ export default function SceneEdit({ supabase }) {
 
         setInitial({
           title: scene?.title || scene?.name || "",
-          intent: scene?.intent || "",
-          notes: scene?.notes || "",
-          scheduled_at: scene?.scheduled_at || null,
+          intent: scene?.emotional_state || "",
+          notes: scene?.emotional_notes || "",
+          scheduled_at: scene?.scheduled_for || null,
           participantIds,
           toolUserIds,
         });
@@ -83,26 +83,33 @@ export default function SceneEdit({ supabase }) {
 
   return (
     <div>
-      <Page style={{ display: "grid", gap: 14 }}>
-        {/* Sub-route contextual row: Back only (form keeps its own Save button) */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-          <SmallButton onClick={() => navigate(`/scenes/${id}`)} title="Back to scene">
-            ← Back
-          </SmallButton>
-          <div style={{ fontSize: 12, opacity: 0.7 }}>Edit scene</div>
+      <Page
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          marginBottom: 14,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <SmallButton onClick={() => navigate(-1)}>← Back</SmallButton>
+          <div style={{ fontWeight: 900, fontSize: 18 }}>Edit Scene</div>
         </div>
+      </Page>
 
+      <Page>
         {loading ? (
-          <div style={{ opacity: 0.8 }}>Loading…</div>
+          <div style={{ opacity: 0.7 }}>Loading…</div>
         ) : (
           <SceneForm
-            initial={initial || {}}
+            initial={initial}
             participants={participants}
             ownedTools={ownedTools}
             onSubmit={handleSubmit}
             busy={busy}
             err={err}
-            submitLabel="Save Changes"
+            submitLabel="Save"
             backTo={`/scenes/${id}`}
           />
         )}
