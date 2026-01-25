@@ -28,7 +28,7 @@ export default function SettingsHome({ supabase }) {
         </div>
 
         <div style={{ display: "grid", gap: 12 }}>
-          <Card asLink to="/vocabulary">
+          <Card asLink to="/settings/action-vocabulary">
             <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
               <div>
                 <div style={{ fontWeight: 700 }}>Action Vocabulary</div>
@@ -44,7 +44,9 @@ export default function SettingsHome({ supabase }) {
             <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
               <div>
                 <div style={{ fontWeight: 700 }}>Profile</div>
-                <div style={{ marginTop: 6, opacity: 0.75, fontSize: 13 }}>Avatar and identity basics.</div>
+                <div style={{ marginTop: 6, opacity: 0.75, fontSize: 13 }}>
+                  Avatar and identity basics.
+                </div>
               </div>
               <div style={{ opacity: 0.75 }}>›</div>
             </div>
