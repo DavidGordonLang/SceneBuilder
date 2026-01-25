@@ -209,9 +209,7 @@ export default function ScenesHome() {
                               >
                                 {intent}
                               </div>
-                            ) : (
-                              <div style={{ marginTop: 4, fontSize: 13, opacity: 0.55 }}>—</div>
-                            )}
+                            ) : null}
 
                             <div style={{ marginTop: 6, fontSize: 12, opacity: 0.7 }}>
                               {when ? when : "—"}
