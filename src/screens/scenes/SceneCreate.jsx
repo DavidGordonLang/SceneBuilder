@@ -1,9 +1,17 @@
 import React, { useEffect, useState } from "react";
-import { TopBar } from "../../components/routesUi";
-import { createScene, fetchOwnedToolsForPicker, fetchParticipants } from "../../lib/scenesApi";
+import { useNavigate } from "react-router-dom";
+import { SmallButton } from "../../components/routesUi";
+import Page from "../../components/Page";
+import {
+  createScene,
+  fetchOwnedToolsForPicker,
+  fetchParticipants,
+} from "../../lib/scenesApi";
 import SceneForm from "./SceneForm";
 
 export default function SceneCreate({ supabase }) {
+  const navigate = useNavigate();
+
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -11,17 +19,16 @@ export default function SceneCreate({ supabase }) {
   const [participants, setParticipants] = useState([]);
   const [ownedTools, setOwnedTools] = useState([]);
 
-  async function signOut() {
-    await supabase.auth.signOut();
-  }
-
   useEffect(() => {
     let alive = true;
     (async () => {
       setLoading(true);
       setErr("");
       try {
-        const [ps, ot] = await Promise.all([fetchParticipants(), fetchOwnedToolsForPicker()]);
+        const [ps, ot] = await Promise.all([
+          fetchParticipants(),
+          fetchOwnedToolsForPicker(),
+        ]);
         if (!alive) return;
         setParticipants(ps);
         setOwnedTools(ot);
@@ -54,21 +61,37 @@ export default function SceneCreate({ supabase }) {
 
   return (
     <div>
-      <TopBar title="New Scene" onSignOut={signOut} />
-      {loading ? (
-        <div style={{ padding: 16, opacity: 0.8 }}>Loading…</div>
-      ) : (
-        <SceneForm
-          initial={{}}
-          participants={participants}
-          ownedTools={ownedTools}
-          onSubmit={handleSubmit}
-          busy={busy}
-          err={err}
-          submitLabel="Save Draft"
-          backTo="/scenes"
-        />
-      )}
+      <Page style={{ display: "grid", gap: 14 }}>
+        {/* Sub-route contextual row */}
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 10,
+          }}
+        >
+          <SmallButton onClick={() => navigate("/scenes")} title="Back to scenes">
+            ← Back
+          </SmallButton>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>New scene</div>
+        </div>
+
+        {loading ? (
+          <div style={{ opacity: 0.8 }}>Loading…</div>
+        ) : (
+          <SceneForm
+            initial={{}}
+            participants={participants}
+            ownedTools={ownedTools}
+            onSubmit={handleSubmit}
+            busy={busy}
+            err={err}
+            submitLabel="Save Draft"
+            backTo="/scenes"
+          />
+        )}
+      </Page>
     </div>
   );
 }
