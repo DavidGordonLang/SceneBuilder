@@ -198,6 +198,94 @@ function EntryEditor({ initial, onCancel, onSave, saving }) {
   );
 }
 
+function KebabButton({ onClick, title = "More actions" }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      aria-label={title}
+      style={{
+        width: 34,
+        height: 34,
+        borderRadius: 10,
+        border: "1px solid rgba(255,255,255,0.14)",
+        background: "rgba(255,255,255,0.06)",
+        color: "#f3f3f7",
+        cursor: "pointer",
+        display: "grid",
+        placeItems: "center",
+        lineHeight: 1,
+        fontSize: 18,
+        flexShrink: 0,
+      }}
+    >
+      ⋯
+    </button>
+  );
+}
+
+function KebabMenu({ onEdit, onDelete }) {
+  return (
+    <div
+      role="menu"
+      style={{
+        position: "absolute",
+        top: 40,
+        right: 10,
+        zIndex: 50,
+        minWidth: 160,
+        borderRadius: 12,
+        border: "1px solid rgba(255,255,255,0.12)",
+        background: "rgba(10,10,12,0.96)",
+        boxShadow: "0 10px 30px rgba(0,0,0,0.45)",
+        overflow: "hidden",
+      }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <button
+        type="button"
+        role="menuitem"
+        onClick={onEdit}
+        style={{
+          width: "100%",
+          textAlign: "left",
+          padding: "10px 12px",
+          border: "none",
+          background: "transparent",
+          color: "#f3f3f7",
+          cursor: "pointer",
+          fontSize: 13,
+          fontWeight: 750,
+        }}
+      >
+        Edit
+      </button>
+
+      <div style={{ height: 1, background: "rgba(255,255,255,0.08)" }} />
+
+      <button
+        type="button"
+        role="menuitem"
+        onClick={onDelete}
+        style={{
+          width: "100%",
+          textAlign: "left",
+          padding: "10px 12px",
+          border: "none",
+          background: "transparent",
+          color: "#ffb4b4",
+          cursor: "pointer",
+          fontSize: 13,
+          fontWeight: 850,
+        }}
+      >
+        Delete
+      </button>
+    </div>
+  );
+}
+
 export default function JournalHome({ supabase, session }) {
   const { showToast } = useToast();
   const navigate = useNavigate();
@@ -211,6 +299,10 @@ export default function JournalHome({ supabase, session }) {
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState(null);
   const handledEditStateRef = useRef(false);
+
+  // Kebab state
+  const [menuOpenForId, setMenuOpenForId] = useState(null);
+  const menuRootRef = useRef(null);
 
   async function load() {
     if (!userId) return;
@@ -244,7 +336,7 @@ export default function JournalHome({ supabase, session }) {
       let list = entries;
       if (!list || list.length === 0) {
         await load();
-        list = entries; // may still be stale, so we do a direct fetch fallback below
+        list = entries;
       }
 
       // Fallback: direct fetch if we still didn't find it.
@@ -265,6 +357,29 @@ export default function JournalHome({ supabase, session }) {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location?.state]);
+
+  // Close kebab on outside click / escape
+  useEffect(() => {
+    if (!menuOpenForId) return;
+
+    function onDocDown(e) {
+      // If click is outside any of our menu roots (we render menu inside the card wrapper),
+      // we close. This is intentionally simple and reliable.
+      if (menuRootRef.current && menuRootRef.current.contains(e.target)) return;
+      setMenuOpenForId(null);
+    }
+
+    function onKey(e) {
+      if (e.key === "Escape") setMenuOpenForId(null);
+    }
+
+    document.addEventListener("mousedown", onDocDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [menuOpenForId]);
 
   const sorted = useMemo(() => {
     const list = Array.isArray(entries) ? entries : [];
@@ -299,7 +414,6 @@ export default function JournalHome({ supabase, session }) {
       buckets.get(key).items.push(e);
     }
 
-    // keys are start-of-day timestamps; sort newest day first
     const keys = Array.from(buckets.keys()).sort((a, b) => Number(b) - Number(a));
     return keys.map((k) => ({ dayKey: k, label: buckets.get(k).label, items: buckets.get(k).items }));
   }, [filtered]);
@@ -343,6 +457,20 @@ export default function JournalHome({ supabase, session }) {
     navigate(`/journal/${id}`);
   }
 
+  function toggleMenu(id) {
+    setMenuOpenForId((cur) => (cur === id ? null : id));
+  }
+
+  function handleMenuEdit(entry) {
+    setMenuOpenForId(null);
+    setEditing(entry);
+  }
+
+  async function handleMenuDelete(entry) {
+    setMenuOpenForId(null);
+    await handleDelete(entry.id);
+  }
+
   return (
     <div>
       <Page style={{ display: "grid", gap: 14 }}>
@@ -356,9 +484,7 @@ export default function JournalHome({ supabase, session }) {
               {loading ? "Loading…" : "Refresh"}
             </SmallButton>
           </div>
-          <div style={{ fontSize: 12, opacity: 0.7 }}>
-            {loading ? "Loading…" : `${entries.length} entries`}
-          </div>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>{loading ? "Loading…" : `${entries.length} entries`}</div>
         </div>
 
         {err ? (
@@ -424,11 +550,9 @@ export default function JournalHome({ supabase, session }) {
                     ENTRY_TYPES.find((t) => t.value === e.entry_type)?.label || e.entry_type || "Entry";
                   const title = e.title?.trim() ? e.title : "Untitled";
                   const preview =
-                    e.body && e.body.trim()
-                      ? e.body.length > 180
-                        ? `${e.body.slice(0, 180)}…`
-                        : e.body
-                      : "";
+                    e.body && e.body.trim() ? (e.body.length > 180 ? `${e.body.slice(0, 180)}…` : e.body) : "";
+
+                  const menuOpen = menuOpenForId === e.id;
 
                   return (
                     <div
@@ -439,12 +563,20 @@ export default function JournalHome({ supabase, session }) {
                       onKeyDown={(ev) => {
                         if (ev.key === "Enter" || ev.key === " ") openEntry(e.id);
                       }}
-                      style={{ cursor: "pointer" }}
+                      style={{ cursor: "pointer", position: "relative" }}
                       title="Open entry"
+                      ref={menuOpen ? menuRootRef : null}
                     >
                       <Card>
                         <div style={{ display: "grid", gap: 8 }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+                          <div
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              gap: 12,
+                              alignItems: "flex-start",
+                            }}
+                          >
                             <div style={{ minWidth: 0 }}>
                               <div
                                 style={{
@@ -458,56 +590,42 @@ export default function JournalHome({ supabase, session }) {
                                 {title}
                               </div>
 
-                              <div style={{ marginTop: 4, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                              <div
+                                style={{
+                                  marginTop: 4,
+                                  display: "flex",
+                                  gap: 8,
+                                  flexWrap: "wrap",
+                                  alignItems: "center",
+                                }}
+                              >
                                 <Chip>{typeLabel}</Chip>
                                 <span style={{ fontSize: 12, opacity: 0.65 }}>{formatDate(e.created_at)}</span>
                               </div>
                             </div>
 
-                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                              <SmallButton
-                                onClick={(ev) => {
-                                  ev.stopPropagation();
-                                  openEntry(e.id);
-                                }}
-                                disabled={saving}
-                                title="Open entry"
-                              >
-                                Open
-                              </SmallButton>
-                              <SmallButton
-                                onClick={(ev) => {
-                                  ev.stopPropagation();
-                                  setEditing(e);
-                                }}
-                                disabled={saving}
-                                title="Edit entry"
-                              >
-                                Edit
-                              </SmallButton>
-                              <SmallButton
-                                tone="danger"
-                                onClick={(ev) => {
-                                  ev.stopPropagation();
-                                  handleDelete(e.id);
-                                }}
-                                disabled={saving}
-                                title="Delete entry"
-                              >
-                                Delete
-                              </SmallButton>
+                            <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                              <div onClick={(ev) => ev.stopPropagation()}>
+                                <KebabButton
+                                  onClick={() => toggleMenu(e.id)}
+                                  title="Entry actions"
+                                />
+                              </div>
                             </div>
                           </div>
 
-                          {preview ? (
-                            <div style={{ opacity: 0.88, whiteSpace: "pre-wrap", lineHeight: 1.45 }}>
-                              {preview}
-                            </div>
+                          {menuOpen ? (
+                            <KebabMenu
+                              onEdit={() => handleMenuEdit(e)}
+                              onDelete={() => handleMenuDelete(e)}
+                            />
                           ) : null}
 
-                          {e.scene_id ? (
-                            <div style={{ fontSize: 12, opacity: 0.65 }}>Linked scene: {e.scene_id}</div>
+                          {preview ? (
+                            <div style={{ opacity: 0.88, whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{preview}</div>
                           ) : null}
+
+                          {e.scene_id ? <div style={{ fontSize: 12, opacity: 0.65 }}>Linked scene: {e.scene_id}</div> : null}
                         </div>
                       </Card>
                     </div>
