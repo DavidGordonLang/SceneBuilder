@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { TopBar, SmallButton, Chip, Card } from "../../components/routesUi";
+import { SmallButton, Chip, Card } from "../../components/routesUi";
 import Page from "../../components/Page";
 import { useToast } from "../../ui/ToastContext.jsx";
 import {
@@ -113,7 +113,7 @@ function EntryEditor({ initial, onCancel, onSave, saving }) {
           </div>
 
           <div style={{ display: "flex", gap: 8 }}>
-            <SmallButton disabled={saving} onClick={onCancel} title="Close editor">
+            <SmallButton disabled={saving} onClick={onCancel}>
               Close
             </SmallButton>
             <SmallButton
@@ -126,7 +126,6 @@ function EntryEditor({ initial, onCancel, onSave, saving }) {
                   scene_id: sceneId.trim() ? sceneId.trim() : null,
                 })
               }
-              title="Save entry"
             >
               {saving ? "Saving…" : "Save"}
             </SmallButton>
@@ -136,7 +135,7 @@ function EntryEditor({ initial, onCancel, onSave, saving }) {
         <Divider />
 
         <div style={{ display: "grid", gap: 10 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "160px 1fr", gap: 10, alignItems: "center" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "160px 1fr", gap: 10 }}>
             <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 800 }}>Entry type</div>
             <Select value={entryType} onChange={(e) => setEntryType(e.target.value)}>
               {ENTRY_TYPES.map((t) => (
@@ -147,33 +146,21 @@ function EntryEditor({ initial, onCancel, onSave, saving }) {
             </Select>
 
             <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 800 }}>Title</div>
-            <Input
-              type="text"
-              placeholder="Optional title"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-            />
+            <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Optional title" />
 
             <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 800 }}>Linked scene</div>
             <Input
-              type="text"
-              placeholder="Scene ID (optional for now)"
               value={sceneId}
               onChange={(e) => setSceneId(e.target.value)}
+              placeholder="Scene ID (optional for now)"
             />
           </div>
 
-          <div style={{ display: "grid", gap: 6 }}>
-            <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 800 }}>Write</div>
-            <TextArea
-              placeholder="Write your entry…"
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-            />
-            <div style={{ fontSize: 12, opacity: 0.65, lineHeight: 1.35 }}>
-              Entries are private and tied to your account. Scene linking will become a proper picker later.
-            </div>
-          </div>
+          <TextArea
+            placeholder="Write your entry…"
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+          />
         </div>
       </div>
     </Card>
@@ -184,26 +171,18 @@ export default function JournalHome({ supabase, session }) {
   const { showToast } = useToast();
   const navigate = useNavigate();
   const location = useLocation();
-
   const userId = session?.user?.id;
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
-
   const [entries, setEntries] = useState([]);
   const [search, setSearch] = useState("");
-
-  const [editing, setEditing] = useState(null); // null | entry object | { mode: 'new' }
+  const [editing, setEditing] = useState(null);
   const handledEditStateRef = useRef(false);
-
-  async function signOut() {
-    await supabase.auth.signOut();
-  }
 
   async function load() {
     if (!userId) return;
-
     setLoading(true);
     setErr("");
     try {
@@ -219,55 +198,35 @@ export default function JournalHome({ supabase, session }) {
 
   useEffect(() => {
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
-  // Allow JournalEntryView to send user back here and open editor immediately.
-   useEffect(() => {
+  useEffect(() => {
     const editId = location?.state?.editId;
-    if (!editId) return;
-    if (handledEditStateRef.current) return;
-
+    if (!editId || handledEditStateRef.current) return;
     handledEditStateRef.current = true;
 
     (async () => {
-      // Ensure we have data to find the entry.
-      if (!entries || entries.length === 0) {
-        await load();
-      }
-
-      const found = (entries || []).find((e) => e.id === editId);
-      if (found) {
-        setEditing(found);
-      } else {
-        // Fallback: open a new editor if entry isn't in the list (rare).
-        setEditing({ mode: "new" });
-      }
-
-      // Clear state so refresh/back doesn't re-trigger.
+      if (!entries.length) await load();
+      const found = entries.find((e) => e.id === editId);
+      setEditing(found || { mode: "new" });
       navigate("/journal", { replace: true, state: {} });
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location?.state]);
 
   const filtered = useMemo(() => {
-    const q = (search || "").trim().toLowerCase();
+    const q = search.trim().toLowerCase();
     if (!q) return entries;
-
-    return (entries || []).filter((e) => {
-      const t = (e.title || "").toLowerCase();
-      const b = (e.body || "").toLowerCase();
-      const ty = (e.entry_type || "").toLowerCase();
-      return t.includes(q) || b.includes(q) || ty.includes(q);
-    });
+    return entries.filter(
+      (e) =>
+        e.title?.toLowerCase().includes(q) ||
+        e.body?.toLowerCase().includes(q) ||
+        e.entry_type?.toLowerCase().includes(q)
+    );
   }, [entries, search]);
 
   async function handleSave(payload) {
     if (!userId) return;
-
     setSaving(true);
-    setErr("");
-
     try {
       if (editing?.id) {
         await updateJournalEntry({ supabase, id: editing.id, patch: payload });
@@ -276,7 +235,6 @@ export default function JournalHome({ supabase, session }) {
         await createJournalEntry({ supabase, userId, entry: payload });
         showToast?.("Created");
       }
-
       setEditing(null);
       await load();
     } catch (e) {
@@ -287,183 +245,55 @@ export default function JournalHome({ supabase, session }) {
   }
 
   async function handleDelete(id) {
-    const ok = window.confirm("Delete this entry? This cannot be undone.");
-    if (!ok) return;
-
-    setErr("");
-    try {
-      await deleteJournalEntry({ supabase, id });
-      showToast?.("Deleted");
-      await load();
-    } catch (e) {
-      setErr(e?.message || "Delete failed.");
-    }
-  }
-
-  function openEntry(id) {
-    navigate(`/journal/${id}`);
+    if (!window.confirm("Delete this entry?")) return;
+    await deleteJournalEntry({ supabase, id });
+    showToast?.("Deleted");
+    await load();
   }
 
   return (
     <div>
-      <TopBar
-        title="Journal"
-        onSignOut={signOut}
-        rightSlot={
-          <>
-            <SmallButton onClick={() => setEditing({ mode: "new" })} disabled={saving} title="New entry">
-              New entry
-            </SmallButton>
-            <SmallButton onClick={load} disabled={loading || saving} title="Refresh">
+      <Page style={{ display: "grid", gap: 14 }}>
+        {/* Contextual actions row */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+          <div style={{ display: "flex", gap: 10 }}>
+            <SmallButton onClick={() => setEditing({ mode: "new" })}>New entry</SmallButton>
+            <SmallButton onClick={load} disabled={loading}>
               {loading ? "Loading…" : "Refresh"}
             </SmallButton>
-          </>
-        }
-      />
-
-      <Page style={{ display: "grid", gap: 14 }}>
-        <Card>
-          <div style={{ display: "grid", gap: 10 }}>
-            <div style={{ fontWeight: 900, letterSpacing: 0.2 }}>Search</div>
-            <Input
-              type="text"
-              placeholder="Search entries…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-            {err ? (
-              <div
-                style={{
-                  marginTop: 2,
-                  padding: 10,
-                  borderRadius: 12,
-                  border: "1px solid rgba(255,80,80,0.30)",
-                  background: "rgba(255,80,80,0.08)",
-                  lineHeight: 1.4,
-                  fontSize: 13,
-                }}
-              >
-                {err}
-              </div>
-            ) : null}
           </div>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>
+            {loading ? "Loading…" : `${entries.length} entries`}
+          </div>
+        </div>
+
+        <Card>
+          <Input
+            placeholder="Search entries…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
         </Card>
 
-        {editing ? (
+        {editing && (
           <EntryEditor
-            initial={
-              editing?.id
-                ? editing
-                : { entry_type: "reflection", title: "", body: "", scene_id: "" }
-            }
+            initial={editing?.id ? editing : { entry_type: "reflection", title: "", body: "" }}
             saving={saving}
             onCancel={() => setEditing(null)}
             onSave={handleSave}
           />
-        ) : null}
+        )}
 
         <div style={{ display: "grid", gap: 12 }}>
-          {(filtered || []).map((e) => {
-            const typeLabel = ENTRY_TYPES.find((t) => t.value === e.entry_type)?.label || e.entry_type;
-            const title = e.title?.trim() ? e.title : "Untitled";
-            const preview = e.body ? (e.body.length > 240 ? `${e.body.slice(0, 240)}…` : e.body) : "";
-
-            return (
-              <div
-                key={e.id}
-                role="button"
-                tabIndex={0}
-                onClick={() => openEntry(e.id)}
-                onKeyDown={(ev) => {
-                  if (ev.key === "Enter" || ev.key === " ") openEntry(e.id);
-                }}
-                style={{ cursor: "pointer" }}
-                title="Open entry"
-              >
-                <Card>
-                  <div style={{ display: "grid", gap: 10 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
-                      <div style={{ minWidth: 0 }}>
-                        <div
-                          style={{
-                            fontWeight: 900,
-                            letterSpacing: 0.2,
-                            whiteSpace: "nowrap",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                          }}
-                        >
-                          {title}
-                        </div>
-                        <div style={{ marginTop: 4, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                          <Chip>{typeLabel}</Chip>
-                          <span style={{ fontSize: 12, opacity: 0.65 }}>{formatDate(e.created_at)}</span>
-                        </div>
-                      </div>
-
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                        <SmallButton
-                          onClick={(ev) => {
-                            ev.stopPropagation();
-                            openEntry(e.id);
-                          }}
-                          disabled={saving}
-                          title="Open entry"
-                        >
-                          Open
-                        </SmallButton>
-                        <SmallButton
-                          onClick={(ev) => {
-                            ev.stopPropagation();
-                            setEditing(e);
-                          }}
-                          disabled={saving}
-                          title="Edit entry"
-                        >
-                          Edit
-                        </SmallButton>
-                        <SmallButton
-                          tone="danger"
-                          onClick={(ev) => {
-                            ev.stopPropagation();
-                            handleDelete(e.id);
-                          }}
-                          disabled={saving}
-                          title="Delete entry"
-                        >
-                          Delete
-                        </SmallButton>
-                      </div>
-                    </div>
-
-                    {preview ? (
-                      <div style={{ opacity: 0.88, whiteSpace: "pre-wrap", lineHeight: 1.45 }}>
-                        {preview}
-                      </div>
-                    ) : null}
-
-                    {e.scene_id ? (
-                      <div style={{ fontSize: 12, opacity: 0.65 }}>Linked scene: {e.scene_id}</div>
-                    ) : null}
-                  </div>
-                </Card>
-              </div>
-            );
-          })}
-
-          {!loading && filtered.length === 0 ? (
-            <Card>
-              <div style={{ opacity: 0.85, lineHeight: 1.4 }}>
-                No entries yet.
-                <div style={{ marginTop: 10 }}>
-                  <SmallButton onClick={() => setEditing({ mode: "new" })}>Create your first entry</SmallButton>
-                </div>
+          {filtered.map((e) => (
+            <Card key={e.id} onClick={() => navigate(`/journal/${e.id}`)} style={{ cursor: "pointer" }}>
+              <div style={{ fontWeight: 900 }}>{e.title || "Untitled"}</div>
+              <div style={{ fontSize: 12, opacity: 0.7 }}>
+                {ENTRY_TYPES.find((t) => t.value === e.entry_type)?.label} • {formatDate(e.created_at)}
               </div>
             </Card>
-          ) : null}
+          ))}
         </div>
-
-        <div style={{ height: 24 }} />
       </Page>
     </div>
   );
