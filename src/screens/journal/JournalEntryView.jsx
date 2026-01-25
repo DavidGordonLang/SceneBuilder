@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { TopBar, SmallButton, Chip, Card } from "../../components/routesUi";
+import { SmallButton, Chip, Card } from "../../components/routesUi";
 import Page from "../../components/Page";
 import { useToast } from "../../ui/ToastContext.jsx";
 import { deleteJournalEntry, fetchJournalEntries } from "../../lib/journalApi";
@@ -38,10 +38,6 @@ export default function JournalEntryView({ supabase, session }) {
   const [err, setErr] = useState("");
   const [entry, setEntry] = useState(null);
   const [busy, setBusy] = useState(false);
-
-  async function signOut() {
-    await supabase.auth.signOut();
-  }
 
   const typeLabel = useMemo(() => {
     const v = entry?.entry_type;
@@ -89,7 +85,7 @@ export default function JournalEntryView({ supabase, session }) {
 
     try {
       await deleteJournalEntry({ supabase, id: entry.id });
-      showToast("Deleted");
+      showToast?.("Deleted");
       navigate("/journal");
     } catch (e) {
       setErr(e?.message || "Delete failed.");
@@ -100,30 +96,35 @@ export default function JournalEntryView({ supabase, session }) {
 
   return (
     <div>
-      <TopBar
-        title={typeLabel}
-        onSignOut={signOut}
-        showBack
-        backTo="/journal"
-        rightSlot={
-          entry ? (
-            <>
-              <SmallButton
-                onClick={() => navigate("/journal", { state: { editId: entry.id } })}
-                disabled={busy}
-                title="Edit entry"
-              >
-                Edit
-              </SmallButton>
-              <SmallButton tone="danger" onClick={handleDelete} disabled={busy} title="Delete entry">
-                Delete
-              </SmallButton>
-            </>
-          ) : null
-        }
-      />
-
       <Page style={{ display: "grid", gap: 14 }}>
+        {/* Contextual actions row (sub-route: back + actions; no sign out; no title row) */}
+        <div style={{ display: "flex", gap: 10, justifyContent: "space-between", alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <SmallButton onClick={() => navigate("/journal")} disabled={busy}>
+              ← Back
+            </SmallButton>
+
+            {entry ? (
+              <>
+                <SmallButton
+                  onClick={() => navigate("/journal", { state: { editId: entry.id } })}
+                  disabled={busy}
+                  title="Edit entry"
+                >
+                  Edit
+                </SmallButton>
+                <SmallButton tone="danger" onClick={handleDelete} disabled={busy} title="Delete entry">
+                  Delete
+                </SmallButton>
+              </>
+            ) : null}
+          </div>
+
+          <div style={{ fontSize: 12, opacity: 0.7 }}>
+            {loading ? "Loading…" : entry ? typeLabel : "Journal"}
+          </div>
+        </div>
+
         {loading ? <div style={{ opacity: 0.8 }}>Loading…</div> : null}
 
         {err ? (
@@ -162,9 +163,7 @@ export default function JournalEntryView({ supabase, session }) {
 
                   <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                     <Chip>{typeLabel}</Chip>
-                    <span style={{ fontSize: 12, opacity: 0.65 }}>
-                      {formatDate(entry.created_at)}
-                    </span>
+                    <span style={{ fontSize: 12, opacity: 0.65 }}>{formatDate(entry.created_at)}</span>
                   </div>
                 </div>
               </div>
