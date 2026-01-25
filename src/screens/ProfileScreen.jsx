@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { TopBar, SmallButton } from "../components/routesUi";
+import { SmallButton } from "../components/routesUi";
+import Page from "../components/Page";
 import { useAvatarUpload } from "../hooks/useAvatarUpload";
 import { useProfile } from "../hooks/useProfile";
 
@@ -71,15 +72,12 @@ export default function ProfileScreen({ session, supabase }) {
 
   // View vs Edit mode
   const searchParams = new URLSearchParams(location.search || "");
-  const from = searchParams.get("from") || "";
   const shouldStartEditing = searchParams.get("edit") === "1";
   const [editing, setEditing] = useState(shouldStartEditing);
 
   useEffect(() => {
     setEditing(shouldStartEditing);
   }, [shouldStartEditing]);
-
-  const backTo = from === "settings" ? "/settings" : "/scenes";
 
   const initials = useMemo(() => {
     const base = (profile?.display_name || session?.user?.email || "U").trim();
@@ -101,10 +99,7 @@ export default function ProfileScreen({ session, supabase }) {
       if (!path) return;
 
       try {
-        const { data, error: sErr } = await supabase.storage
-          .from("avatars")
-          .createSignedUrl(path, 60 * 60);
-
+        const { data, error: sErr } = await supabase.storage.from("avatars").createSignedUrl(path, 60 * 60);
         if (sErr) throw sErr;
         if (!cancelled) setSignedAvatarUrl(data?.signedUrl || "");
       } catch (_e) {
@@ -161,7 +156,6 @@ export default function ProfileScreen({ session, supabase }) {
     setBio(profile?.bio || "");
     setEditing(false);
 
-    // If we came in via settings intent, clean URL to standard /profile
     if (location.search) {
       navigate("/profile", { replace: true });
     }
@@ -198,35 +192,43 @@ export default function ProfileScreen({ session, supabase }) {
   const busy = loading || uploading || busySave;
 
   return (
-    <div style={{ minHeight: "100vh" }}>
-      <TopBar
-        title="Profile"
-        onSignOut={signOut}
-        showBack
-        backTo={backTo}
-        rightSlot={
-          !editing ? (
-            <SmallButton onClick={handleStartEdit} disabled={busy} title="Edit profile">
-              Edit
-            </SmallButton>
-          ) : (
-            <>
-              <SmallButton onClick={handleCancelEdit} disabled={busy} title="Cancel editing">
-                Cancel
+    <div>
+      <Page style={{ display: "grid", gap: 14 }}>
+        {/* Contextual actions row (Profile keeps sign out; no TopBar; no back) */}
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 10,
+            flexWrap: "wrap",
+          }}
+        >
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            {!editing ? (
+              <SmallButton onClick={handleStartEdit} disabled={busy} title="Edit profile">
+                Edit
               </SmallButton>
-              <SmallButton onClick={handleSave} disabled={busy} title="Save changes">
-                {busySave ? "Saving..." : "Save"}
-              </SmallButton>
-            </>
-          )
-        }
-      />
+            ) : (
+              <>
+                <SmallButton onClick={handleCancelEdit} disabled={busy} title="Cancel editing">
+                  Cancel
+                </SmallButton>
+                <SmallButton onClick={handleSave} disabled={busy} title="Save changes">
+                  {busySave ? "Saving..." : "Save"}
+                </SmallButton>
+              </>
+            )}
+          </div>
 
-      <div style={{ padding: 16, maxWidth: 720, margin: "0 auto" }}>
+          <SmallButton tone="danger" onClick={signOut} title="Sign out">
+            Sign out
+          </SmallButton>
+        </div>
+
         {error || localErr ? (
           <div
             style={{
-              marginBottom: 12,
               padding: 10,
               borderRadius: 10,
               border: "1px solid rgba(255,80,80,0.35)",
@@ -241,7 +243,6 @@ export default function ProfileScreen({ session, supabase }) {
         {localOk ? (
           <div
             style={{
-              marginBottom: 12,
               padding: 10,
               borderRadius: 10,
               border: "1px solid rgba(120,255,170,0.25)",
@@ -263,7 +264,6 @@ export default function ProfileScreen({ session, supabase }) {
             borderRadius: 14,
             border: "1px solid rgba(255,255,255,0.10)",
             background: "rgba(255,255,255,0.03)",
-            marginBottom: 14,
           }}
         >
           <div
@@ -281,11 +281,7 @@ export default function ProfileScreen({ session, supabase }) {
             }}
           >
             {signedAvatarUrl ? (
-              <img
-                src={signedAvatarUrl}
-                alt="Avatar"
-                style={{ width: "100%", height: "100%", objectFit: "cover" }}
-              />
+              <img src={signedAvatarUrl} alt="Avatar" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
             ) : (
               initials
             )}
@@ -311,13 +307,7 @@ export default function ProfileScreen({ session, supabase }) {
             </div>
           </div>
 
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            onChange={handleAvatarFile}
-            style={{ display: "none" }}
-          />
+          <input ref={fileRef} type="file" accept="image/*" onChange={handleAvatarFile} style={{ display: "none" }} />
         </div>
 
         {/* Edit fields */}
@@ -358,7 +348,6 @@ export default function ProfileScreen({ session, supabase }) {
         {!profile?.onboarding_complete ? (
           <div
             style={{
-              marginTop: 14,
               padding: 12,
               borderRadius: 14,
               border: "1px solid rgba(255,255,255,0.10)",
@@ -376,7 +365,7 @@ export default function ProfileScreen({ session, supabase }) {
             </div>
           </div>
         ) : null}
-      </div>
+      </Page>
     </div>
   );
 }
