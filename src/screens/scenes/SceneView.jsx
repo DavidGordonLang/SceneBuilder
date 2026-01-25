@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Chip, Card, SmallButton } from "../../components/routesUi";
 import Page from "../../components/Page";
+import { useToast } from "../../ui/ToastContext.jsx";
 import { fetchSceneById } from "../../lib/scenesApi";
 import { formatDate, pickParticipantLabel, pickToolIcon, pickToolLabel } from "../../lib/sceneHelpers";
 
@@ -62,13 +63,127 @@ function ToolRow({ tool }) {
   );
 }
 
+function KebabMenu({ open, onToggle, onEdit, onDelete, busy }) {
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+
+    function onDocMouseDown(e) {
+      if (!ref.current) return;
+      if (ref.current.contains(e.target)) return;
+      onToggle(false);
+    }
+
+    document.addEventListener("mousedown", onDocMouseDown);
+    return () => document.removeEventListener("mousedown", onDocMouseDown);
+  }, [open, onToggle]);
+
+  return (
+    <div ref={ref} style={{ position: "relative", display: "inline-flex" }}>
+      {/* No box around the dots */}
+      <button
+        type="button"
+        onClick={() => onToggle(!open)}
+        aria-label="Menu"
+        title="Menu"
+        style={{
+          border: "none",
+          background: "transparent",
+          color: "#f3f3f7",
+          cursor: "pointer",
+          fontSize: 22,
+          lineHeight: 1,
+          padding: 6,
+          opacity: 0.9,
+        }}
+      >
+        ⋮
+      </button>
+
+      {open ? (
+        <div
+          role="menu"
+          style={{
+            position: "absolute",
+            right: 0,
+            top: "100%",
+            marginTop: 6,
+            minWidth: 160,
+            borderRadius: 12,
+            border: "1px solid rgba(255,255,255,0.12)",
+            background: "rgba(12,12,14,0.98)",
+            boxShadow: "0 12px 30px rgba(0,0,0,0.45)",
+            overflow: "hidden",
+            zIndex: 50,
+          }}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              onToggle(false);
+              onEdit();
+            }}
+            disabled={busy}
+            style={{
+              width: "100%",
+              textAlign: "left",
+              padding: "10px 12px",
+              border: "none",
+              background: "transparent",
+              color: "#f3f3f7",
+              cursor: busy ? "not-allowed" : "pointer",
+              fontSize: 13,
+              fontWeight: 750,
+              opacity: busy ? 0.55 : 0.95,
+            }}
+          >
+            Edit
+          </button>
+
+          <div style={{ height: 1, background: "rgba(255,255,255,0.08)" }} />
+
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              onToggle(false);
+              onDelete();
+            }}
+            disabled={busy}
+            style={{
+              width: "100%",
+              textAlign: "left",
+              padding: "10px 12px",
+              border: "none",
+              background: "transparent",
+              color: "#ffb3b3",
+              cursor: busy ? "not-allowed" : "pointer",
+              fontSize: 13,
+              fontWeight: 800,
+              opacity: busy ? 0.55 : 1,
+            }}
+          >
+            Delete
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export default function SceneView({ supabase }) {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { showToast } = useToast();
 
   const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [scene, setScene] = useState(null);
+
+  const [menuOpen, setMenuOpen] = useState(false);
 
   async function reload() {
     setLoading(true);
@@ -95,8 +210,36 @@ export default function SceneView({ supabase }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
+  async function handleDelete() {
+    if (!supabase || !id) return;
+
+    const ok = window.confirm("Delete this scene? This cannot be undone.");
+    if (!ok) return;
+
+    setBusy(true);
+    setErr("");
+
+    try {
+      // Delete join rows first (safe even if FK cascade exists).
+      const { error: tErr } = await supabase.from("scene_tools").delete().eq("scene_id", id);
+      if (tErr) throw tErr;
+
+      const { error: pErr } = await supabase.from("scene_participants").delete().eq("scene_id", id);
+      if (pErr) throw pErr;
+
+      const { error: sErr } = await supabase.from("scenes").delete().eq("id", id);
+      if (sErr) throw sErr;
+
+      showToast?.("Deleted");
+      navigate("/scenes");
+    } catch (e) {
+      setErr(e?.message || "Delete failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const title = scene?.title || scene?.name || "Untitled scene";
-  const status = (scene?.status || "draft").toUpperCase();
 
   const participants = scene?.scene_participants?.map((sp) => sp.participants).filter(Boolean) ?? [];
   const tools = scene?.scene_tools?.map((st) => st.tools_user).filter(Boolean) ?? [];
@@ -104,7 +247,7 @@ export default function SceneView({ supabase }) {
   return (
     <div>
       <Page style={{ display: "grid", gap: 14 }}>
-        {/* Sub-route contextual row: Back + actions */}
+        {/* Sub-route contextual row: Back + kebab */}
         <div
           style={{
             display: "flex",
@@ -118,9 +261,13 @@ export default function SceneView({ supabase }) {
             ← Back
           </SmallButton>
 
-          <SmallButton disabled={!scene} onClick={() => navigate(`/scenes/${id}/edit`)} title="Edit scene">
-            Edit
-          </SmallButton>
+          <KebabMenu
+            open={menuOpen}
+            onToggle={setMenuOpen}
+            busy={busy || loading || !scene}
+            onEdit={() => navigate(`/scenes/${id}/edit`)}
+            onDelete={handleDelete}
+          />
         </div>
 
         {loading ? <div style={{ opacity: 0.8 }}>Loading…</div> : null}
@@ -153,9 +300,6 @@ export default function SceneView({ supabase }) {
                   <div style={{ marginTop: 6, opacity: 0.7, fontSize: 12 }}>
                     {formatDate(scene.scheduled_at || scene.created_at) || "—"}
                   </div>
-                </div>
-                <div style={{ display: "flex", alignItems: "flex-start" }}>
-                  <Chip>{status}</Chip>
                 </div>
               </div>
 
