@@ -67,102 +67,68 @@ function KebabMenu({ open, onToggle, onEdit, onDelete, busy }) {
   const ref = useRef(null);
 
   useEffect(() => {
-    if (!open) return;
-
-    function onDocMouseDown(e) {
+    function onDoc(e) {
+      if (!open) return;
       if (!ref.current) return;
       if (ref.current.contains(e.target)) return;
       onToggle(false);
     }
-
-    document.addEventListener("mousedown", onDocMouseDown);
-    return () => document.removeEventListener("mousedown", onDocMouseDown);
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
   }, [open, onToggle]);
 
   return (
-    <div ref={ref} style={{ position: "relative", display: "inline-flex" }}>
-      {/* No box around the dots */}
-      <button
-        type="button"
-        onClick={() => onToggle(!open)}
-        aria-label="Menu"
-        title="Menu"
-        style={{
-          border: "none",
-          background: "transparent",
-          color: "#f3f3f7",
-          cursor: "pointer",
-          fontSize: 22,
-          lineHeight: 1,
-          padding: 6,
-          opacity: 0.9,
-        }}
-      >
-        ⋮
-      </button>
-
+    <div ref={ref} style={{ position: "relative" }}>
+      <SmallButton onClick={() => onToggle(!open)} disabled={busy} aria-label="Scene actions">
+        ⋯
+      </SmallButton>
       {open ? (
         <div
-          role="menu"
           style={{
             position: "absolute",
             right: 0,
-            top: "100%",
-            marginTop: 6,
+            top: 38,
             minWidth: 160,
-            borderRadius: 12,
+            borderRadius: 14,
             border: "1px solid rgba(255,255,255,0.12)",
-            background: "rgba(12,12,14,0.98)",
-            boxShadow: "0 12px 30px rgba(0,0,0,0.45)",
+            background: "rgba(20,20,24,0.98)",
+            boxShadow: "0 18px 40px rgba(0,0,0,0.55)",
             overflow: "hidden",
-            zIndex: 50,
+            zIndex: 10,
           }}
         >
           <button
-            type="button"
-            role="menuitem"
             onClick={() => {
               onToggle(false);
               onEdit();
             }}
-            disabled={busy}
             style={{
               width: "100%",
-              textAlign: "left",
               padding: "10px 12px",
-              border: "none",
+              textAlign: "left",
               background: "transparent",
-              color: "#f3f3f7",
-              cursor: busy ? "not-allowed" : "pointer",
-              fontSize: 13,
-              fontWeight: 750,
-              opacity: busy ? 0.55 : 0.95,
+              border: "none",
+              color: "rgba(255,255,255,0.92)",
+              cursor: "pointer",
+              fontWeight: 700,
             }}
           >
             Edit
           </button>
-
-          <div style={{ height: 1, background: "rgba(255,255,255,0.08)" }} />
-
           <button
-            type="button"
-            role="menuitem"
             onClick={() => {
               onToggle(false);
               onDelete();
             }}
-            disabled={busy}
             style={{
               width: "100%",
-              textAlign: "left",
               padding: "10px 12px",
-              border: "none",
+              textAlign: "left",
               background: "transparent",
-              color: "#ffb3b3",
-              cursor: busy ? "not-allowed" : "pointer",
-              fontSize: 13,
+              border: "none",
+              color: "rgba(255,90,90,0.95)",
+              cursor: "pointer",
               fontWeight: 800,
-              opacity: busy ? 0.55 : 1,
             }}
           >
             Delete
@@ -173,182 +139,179 @@ function KebabMenu({ open, onToggle, onEdit, onDelete, busy }) {
   );
 }
 
-export default function SceneView({ supabase }) {
+export default function SceneView() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { showToast } = useToast();
+  const toast = useToast();
 
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [scene, setScene] = useState(null);
-
   const [menuOpen, setMenuOpen] = useState(false);
-
-  async function reload() {
-    setLoading(true);
-    setErr("");
-    try {
-      const data = await fetchSceneById(id);
-      setScene(data);
-    } catch (e) {
-      setErr(e?.message || "Failed to load scene.");
-    } finally {
-      setLoading(false);
-    }
-  }
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     let alive = true;
     (async () => {
-      if (!alive) return;
-      await reload();
+      setLoading(true);
+      setErr("");
+      try {
+        const s = await fetchSceneById(id);
+        if (!alive) return;
+        setScene(s);
+      } catch (e) {
+        if (!alive) return;
+        setErr(e?.message || "Failed to load scene.");
+      } finally {
+        if (!alive) return;
+        setLoading(false);
+      }
     })();
     return () => {
       alive = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   async function handleDelete() {
-    if (!supabase || !id) return;
-
+    if (!scene?.id) return;
     const ok = window.confirm("Delete this scene? This cannot be undone.");
     if (!ok) return;
 
     setBusy(true);
-    setErr("");
-
     try {
-      // Delete join rows first (safe even if FK cascade exists).
-      const { error: tErr } = await supabase.from("scene_tools").delete().eq("scene_id", id);
-      if (tErr) throw tErr;
+      // Defensive: delete join rows first then scene.
+      // (Matches your earlier approach in chat; keeping it local here.)
+      const { supabase } = await import("../../lib/supabaseClient.js").then((m) => m);
+      {
+        const { error } = await supabase.from("scene_participants").delete().eq("scene_id", scene.id);
+        if (error) throw error;
+      }
+      {
+        const { error } = await supabase.from("scene_tools").delete().eq("scene_id", scene.id);
+        if (error) throw error;
+      }
+      {
+        const { error } = await supabase.from("scenes").delete().eq("id", scene.id);
+        if (error) throw error;
+      }
 
-      const { error: pErr } = await supabase.from("scene_participants").delete().eq("scene_id", id);
-      if (pErr) throw pErr;
-
-      const { error: sErr } = await supabase.from("scenes").delete().eq("id", id);
-      if (sErr) throw sErr;
-
-      showToast?.("Deleted");
+      toast.show("Scene deleted.");
       navigate("/scenes");
     } catch (e) {
-      setErr(e?.message || "Delete failed.");
+      toast.show(e?.message || "Could not delete scene.");
     } finally {
       setBusy(false);
     }
   }
 
-  const title = scene?.title || scene?.name || "Untitled scene";
-
-  const participants = scene?.scene_participants?.map((sp) => sp.participants).filter(Boolean) ?? [];
-  const tools = scene?.scene_tools?.map((st) => st.tools_user).filter(Boolean) ?? [];
+  const participants =
+    scene?.scene_participants?.map((sp) => sp?.participants).filter(Boolean) ?? [];
+  const tools =
+    scene?.scene_tools
+      ?.map((st) => {
+        const tu = st?.tools_user;
+        const tg = tu?.tools_global;
+        const name = pickToolLabel(tu, tg);
+        const icon = pickToolIcon(tu, tg);
+        return {
+          id: tu?.id || st?.tool_user_id,
+          name,
+          icon,
+          tags: tg?.tags || [],
+          safety_level: tg?.safety_level || null,
+          raw: { tu, tg },
+        };
+      })
+      .filter((t) => t?.id) ?? [];
 
   return (
     <div>
-      <Page style={{ display: "grid", gap: 14 }}>
-        {/* Sub-route contextual row: Back + kebab */}
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 10,
-            flexWrap: "wrap",
-          }}
-        >
-          <SmallButton onClick={() => navigate("/scenes")} title="Back to Scenes">
-            ← Back
-          </SmallButton>
-
-          <KebabMenu
-            open={menuOpen}
-            onToggle={setMenuOpen}
-            busy={busy || loading || !scene}
-            onEdit={() => navigate(`/scenes/${id}/edit`)}
-            onDelete={handleDelete}
-          />
+      <Page
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          marginBottom: 14,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+          <SmallButton onClick={() => navigate(-1)}>← Back</SmallButton>
+          <div style={{ fontWeight: 900, fontSize: 18, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {scene?.title || "Scene"}
+          </div>
         </div>
 
-        {loading ? <div style={{ opacity: 0.8 }}>Loading…</div> : null}
+        <KebabMenu
+          open={menuOpen}
+          onToggle={setMenuOpen}
+          onEdit={() => navigate(`/scenes/${id}/edit`)}
+          onDelete={handleDelete}
+          busy={busy}
+        />
+      </Page>
 
-        {err ? (
-          <Card>
-            <div
-              style={{
-                padding: 12,
-                borderRadius: 12,
-                border: "1px solid rgba(255,80,80,0.35)",
-                background: "rgba(255,80,80,0.10)",
-                fontSize: 13,
-                lineHeight: 1.4,
-              }}
-            >
-              {err}
-            </div>
-          </Card>
-        ) : null}
-
-        {!loading && scene ? (
-          <>
+      <Page>
+        {loading ? (
+          <div style={{ opacity: 0.7 }}>Loading…</div>
+        ) : err ? (
+          <div style={{ opacity: 0.9 }}>{err}</div>
+        ) : !scene ? (
+          <div style={{ opacity: 0.7 }}>Not found.</div>
+        ) : (
+          <div style={{ display: "grid", gap: 12 }}>
             <Card>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontWeight: 950, fontSize: 18, overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {title}
-                  </div>
-                  <div style={{ marginTop: 6, opacity: 0.7, fontSize: 12 }}>
-                    {formatDate(scene.scheduled_at || scene.created_at) || "—"}
+              <div style={{ display: "grid", gap: 10 }}>
+                <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10 }}>
+                  <div style={{ fontWeight: 900, fontSize: 18 }}>{scene.title}</div>
+                  <div style={{ opacity: 0.65, fontSize: 12 }}>
+                    {formatDate(scene.scheduled_for || scene.created_at) || "—"}
                   </div>
                 </div>
-              </div>
 
-              {scene.intent ? (
-                <div style={{ marginTop: 10, opacity: 0.9 }}>
-                  <div style={{ fontSize: 12, opacity: 0.7 }}>Intent</div>
-                  <div style={{ marginTop: 4, lineHeight: 1.35 }}>{scene.intent}</div>
-                </div>
-              ) : null}
+                {scene.emotional_state ? (
+                  <div style={{ marginTop: 10, opacity: 0.9 }}>
+                    <div style={{ fontSize: 12, opacity: 0.7 }}>Intent</div>
+                    <div style={{ marginTop: 4, lineHeight: 1.35 }}>{scene.emotional_state}</div>
+                  </div>
+                ) : null}
 
-              {scene.notes ? (
-                <div style={{ marginTop: 10, opacity: 0.9 }}>
-                  <div style={{ fontSize: 12, opacity: 0.7 }}>Notes</div>
-                  <div style={{ marginTop: 4, lineHeight: 1.35, whiteSpace: "pre-wrap" }}>{scene.notes}</div>
-                </div>
-              ) : null}
-            </Card>
-
-            <Card>
-              <div style={{ fontWeight: 900 }}>Participants</div>
-              <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 8 }}>
-                {participants.length ? (
-                  participants.map((p) => <Chip key={p.id}>{pickParticipantLabel(p)}</Chip>)
-                ) : (
-                  <div style={{ opacity: 0.7, fontSize: 13 }}>None selected</div>
-                )}
+                {scene.emotional_notes ? (
+                  <div style={{ marginTop: 10, opacity: 0.9 }}>
+                    <div style={{ fontSize: 12, opacity: 0.7 }}>Notes</div>
+                    <div style={{ marginTop: 4, lineHeight: 1.35, whiteSpace: "pre-wrap" }}>{scene.emotional_notes}</div>
+                  </div>
+                ) : null}
               </div>
             </Card>
 
             <Card>
-              <div style={{ fontWeight: 900 }}>Tools</div>
-              <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
-                {tools.length ? (
-                  tools.map((tu) => {
-                    const name = pickToolLabel(tu);
-                    const icon = pickToolIcon(tu);
-                    const g = tu.tools_global;
-                    const tags = g?.tags || tu.tags_override || [];
-                    const safety = g?.safety_level || null;
-
-                    return <ToolRow key={tu.id} tool={{ name, icon, tags, safety_level: safety }} />;
-                  })
-                ) : (
-                  <div style={{ opacity: 0.7, fontSize: 13 }}>None selected</div>
-                )}
-              </div>
+              <div style={{ fontWeight: 900, marginBottom: 10 }}>Participants</div>
+              {participants.length ? (
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {participants.map((p) => (
+                    <Chip key={p.id}>{pickParticipantLabel(p)}</Chip>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ opacity: 0.65, fontSize: 12 }}>No participants selected.</div>
+              )}
             </Card>
-          </>
-        ) : null}
+
+            <Card>
+              <div style={{ fontWeight: 900, marginBottom: 10 }}>Tools</div>
+              {tools.length ? (
+                <div style={{ display: "grid", gap: 10 }}>
+                  {tools.map((t) => (
+                    <ToolRow key={t.id} tool={t} />
+                  ))}
+                </div>
+              ) : (
+                <div style={{ opacity: 0.65, fontSize: 12 }}>No tools selected.</div>
+              )}
+            </Card>
+          </div>
+        )}
       </Page>
     </div>
   );
