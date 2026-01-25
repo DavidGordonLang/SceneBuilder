@@ -31,7 +31,6 @@ function parseHashSections(raw) {
     const m = line.match(/^\s*#\s+(.*)\s*$/);
     if (m) {
       sawHeading = true;
-      // push previous
       if (current && (current.bodyLines.length || current.title)) {
         sections.push({
           title: current.title || "Section",
@@ -51,7 +50,6 @@ function parseHashSections(raw) {
     });
   }
 
-  // If the user never used headings, keep a single "Plan" section.
   if (!sawHeading) {
     return [
       {
@@ -61,7 +59,6 @@ function parseHashSections(raw) {
     ];
   }
 
-  // Remove empty sections (e.g., headings with nothing under them)
   return sections.filter((s) => (s.title && s.title.trim()) || (s.body && s.body.trim()));
 }
 
@@ -69,15 +66,12 @@ export default function ScenesHome() {
   const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false); // delete / mutations
+  const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [scenes, setScenes] = useState([]);
 
-  // Multiple scenes can be expanded at once
   const [openScenes, setOpenScenes] = useState(() => new Set());
 
-  // Cache full scene details once expanded (lazy-load)
-  // shape: { [sceneId]: { status: 'idle'|'loading'|'ready'|'error', data?: any, error?: string } }
   const [details, setDetails] = useState({});
 
   async function reload() {
@@ -135,7 +129,6 @@ export default function ScenesHome() {
     setBusy(true);
     setErr("");
     try {
-      // delete join rows first, then delete the scene
       const { supabase } = await import("../../lib/supabaseClient.js").then((m) => m);
 
       {
@@ -151,14 +144,12 @@ export default function ScenesHome() {
         if (error) throw error;
       }
 
-      // Close it if it was open
       setOpenScenes((prev) => {
         const next = new Set(prev);
         next.delete(sceneId);
         return next;
       });
 
-      // Drop cached details for deleted scene
       setDetails((prev) => {
         const next = { ...prev };
         delete next[sceneId];
@@ -176,7 +167,6 @@ export default function ScenesHome() {
   return (
     <div>
       <Page style={{ display: "grid", gap: 12 }}>
-        {/* Contextual actions row (no page title) */}
         <div
           style={{
             display: "flex",
@@ -187,9 +177,7 @@ export default function ScenesHome() {
           }}
         >
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-            <SmallButton asLink to="/scenes/new">
-              + New scene
-            </SmallButton>
+            <SmallButton asLink to="/scenes/new">+ New scene</SmallButton>
             <SmallButton onClick={reload} disabled={loading || busy}>
               {loading ? "Loading…" : "Refresh"}
             </SmallButton>
@@ -238,18 +226,15 @@ export default function ScenesHome() {
               ? scenes.map((s) => {
                   const title = s.title || "Untitled scene";
 
-                  // quick fields from list
                   const intent = s.emotional_state || "";
                   const isOpen = openScenes.has(s.id);
 
-                  // We only show date if it exists; no placeholders
                   const whenValue = s.scheduled_for || s.started_at || null;
                   const when = whenValue ? formatDate(whenValue) : "";
 
                   const det = details?.[s.id];
                   const full = det?.status === "ready" ? det.data : null;
 
-                  // Prefer full details if loaded
                   const fullIntent = full?.emotional_state ?? intent;
                   const fullNotes = full?.emotional_notes ?? "";
 
@@ -257,9 +242,7 @@ export default function ScenesHome() {
                     full?.scene_participants?.map((sp) => sp?.participants).filter(Boolean) ?? [];
 
                   const tools =
-                    full?.scene_tools
-                      ?.map((st) => st?.tools_user)
-                      .filter(Boolean) ?? [];
+                    full?.scene_tools?.map((st) => st?.tools_user).filter(Boolean) ?? [];
 
                   const sections = parseHashSections(fullNotes);
 
@@ -272,7 +255,6 @@ export default function ScenesHome() {
                       }}
                     >
                       <div style={{ display: "grid", gap: 10 }}>
-                        {/* Header */}
                         <div
                           style={{
                             display: "flex",
@@ -313,7 +295,6 @@ export default function ScenesHome() {
                             ) : null}
                           </div>
 
-                          {/* Visual affordance */}
                           <div
                             aria-hidden="true"
                             style={{
@@ -335,16 +316,11 @@ export default function ScenesHome() {
                           </div>
                         </div>
 
-                        {/* Expanded content */}
                         {isOpen ? (
                           <div
                             style={{ display: "grid", gap: 12 }}
-                            onClick={(e) => {
-                              // allow interaction inside expanded area without collapsing
-                              e.stopPropagation();
-                            }}
+                            onClick={(e) => e.stopPropagation()}
                           >
-                            {/* Loading / error state for details */}
                             {det?.status === "loading" ? (
                               <div style={{ opacity: 0.75, fontSize: 13 }}>Loading details…</div>
                             ) : det?.status === "error" ? (
@@ -362,19 +338,23 @@ export default function ScenesHome() {
                               </div>
                             ) : null}
 
-                            {/* Participants (top, directly under intent) */}
-                            {participants.length ? (
-                              <div style={{ display: "grid", gap: 6 }}>
-                                <div style={{ fontSize: 12, opacity: 0.7 }}>Participants</div>
+                            {/* Participants ALWAYS shown when expanded (so user isn't confused) */}
+                            <div style={{ display: "grid", gap: 6 }}>
+                              <div style={{ fontSize: 12, opacity: 0.7 }}>Participants</div>
+                              {participants.length ? (
                                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                                   {participants.map((p) => (
                                     <Chip key={p.id}>{pickParticipantLabel(p)}</Chip>
                                   ))}
                                 </div>
-                              </div>
-                            ) : null}
+                              ) : (
+                                <div style={{ opacity: 0.7, fontSize: 13 }}>
+                                  None selected yet.{" "}
+                                  <span style={{ opacity: 0.8 }}>Edit to add.</span>
+                                </div>
+                              )}
+                            </div>
 
-                            {/* Sections (from notes, using # headings) */}
                             {sections.length ? (
                               <div style={{ display: "grid", gap: 10 }}>
                                 {sections.map((sec, idx) => (
@@ -404,7 +384,6 @@ export default function ScenesHome() {
                               </div>
                             ) : null}
 
-                            {/* Tools (compact, bottom) */}
                             {tools.length ? (
                               <div style={{ display: "grid", gap: 6 }}>
                                 <div style={{ fontSize: 12, opacity: 0.7 }}>Tools</div>
@@ -423,7 +402,6 @@ export default function ScenesHome() {
                               </div>
                             ) : null}
 
-                            {/* Action row (Edit/Delete only) */}
                             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                               <SmallButton
                                 onClick={(e) => {
