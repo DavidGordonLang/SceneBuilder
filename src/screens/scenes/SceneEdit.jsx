@@ -1,11 +1,18 @@
 import React, { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
-import { TopBar } from "../../components/routesUi";
-import { fetchOwnedToolsForPicker, fetchParticipants, fetchSceneById, updateScene } from "../../lib/scenesApi";
+import { useNavigate, useParams } from "react-router-dom";
+import { SmallButton } from "../../components/routesUi";
+import Page from "../../components/Page";
+import {
+  fetchOwnedToolsForPicker,
+  fetchParticipants,
+  fetchSceneById,
+  updateScene,
+} from "../../lib/scenesApi";
 import SceneForm from "./SceneForm";
 
 export default function SceneEdit({ supabase }) {
   const { id } = useParams();
+  const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -14,10 +21,6 @@ export default function SceneEdit({ supabase }) {
   const [participants, setParticipants] = useState([]);
   const [ownedTools, setOwnedTools] = useState([]);
   const [initial, setInitial] = useState(null);
-
-  async function signOut() {
-    await supabase.auth.signOut();
-  }
 
   useEffect(() => {
     let alive = true;
@@ -80,21 +83,30 @@ export default function SceneEdit({ supabase }) {
 
   return (
     <div>
-      <TopBar title="Edit Scene" onSignOut={signOut} />
-      {loading ? (
-        <div style={{ padding: 16, opacity: 0.8 }}>Loading…</div>
-      ) : (
-        <SceneForm
-          initial={initial || {}}
-          participants={participants}
-          ownedTools={ownedTools}
-          onSubmit={handleSubmit}
-          busy={busy}
-          err={err}
-          submitLabel="Save Changes"
-          backTo={`/scenes/${id}`}
-        />
-      )}
+      <Page style={{ display: "grid", gap: 14 }}>
+        {/* Sub-route contextual row: Back only (form keeps its own Save button) */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+          <SmallButton onClick={() => navigate(`/scenes/${id}`)} title="Back to scene">
+            ← Back
+          </SmallButton>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>Edit scene</div>
+        </div>
+
+        {loading ? (
+          <div style={{ opacity: 0.8 }}>Loading…</div>
+        ) : (
+          <SceneForm
+            initial={initial || {}}
+            participants={participants}
+            ownedTools={ownedTools}
+            onSubmit={handleSubmit}
+            busy={busy}
+            err={err}
+            submitLabel="Save Changes"
+            backTo={`/scenes/${id}`}
+          />
+        )}
+      </Page>
     </div>
   );
 }
