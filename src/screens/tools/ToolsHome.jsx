@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Chip, SmallButton } from "../../components/routesUi";
 import Page from "../../components/Page";
 import {
@@ -9,7 +9,112 @@ import {
   updateUserToolStatus,
 } from "../../lib/toolsApi";
 
-function ToolRow({ tool, actions }) {
+function KebabMenu({ items, disabled }) {
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef(null);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    function onDown(e) {
+      if (!open) return;
+      const t = e.target;
+      if (btnRef.current?.contains(t)) return;
+      if (menuRef.current?.contains(t)) return;
+      setOpen(false);
+    }
+    function onKey(e) {
+      if (!open) return;
+      if (e.key === "Escape") setOpen(false);
+    }
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+      <button
+        ref={btnRef}
+        type="button"
+        disabled={disabled}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (disabled) return;
+          setOpen((v) => !v);
+        }}
+        aria-label="More actions"
+        title="More"
+        style={{
+          border: "none",
+          background: "transparent",
+          color: "#f3f3f7",
+          cursor: disabled ? "not-allowed" : "pointer",
+          padding: 6,
+          lineHeight: 1,
+          fontSize: 18,
+          opacity: disabled ? 0.45 : 0.85,
+        }}
+      >
+        ⋯
+      </button>
+
+      {open ? (
+        <div
+          ref={menuRef}
+          style={{
+            position: "absolute",
+            right: 0,
+            top: "calc(100% + 8px)",
+            minWidth: 170,
+            padding: 6,
+            borderRadius: 12,
+            border: "1px solid rgba(255,255,255,0.12)",
+            background: "rgba(20,20,24,0.92)",
+            backdropFilter: "blur(10px)",
+            WebkitBackdropFilter: "blur(10px)",
+            boxShadow: "0 10px 24px rgba(0,0,0,0.35)",
+            zIndex: 50,
+            display: "grid",
+            gap: 4,
+          }}
+        >
+          {items.map((it) => (
+            <button
+              key={it.key}
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setOpen(false);
+                it.onClick?.();
+              }}
+              style={{
+                textAlign: "left",
+                width: "100%",
+                border: "none",
+                borderRadius: 10,
+                padding: "10px 10px",
+                background: it.tone === "danger" ? "rgba(255,80,80,0.12)" : "rgba(255,255,255,0.06)",
+                color: "#f3f3f7",
+                cursor: "pointer",
+                fontSize: 12,
+                fontWeight: 750,
+                opacity: 0.95,
+              }}
+              title={it.title || it.label}
+            >
+              {it.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ToolRow({ tool, menuItems }) {
   const icon = tool.icon || "🧰";
   const tags = Array.isArray(tool.tags) ? tool.tags : [];
   const safety = tool.safety_level ? String(tool.safety_level).toUpperCase() : null;
@@ -41,33 +146,19 @@ function ToolRow({ tool, actions }) {
       </div>
 
       <div style={{ minWidth: 0 }}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "baseline",
-            justifyContent: "space-between",
-            gap: 10,
-          }}
-        >
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10 }}>
           <div style={{ minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-              <div
-                style={{
-                  fontWeight: 800,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-              >
+              <div style={{ fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {tool.name}
               </div>
               {safety ? <span style={{ opacity: 0.6, fontSize: 12 }}>{safety}</span> : null}
             </div>
           </div>
 
-          {actions ? (
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-              {actions}
+          {menuItems?.length ? (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
+              <KebabMenu items={menuItems} />
             </div>
           ) : null}
         </div>
@@ -240,7 +331,15 @@ export default function ToolsHome() {
     <div>
       <Page style={{ display: "grid", gap: 14 }}>
         {/* Contextual actions row (no page title, no sign out) */}
-        <div style={{ display: "flex", gap: 10, justifyContent: "space-between", alignItems: "center", flexWrap: "wrap" }}>
+        <div
+          style={{
+            display: "flex",
+            gap: 10,
+            justifyContent: "space-between",
+            alignItems: "center",
+            flexWrap: "wrap",
+          }}
+        >
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <Segmented
               value={tab}
@@ -275,10 +374,7 @@ export default function ToolsHome() {
 
         {tab === "drawer" ? (
           <div style={{ display: "grid", gap: 16 }}>
-            <Section
-              title="Owned tools"
-              subtitle={owned.length ? null : "No owned tools yet. Add some from the Vault."}
-            >
+            <Section title="Owned tools" subtitle={owned.length ? null : "No owned tools yet. Add some from the Vault."}>
               {owned.length ? (
                 <div style={{ display: "grid", gap: 10 }}>
                   {owned.map((t) => {
@@ -292,16 +388,14 @@ export default function ToolsHome() {
                       <ToolRow
                         key={t.id}
                         tool={{ name, icon, tags, safety_level: safety }}
-                        actions={
-                          <SmallButton
-                            tone="danger"
-                            disabled={busy}
-                            onClick={() => removeFromDrawer(t.id, name)}
-                            title="Remove from Owned"
-                          >
-                            Remove
-                          </SmallButton>
-                        }
+                        menuItems={[
+                          {
+                            key: "remove",
+                            label: "Remove",
+                            tone: "danger",
+                            onClick: () => removeFromDrawer(t.id, name),
+                          },
+                        ]}
                       />
                     );
                   })}
@@ -309,10 +403,7 @@ export default function ToolsHome() {
               ) : null}
             </Section>
 
-            <Section
-              title="Craving drawer"
-              subtitle={craving.length ? null : "Nothing in craving yet. Add items from the Vault."}
-            >
+            <Section title="Craving drawer" subtitle={craving.length ? null : "Nothing in craving yet. Add items from the Vault."}>
               {craving.length ? (
                 <div style={{ display: "grid", gap: 10 }}>
                   {craving.map((t) => {
@@ -326,25 +417,19 @@ export default function ToolsHome() {
                       <ToolRow
                         key={t.id}
                         tool={{ name, icon, tags, safety_level: safety }}
-                        actions={
-                          <>
-                            <SmallButton
-                              disabled={busy}
-                              onClick={() => moveCravingToOwned(t.id)}
-                              title="Move this tool into Owned"
-                            >
-                              Move to Owned
-                            </SmallButton>
-                            <SmallButton
-                              tone="danger"
-                              disabled={busy}
-                              onClick={() => removeFromDrawer(t.id, name)}
-                              title="Remove from Craving"
-                            >
-                              Remove
-                            </SmallButton>
-                          </>
-                        }
+                        menuItems={[
+                          {
+                            key: "move",
+                            label: "Move to Owned",
+                            onClick: () => moveCravingToOwned(t.id),
+                          },
+                          {
+                            key: "remove",
+                            label: "Remove",
+                            tone: "danger",
+                            onClick: () => removeFromDrawer(t.id, name),
+                          },
+                        ]}
                       />
                     );
                   })}
@@ -374,34 +459,69 @@ export default function ToolsHome() {
                 const inCraving = cravingGlobalIds.has(t.id);
 
                 return (
-                  <ToolRow
+                  <div
                     key={t.id}
-                    tool={t}
-                    actions={
-                      <>
-                        <SmallButton
-                          disabled={busy || inCraving || inOwned}
-                          onClick={() => addTo("craving", t.id)}
-                          title={
-                            inOwned
-                              ? "Already in Owned"
-                              : inCraving
-                              ? "Already in Craving"
-                              : "Add to Craving Drawer"
-                          }
-                        >
-                          + Craving
-                        </SmallButton>
-                        <SmallButton
-                          disabled={busy || inOwned}
-                          onClick={() => addTo("owned", t.id)}
-                          title={inOwned ? "Already in Owned" : "Add to Owned Tools"}
-                        >
-                          + Owned
-                        </SmallButton>
-                      </>
-                    }
-                  />
+                    style={{
+                      padding: 12,
+                      borderRadius: 14,
+                      border: "1px solid rgba(255,255,255,0.10)",
+                      background: "rgba(255,255,255,0.03)",
+                      display: "grid",
+                      gridTemplateColumns: "36px 1fr",
+                      gap: 10,
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: 36,
+                        height: 36,
+                        borderRadius: 12,
+                        display: "grid",
+                        placeItems: "center",
+                        background: "rgba(255,255,255,0.05)",
+                        fontSize: 18,
+                      }}
+                    >
+                      {t.icon || "🧰"}
+                    </div>
+
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline" }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {t.name}
+                          </div>
+                        </div>
+
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                          <SmallButton
+                            disabled={busy || inCraving || inOwned}
+                            onClick={() => addTo("craving", t.id)}
+                            title={inOwned ? "Already in Owned" : inCraving ? "Already in Craving" : "Add to Craving Drawer"}
+                          >
+                            + Craving
+                          </SmallButton>
+                          <SmallButton
+                            disabled={busy || inOwned}
+                            onClick={() => addTo("owned", t.id)}
+                            title={inOwned ? "Already in Owned" : "Add to Owned Tools"}
+                          >
+                            + Owned
+                          </SmallButton>
+                        </div>
+                      </div>
+
+                      {Array.isArray(t.tags) && t.tags.length ? (
+                        <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          {t.tags.slice(0, 6).map((tag) => (
+                            <Chip key={tag}>{tag}</Chip>
+                          ))}
+                        </div>
+                      ) : (
+                        <div style={{ marginTop: 6, opacity: 0.6, fontSize: 12 }}>No tags</div>
+                      )}
+                    </div>
+                  </div>
                 );
               })}
             </div>
