@@ -206,24 +206,22 @@ function KebabButton({ onClick, title = "More actions" }) {
       title={title}
       aria-label={title}
       style={{
-        width: 34,
-        height: 34,
-        borderRadius: 10,
-        border: "1px solid rgba(255,255,255,0.14)",
-        background: "rgba(255,255,255,0.06)",
-        color: "#f3f3f7",
+        border: "none",
+        background: "transparent",
+        color: "rgba(243,243,247,0.85)",
         cursor: "pointer",
-        display: "grid",
-        placeItems: "center",
+        padding: 6,
+        margin: -6, // keeps alignment tight without expanding layout
         lineHeight: 1,
-        fontSize: 18,
-        flexShrink: 0,
+        fontSize: 20,
+        fontWeight: 900,
       }}
     >
       ⋯
     </button>
   );
 }
+
 
 function KebabMenu({ onEdit, onDelete }) {
   return (
