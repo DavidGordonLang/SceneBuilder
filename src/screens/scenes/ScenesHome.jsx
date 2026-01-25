@@ -1,8 +1,13 @@
 import React, { useEffect, useState } from "react";
-import { Card, SmallButton } from "../../components/routesUi";
+import { Card, Chip, SmallButton } from "../../components/routesUi";
 import Page from "../../components/Page";
-import { fetchScenes } from "../../lib/scenesApi";
-import { formatDate } from "../../lib/sceneHelpers";
+import { fetchSceneById, fetchScenes } from "../../lib/scenesApi";
+import {
+  formatDate,
+  pickParticipantLabel,
+  pickToolIcon,
+  pickToolLabel,
+} from "../../lib/sceneHelpers";
 import { useNavigate } from "react-router-dom";
 
 // multiple-open helper (Set-based)
@@ -13,6 +18,53 @@ function toggleInSet(prevSet, id) {
   return next;
 }
 
+function parseHashSections(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return [];
+
+  const lines = text.split(/\r?\n/);
+  const sections = [];
+  let current = { title: "Plan", bodyLines: [] };
+  let sawHeading = false;
+
+  for (const line of lines) {
+    const m = line.match(/^\s*#\s+(.*)\s*$/);
+    if (m) {
+      sawHeading = true;
+      // push previous
+      if (current && (current.bodyLines.length || current.title)) {
+        sections.push({
+          title: current.title || "Section",
+          body: current.bodyLines.join("\n").trim(),
+        });
+      }
+      current = { title: m[1].trim() || "Section", bodyLines: [] };
+    } else {
+      current.bodyLines.push(line);
+    }
+  }
+
+  if (current) {
+    sections.push({
+      title: current.title || "Section",
+      body: current.bodyLines.join("\n").trim(),
+    });
+  }
+
+  // If the user never used headings, keep a single "Plan" section.
+  if (!sawHeading) {
+    return [
+      {
+        title: "Plan",
+        body: text,
+      },
+    ];
+  }
+
+  // Remove empty sections (e.g., headings with nothing under them)
+  return sections.filter((s) => (s.title && s.title.trim()) || (s.body && s.body.trim()));
+}
+
 export default function ScenesHome() {
   const navigate = useNavigate();
 
@@ -21,8 +73,12 @@ export default function ScenesHome() {
   const [err, setErr] = useState("");
   const [scenes, setScenes] = useState([]);
 
-  // Multiple scenes can be expanded at once (consistent with Tools browsing)
+  // Multiple scenes can be expanded at once
   const [openScenes, setOpenScenes] = useState(() => new Set());
+
+  // Cache full scene details once expanded (lazy-load)
+  // shape: { [sceneId]: { status: 'idle'|'loading'|'ready'|'error', data?: any, error?: string } }
+  const [details, setDetails] = useState({});
 
   async function reload() {
     setLoading(true);
@@ -49,6 +105,29 @@ export default function ScenesHome() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  async function ensureDetails(sceneId) {
+    const existing = details?.[sceneId];
+    if (existing?.status === "loading" || existing?.status === "ready") return;
+
+    setDetails((prev) => ({
+      ...prev,
+      [sceneId]: { status: "loading" },
+    }));
+
+    try {
+      const full = await fetchSceneById(sceneId);
+      setDetails((prev) => ({
+        ...prev,
+        [sceneId]: { status: "ready", data: full },
+      }));
+    } catch (e) {
+      setDetails((prev) => ({
+        ...prev,
+        [sceneId]: { status: "error", error: e?.message || "Failed to load scene details." },
+      }));
+    }
+  }
+
   async function deleteScene(sceneId, title) {
     const ok = window.confirm(`Delete "${title}"? This cannot be undone.`);
     if (!ok) return;
@@ -56,7 +135,6 @@ export default function ScenesHome() {
     setBusy(true);
     setErr("");
     try {
-      // Match the working deletion approach used in SceneView:
       // delete join rows first, then delete the scene
       const { supabase } = await import("../../lib/supabaseClient.js").then((m) => m);
 
@@ -77,6 +155,13 @@ export default function ScenesHome() {
       setOpenScenes((prev) => {
         const next = new Set(prev);
         next.delete(sceneId);
+        return next;
+      });
+
+      // Drop cached details for deleted scene
+      setDetails((prev) => {
+        const next = { ...prev };
+        delete next[sceneId];
         return next;
       });
 
@@ -142,9 +227,7 @@ export default function ScenesHome() {
           >
             No scenes yet.
             <div style={{ marginTop: 10 }}>
-              <SmallButton asLink to="/scenes/new">
-                Create your first scene
-              </SmallButton>
+              <SmallButton asLink to="/scenes/new">Create your first scene</SmallButton>
             </div>
           </div>
         ) : (
@@ -155,25 +238,40 @@ export default function ScenesHome() {
               ? scenes.map((s) => {
                   const title = s.title || "Untitled scene";
 
-                  // DB fields we confirmed earlier:
+                  // quick fields from list
                   const intent = s.emotional_state || "";
-                  const notes = s.emotional_notes || "";
-
-                  const when =
-                    s.scheduled_for
-                      ? formatDate(s.scheduled_for)
-                      : s.started_at
-                      ? formatDate(s.started_at)
-                      : "";
-
                   const isOpen = openScenes.has(s.id);
+
+                  // We only show date if it exists; no placeholders
+                  const whenValue = s.scheduled_for || s.started_at || null;
+                  const when = whenValue ? formatDate(whenValue) : "";
+
+                  const det = details?.[s.id];
+                  const full = det?.status === "ready" ? det.data : null;
+
+                  // Prefer full details if loaded
+                  const fullIntent = full?.emotional_state ?? intent;
+                  const fullNotes = full?.emotional_notes ?? "";
+
+                  const participants =
+                    full?.scene_participants?.map((sp) => sp?.participants).filter(Boolean) ?? [];
+
+                  const tools =
+                    full?.scene_tools
+                      ?.map((st) => st?.tools_user)
+                      .filter(Boolean) ?? [];
+
+                  const sections = parseHashSections(fullNotes);
 
                   return (
                     <Card
                       key={s.id}
-                      onClick={() => setOpenScenes((prev) => toggleInSet(prev, s.id))}
+                      onClick={() => {
+                        setOpenScenes((prev) => toggleInSet(prev, s.id));
+                        if (!isOpen) ensureDetails(s.id);
+                      }}
                     >
-                      <div style={{ display: "grid", gap: 8 }}>
+                      <div style={{ display: "grid", gap: 10 }}>
                         {/* Header */}
                         <div
                           style={{
@@ -197,8 +295,7 @@ export default function ScenesHome() {
                               {title}
                             </div>
 
-                            {/* Intent under title (collapsed + expanded) */}
-                            {intent ? (
+                            {fullIntent ? (
                               <div
                                 style={{
                                   marginTop: 4,
@@ -207,13 +304,13 @@ export default function ScenesHome() {
                                   lineHeight: 1.35,
                                 }}
                               >
-                                {intent}
+                                {fullIntent}
                               </div>
                             ) : null}
 
-                            <div style={{ marginTop: 6, fontSize: 12, opacity: 0.7 }}>
-                              {when ? when : "—"}
-                            </div>
+                            {when ? (
+                              <div style={{ marginTop: 6, fontSize: 12, opacity: 0.7 }}>{when}</div>
+                            ) : null}
                           </div>
 
                           {/* Visual affordance */}
@@ -241,23 +338,88 @@ export default function ScenesHome() {
                         {/* Expanded content */}
                         {isOpen ? (
                           <div
-                            style={{
-                              marginTop: 2,
-                              display: "grid",
-                              gap: 10,
-                            }}
+                            style={{ display: "grid", gap: 12 }}
                             onClick={(e) => {
                               // allow interaction inside expanded area without collapsing
                               e.stopPropagation();
                             }}
                           >
-                            {/* Notes (temporary) — will become structured sections/blocks later */}
-                            {notes ? (
-                              <div style={{ opacity: 0.9 }}>
-                                <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 4 }}>
-                                  Notes
+                            {/* Loading / error state for details */}
+                            {det?.status === "loading" ? (
+                              <div style={{ opacity: 0.75, fontSize: 13 }}>Loading details…</div>
+                            ) : det?.status === "error" ? (
+                              <div
+                                style={{
+                                  padding: 10,
+                                  borderRadius: 12,
+                                  border: "1px solid rgba(255,80,80,0.30)",
+                                  background: "rgba(255,80,80,0.08)",
+                                  lineHeight: 1.4,
+                                  fontSize: 13,
+                                }}
+                              >
+                                {det.error || "Failed to load scene details."}
+                              </div>
+                            ) : null}
+
+                            {/* Participants (top, directly under intent) */}
+                            {participants.length ? (
+                              <div style={{ display: "grid", gap: 6 }}>
+                                <div style={{ fontSize: 12, opacity: 0.7 }}>Participants</div>
+                                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                  {participants.map((p) => (
+                                    <Chip key={p.id}>{pickParticipantLabel(p)}</Chip>
+                                  ))}
                                 </div>
-                                <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.4 }}>{notes}</div>
+                              </div>
+                            ) : null}
+
+                            {/* Sections (from notes, using # headings) */}
+                            {sections.length ? (
+                              <div style={{ display: "grid", gap: 10 }}>
+                                {sections.map((sec, idx) => (
+                                  <div
+                                    key={`${sec.title}-${idx}`}
+                                    style={{
+                                      padding: 10,
+                                      borderRadius: 14,
+                                      border: "1px solid rgba(255,255,255,0.10)",
+                                      background: "rgba(255,255,255,0.03)",
+                                      display: "grid",
+                                      gap: 6,
+                                    }}
+                                  >
+                                    <div style={{ fontWeight: 850, fontSize: 13, opacity: 0.95 }}>
+                                      {sec.title}
+                                    </div>
+                                    {sec.body ? (
+                                      <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.4, opacity: 0.9 }}>
+                                        {sec.body}
+                                      </div>
+                                    ) : (
+                                      <div style={{ opacity: 0.6, fontSize: 13 }}>—</div>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : null}
+
+                            {/* Tools (compact, bottom) */}
+                            {tools.length ? (
+                              <div style={{ display: "grid", gap: 6 }}>
+                                <div style={{ fontSize: 12, opacity: 0.7 }}>Tools</div>
+                                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                  {tools.map((tu) => {
+                                    const icon = pickToolIcon(tu);
+                                    const label = pickToolLabel(tu);
+                                    return (
+                                      <Chip key={tu.id}>
+                                        <span style={{ marginRight: 6 }}>{icon}</span>
+                                        {label}
+                                      </Chip>
+                                    );
+                                  })}
+                                </div>
                               </div>
                             ) : null}
 
