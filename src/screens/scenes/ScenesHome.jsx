@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Chip, Card, SmallButton } from "../../components/routesUi";
+import { Card, SmallButton } from "../../components/routesUi";
 import Page from "../../components/Page";
 import { fetchScenes } from "../../lib/scenesApi";
 import { formatDate } from "../../lib/sceneHelpers";
@@ -38,7 +38,14 @@ export default function ScenesHome() {
     <div>
       <Page style={{ display: "grid", gap: 12 }}>
         {/* Contextual actions row (no page title) */}
-        <div style={{ display: "flex", gap: 10, justifyContent: "space-between", alignItems: "center" }}>
+        <div
+          style={{
+            display: "flex",
+            gap: 10,
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
             <SmallButton asLink to="/scenes/new">
               + New scene
@@ -49,7 +56,9 @@ export default function ScenesHome() {
           </div>
 
           <div style={{ fontSize: 12, opacity: 0.7 }}>
-            {loading ? "Loading scenes…" : `${scenes.length} scene${scenes.length === 1 ? "" : "s"}`}
+            {loading
+              ? "Loading scenes…"
+              : `${scenes.length} scene${scenes.length === 1 ? "" : "s"}`}
           </div>
         </div>
 
@@ -80,7 +89,9 @@ export default function ScenesHome() {
           >
             No scenes yet.
             <div style={{ marginTop: 10 }}>
-              <SmallButton asLink to="/scenes/new">Create your first scene</SmallButton>
+              <SmallButton asLink to="/scenes/new">
+                Create your first scene
+              </SmallButton>
             </div>
           </div>
         ) : (
@@ -90,9 +101,12 @@ export default function ScenesHome() {
             {!loading
               ? scenes.map((s) => {
                   const title = s.title || "Untitled scene";
-                  const status = (s.status || "DRAFT").toUpperCase();
                   const when =
-                    s.scheduled_for ? formatDate(s.scheduled_for) : s.started_at ? formatDate(s.started_at) : "";
+                    s.scheduled_for
+                      ? formatDate(s.scheduled_for)
+                      : s.started_at
+                      ? formatDate(s.started_at)
+                      : "";
 
                   return (
                     <Card key={s.id} asLink to={`/scenes/${s.id}`}>
@@ -121,9 +135,6 @@ export default function ScenesHome() {
                             <div style={{ marginTop: 2, fontSize: 12, opacity: 0.7 }}>
                               {when ? when : "—"}
                             </div>
-                          </div>
-                          <div style={{ display: "flex", alignItems: "flex-start" }}>
-                            <Chip>{status}</Chip>
                           </div>
                         </div>
                       </div>
