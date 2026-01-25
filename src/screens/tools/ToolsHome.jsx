@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { TopBar, Chip, SmallButton } from "../../components/routesUi";
+import { Chip, SmallButton } from "../../components/routesUi";
 import Page from "../../components/Page";
 import {
   addGlobalToolToUser,
@@ -65,7 +65,11 @@ function ToolRow({ tool, actions }) {
             </div>
           </div>
 
-          {actions ? <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>{actions}</div> : null}
+          {actions ? (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+              {actions}
+            </div>
+          ) : null}
         </div>
 
         {tags.length ? (
@@ -131,11 +135,7 @@ function Section({ title, subtitle, children }) {
   );
 }
 
-export default function ToolsHome({ supabase }) {
-  async function signOut() {
-    await supabase.auth.signOut();
-  }
-
+export default function ToolsHome() {
   const [tab, setTab] = useState("drawer"); // drawer | vault
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -227,27 +227,38 @@ export default function ToolsHome({ supabase }) {
     }
   }
 
+  const infoText =
+    tab === "drawer"
+      ? loading
+        ? "Loading drawer…"
+        : `${owned.length} owned • ${craving.length} craving`
+      : loading
+      ? "Loading vault…"
+      : `${vault.length} in vault`;
+
   return (
     <div>
-      <TopBar
-        title="Tools"
-        onSignOut={signOut}
-        rightSlot={
-          <Segmented
-            value={tab}
-            onChange={setTab}
-            options={[
-              { value: "drawer", label: "Drawer" },
-              { value: "vault", label: "Vault" },
-            ]}
-          />
-        }
-      />
-
       <Page style={{ display: "grid", gap: 14 }}>
-        {loading ? (
-          <div style={{ opacity: 0.8 }}>Loading tools…</div>
-        ) : err ? (
+        {/* Contextual actions row (no page title, no sign out) */}
+        <div style={{ display: "flex", gap: 10, justifyContent: "space-between", alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <Segmented
+              value={tab}
+              onChange={setTab}
+              options={[
+                { value: "drawer", label: "Drawer" },
+                { value: "vault", label: "Vault" },
+              ]}
+            />
+            <SmallButton onClick={reload} disabled={loading || busy} title="Refresh tools">
+              {loading ? "Loading…" : "Refresh"}
+            </SmallButton>
+          </div>
+
+          <div style={{ fontSize: 12, opacity: 0.7 }}>{infoText}</div>
+        </div>
+
+        {err ? (
           <div
             style={{
               padding: 12,
