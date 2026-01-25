@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Chip, SmallButton } from "../../components/routesUi";
+import { SmallButton } from "../../components/routesUi";
 import Page from "../../components/Page";
 import {
   addGlobalToolToUser,
@@ -114,13 +114,44 @@ function KebabMenu({ items, disabled }) {
   );
 }
 
-function ToolRow({ tool, menuItems }) {
+function ExpandChevron({ open }) {
+  return (
+    <div
+      aria-hidden="true"
+      style={{
+        width: 28,
+        height: 28,
+        borderRadius: 10,
+        display: "grid",
+        placeItems: "center",
+        background: "rgba(255,255,255,0.05)",
+        opacity: 0.85,
+        transform: open ? "rotate(180deg)" : "rotate(0deg)",
+        transition: "transform 160ms ease",
+        userSelect: "none",
+        flex: "0 0 auto",
+      }}
+    >
+      ▾
+    </div>
+  );
+}
+
+function ToolRow({ tool, menuItems, open, onToggle, expandedContent }) {
   const icon = tool.icon || "🧰";
-  const tags = Array.isArray(tool.tags) ? tool.tags : [];
   const safety = tool.safety_level ? String(tool.safety_level).toUpperCase() : null;
 
   return (
     <div
+      onClick={onToggle}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onToggle();
+        }
+      }}
       style={{
         padding: 12,
         borderRadius: 14,
@@ -129,7 +160,10 @@ function ToolRow({ tool, menuItems }) {
         display: "grid",
         gridTemplateColumns: "36px 1fr",
         gap: 10,
+        cursor: "pointer",
+        userSelect: "none",
       }}
+      title="Tap to expand / collapse"
     >
       <div
         style={{
@@ -140,15 +174,16 @@ function ToolRow({ tool, menuItems }) {
           placeItems: "center",
           background: "rgba(255,255,255,0.05)",
           fontSize: 18,
+          flex: "0 0 auto",
         }}
       >
         {icon}
       </div>
 
-      <div style={{ minWidth: 0 }}>
+      <div style={{ minWidth: 0, display: "grid", gap: 8 }}>
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10 }}>
           <div style={{ minWidth: 0 }}>
-            <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
               <div style={{ fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {tool.name}
               </div>
@@ -156,22 +191,33 @@ function ToolRow({ tool, menuItems }) {
             </div>
           </div>
 
-          {menuItems?.length ? (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
-              <KebabMenu items={menuItems} />
-            </div>
-          ) : null}
+          <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "flex-end" }}>
+            {menuItems?.length ? (
+              <div style={{ display: "flex", alignItems: "center" }}>
+                <KebabMenu items={menuItems} />
+              </div>
+            ) : null}
+            <ExpandChevron open={open} />
+          </div>
         </div>
 
-        {tags.length ? (
-          <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {tags.slice(0, 6).map((t) => (
-              <Chip key={t}>{t}</Chip>
-            ))}
+        {open ? (
+          <div
+            style={{
+              paddingTop: 2,
+              opacity: 0.9,
+              fontSize: 13,
+              lineHeight: 1.4,
+              userSelect: "text",
+            }}
+            onClick={(e) => {
+              // Allow text selection inside expanded area without collapsing on every click.
+              e.stopPropagation();
+            }}
+          >
+            {expandedContent || <div style={{ opacity: 0.7 }}>More details coming soon.</div>}
           </div>
-        ) : (
-          <div style={{ marginTop: 6, opacity: 0.6, fontSize: 12 }}>No tags</div>
-        )}
+        ) : null}
       </div>
     </div>
   );
@@ -234,6 +280,11 @@ export default function ToolsHome() {
 
   const [vault, setVault] = useState([]);
   const [userTools, setUserTools] = useState([]);
+
+  // Expand/collapse state (Option A)
+  const [openOwnedId, setOpenOwnedId] = useState(null);
+  const [openCravingId, setOpenCravingId] = useState(null);
+  const [openVaultId, setOpenVaultId] = useState(null);
 
   async function reload() {
     setLoading(true);
@@ -343,7 +394,11 @@ export default function ToolsHome() {
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <Segmented
               value={tab}
-              onChange={setTab}
+              onChange={(next) => {
+                setTab(next);
+                // keep expands scoped to each tab; no hard reset required, but this avoids odd carry-over.
+                setOpenVaultId(null);
+              }}
               options={[
                 { value: "drawer", label: "Drawer" },
                 { value: "vault", label: "Vault" },
@@ -381,13 +436,23 @@ export default function ToolsHome() {
                     const g = t.tools_global;
                     const name = g?.name || t.custom_name || "Untitled";
                     const icon = g?.icon || t.custom_icon || "🧰";
-                    const tags = g?.tags || t.tags_override || [];
                     const safety = g?.safety_level || null;
+
+                    const open = openOwnedId === t.id;
 
                     return (
                       <ToolRow
                         key={t.id}
-                        tool={{ name, icon, tags, safety_level: safety }}
+                        tool={{ name, icon, safety_level: safety }}
+                        open={open}
+                        onToggle={() => setOpenOwnedId((prev) => (prev === t.id ? null : t.id))}
+                        expandedContent={
+                          <div style={{ display: "grid", gap: 8 }}>
+                            <div style={{ opacity: 0.75 }}>
+                              This will later support multiple owned instances and photos per item.
+                            </div>
+                          </div>
+                        }
                         menuItems={[
                           {
                             key: "remove",
@@ -410,13 +475,23 @@ export default function ToolsHome() {
                     const g = t.tools_global;
                     const name = g?.name || t.custom_name || "Untitled";
                     const icon = g?.icon || t.custom_icon || "🧰";
-                    const tags = g?.tags || t.tags_override || [];
                     const safety = g?.safety_level || null;
+
+                    const open = openCravingId === t.id;
 
                     return (
                       <ToolRow
                         key={t.id}
-                        tool={{ name, icon, tags, safety_level: safety }}
+                        tool={{ name, icon, safety_level: safety }}
+                        open={open}
+                        onToggle={() => setOpenCravingId((prev) => (prev === t.id ? null : t.id))}
+                        expandedContent={
+                          <div style={{ display: "grid", gap: 8 }}>
+                            <div style={{ opacity: 0.75 }}>
+                              This will later support multiple owned instances and photos per item.
+                            </div>
+                          </div>
+                        }
                         menuItems={[
                           {
                             key: "move",
@@ -457,71 +532,48 @@ export default function ToolsHome() {
               {vault.map((t) => {
                 const inOwned = ownedGlobalIds.has(t.id);
                 const inCraving = cravingGlobalIds.has(t.id);
+                const open = openVaultId === t.id;
 
                 return (
-                  <div
+                  <ToolRow
                     key={t.id}
-                    style={{
-                      padding: 12,
-                      borderRadius: 14,
-                      border: "1px solid rgba(255,255,255,0.10)",
-                      background: "rgba(255,255,255,0.03)",
-                      display: "grid",
-                      gridTemplateColumns: "36px 1fr",
-                      gap: 10,
-                    }}
-                  >
-                    <div
-                      style={{
-                        width: 36,
-                        height: 36,
-                        borderRadius: 12,
-                        display: "grid",
-                        placeItems: "center",
-                        background: "rgba(255,255,255,0.05)",
-                        fontSize: 18,
-                      }}
-                    >
-                      {t.icon || "🧰"}
-                    </div>
-
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline" }}>
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {t.name}
-                          </div>
-                        </div>
-
-                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                    tool={{ name: t.name, icon: t.icon || "🧰", safety_level: t.safety_level || null }}
+                    open={open}
+                    onToggle={() => setOpenVaultId((prev) => (prev === t.id ? null : t.id))}
+                    // Expanded content shows the add actions (buttons stop propagation).
+                    expandedContent={
+                      <div style={{ display: "grid", gap: 10 }}>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                           <SmallButton
                             disabled={busy || inCraving || inOwned}
-                            onClick={() => addTo("craving", t.id)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              addTo("craving", t.id);
+                            }}
                             title={inOwned ? "Already in Owned" : inCraving ? "Already in Craving" : "Add to Craving Drawer"}
                           >
                             + Craving
                           </SmallButton>
                           <SmallButton
                             disabled={busy || inOwned}
-                            onClick={() => addTo("owned", t.id)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              addTo("owned", t.id);
+                            }}
                             title={inOwned ? "Already in Owned" : "Add to Owned Tools"}
                           >
                             + Owned
                           </SmallButton>
                         </div>
-                      </div>
 
-                      {Array.isArray(t.tags) && t.tags.length ? (
-                        <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
-                          {t.tags.slice(0, 6).map((tag) => (
-                            <Chip key={tag}>{tag}</Chip>
-                          ))}
+                        <div style={{ opacity: 0.75 }}>
+                          Vault items will later show richer details and let you create your own owned instances (with photos).
                         </div>
-                      ) : (
-                        <div style={{ marginTop: 6, opacity: 0.6, fontSize: 12 }}>No tags</div>
-                      )}
-                    </div>
-                  </div>
+                      </div>
+                    }
+                    // No kebab menu in Vault for now (actions live in expanded area).
+                    menuItems={null}
+                  />
                 );
               })}
             </div>
