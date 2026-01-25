@@ -18,7 +18,10 @@ export default function SceneForm({
   const [title, setTitle] = useState(initial?.title ?? "");
   const [intent, setIntent] = useState(initial?.intent ?? "");
   const [notes, setNotes] = useState(initial?.notes ?? "");
-  const [scheduledAt, setScheduledAt] = useState(parseDateTimeForInput(initial?.scheduled_at ?? ""));
+
+  // Scheduling is intentionally hidden for now (UI removed),
+  // but we keep the plumbing so we can bring it back later.
+  const [scheduledAt] = useState(parseDateTimeForInput(initial?.scheduled_at ?? ""));
 
   const [selectedParticipants, setSelectedParticipants] = useState(
     new Set(initial?.participantIds ?? [])
@@ -93,24 +96,6 @@ export default function SceneForm({
         </div>
 
         <div>
-          <FieldLabel>Scheduled (optional)</FieldLabel>
-          <input
-            type="datetime-local"
-            value={scheduledAt}
-            onChange={(e) => setScheduledAt(e.target.value)}
-            style={{
-              width: "100%",
-              padding: "11px 12px",
-              borderRadius: 12,
-              border: "1px solid rgba(255,255,255,0.14)",
-              background: "rgba(255,255,255,0.04)",
-              color: "#f3f3f7",
-              outline: "none",
-            }}
-          />
-        </div>
-
-        <div>
           <FieldLabel>Notes</FieldLabel>
           <TextArea value={notes} onChange={setNotes} placeholder="Key constraints, boundaries, flow…" />
         </div>
@@ -135,7 +120,7 @@ export default function SceneForm({
           </div>
         ) : (
           <div style={{ opacity: 0.7, fontSize: 13 }}>
-            No participants found yet. (Participants UI is next after Scenes.)
+            No participants found yet.
           </div>
         )}
       </div>
