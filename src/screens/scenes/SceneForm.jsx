@@ -28,44 +28,37 @@ const DEFAULT_BLOCKS = [
   { key: "integration_debrief", title: "Integration / Debrief" },
 ];
 
-function buildInitialBlocks(initial) {
+function normalizeTitle(t) {
+  return String(t || "").trim().toLowerCase();
+}
+
+function buildBlocksAlwaysDefaults(initial) {
   const existing = Array.isArray(initial?.blocks) ? initial.blocks : [];
-  if (existing.length) {
-    // Normalize/sort for stable UI
-    return existing
-      .slice()
-      .sort((a, b) => (a?.sort_order ?? 0) - (b?.sort_order ?? 0))
-      .map((b, idx) => ({
-        id: b?.id || null,
-        sort_order:
-          typeof b?.sort_order === "number" ? b.sort_order : (idx + 1) * 10,
-        title: String(b?.title || "").trim() || `Stage ${idx + 1}`,
-        body: String(b?.body || ""),
-        duration_minutes:
-          b?.duration_minutes === null || b?.duration_minutes === undefined
-            ? null
-            : Number(b.duration_minutes),
-      }));
+
+  // Build a lookup from existing blocks by title (best-effort merge)
+  const byTitle = new Map();
+  for (const b of existing) {
+    const k = normalizeTitle(b?.title);
+    if (!k) continue;
+    if (!byTitle.has(k)) byTitle.set(k, b);
   }
 
-  // No blocks yet: seed defaults
-  const seedText = String(initial?.notes || "").trim();
-  const rows = DEFAULT_BLOCKS.map((d, idx) => ({
-    id: null,
-    sort_order: (idx + 1) * 10,
-    title: d.title,
-    body: "",
-    duration_minutes: null,
-  }));
-
-  // If the scene has old notes, place them into Planning/Design as a starting point.
-  if (seedText) {
-    const targetIdx = DEFAULT_BLOCKS.findIndex((x) => x.key === "planning_design");
-    const i = targetIdx >= 0 ? targetIdx : 2;
-    rows[i].body = seedText;
-  }
-
-  return rows;
+  // Always render the full framework (11 blocks)
+  return DEFAULT_BLOCKS.map((d, idx) => {
+    const match = byTitle.get(normalizeTitle(d.title));
+    return {
+      // keep id if it matches an existing block with same title
+      id: match?.id || null,
+      sort_order:
+        typeof match?.sort_order === "number" ? match.sort_order : (idx + 1) * 10,
+      title: d.title,
+      body: String(match?.body || ""),
+      duration_minutes:
+        match?.duration_minutes === null || match?.duration_minutes === undefined
+          ? null
+          : Number(match.duration_minutes),
+    };
+  });
 }
 
 export default function SceneForm({
@@ -82,12 +75,9 @@ export default function SceneForm({
 
   const [title, setTitle] = useState(initial?.title ?? "");
   const [intent, setIntent] = useState(initial?.intent ?? "");
-
-  // Extra notes: kept as optional tail notes (not the main planning structure)
   const [notes, setNotes] = useState(initial?.notes ?? "");
 
-  // Scheduling is intentionally hidden for now (UI removed),
-  // but we keep the plumbing so we can bring it back later.
+  // Scheduling hidden for now (keep plumbing for later)
   const [scheduledAt] = useState(parseDateTimeForInput(initial?.scheduled_at ?? ""));
 
   const [selectedParticipants, setSelectedParticipants] = useState(
@@ -95,7 +85,7 @@ export default function SceneForm({
   );
   const [selectedTools, setSelectedTools] = useState(new Set(initial?.toolUserIds ?? []));
 
-  const initialBlocks = useMemo(() => buildInitialBlocks(initial), [initial]);
+  const initialBlocks = useMemo(() => buildBlocksAlwaysDefaults(initial), [initial]);
   const [blocks, setBlocks] = useState(initialBlocks);
 
   const canSubmit = title.trim().length > 0 && !busy;
@@ -132,15 +122,14 @@ export default function SceneForm({
     const payload = {
       title: title.trim(),
       intent: intent.trim(),
-      // Extra notes (optional tail notes)
-      notes: notes.trim(),
+      notes: notes.trim(), // Notes stay Notes (separate from stages)
       scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null,
       participantIds: Array.from(selectedParticipants),
       toolUserIds: Array.from(selectedTools),
-      // Primary planning structure
-      blocks: blocks.map((b) => ({
+      blocks: blocks.map((b, idx) => ({
         id: b.id || null,
-        sort_order: b.sort_order,
+        sort_order:
+          typeof b.sort_order === "number" ? b.sort_order : (idx + 1) * 10,
         title: b.title,
         body: b.body,
         duration_minutes: b.duration_minutes ?? null,
@@ -171,35 +160,27 @@ export default function SceneForm({
         </div>
       ) : null}
 
-      {/* Core scene fields */}
+      {/* Core */}
       <div style={{ display: "grid", gap: 10 }}>
         <div>
           <FieldLabel>Title *</FieldLabel>
-          <TextInput
-            value={title}
-            onChange={setTitle}
-            placeholder="e.g. Rope + sensory focus"
-          />
+          <TextInput value={title} onChange={setTitle} placeholder="e.g. Rope + sensory focus" />
         </div>
 
         <div>
           <FieldLabel>Intent</FieldLabel>
-          <TextInput
-            value={intent}
-            onChange={setIntent}
-            placeholder="What are you aiming to create?"
-          />
+          <TextInput value={intent} onChange={setIntent} placeholder="What are you aiming to create?" />
         </div>
       </div>
 
-      {/* Stage planning blocks */}
+      {/* Stages (always show full framework) */}
       <div style={{ display: "grid", gap: 10 }}>
         <div style={{ fontWeight: 900 }}>Stages</div>
 
         <div style={{ display: "grid", gap: 10 }}>
           {blocks.map((b, idx) => (
             <div
-              key={`${b.sort_order}-${b.title}-${idx}`}
+              key={`${b.title}-${idx}`}
               style={{
                 padding: 12,
                 borderRadius: 14,
@@ -241,7 +222,9 @@ export default function SceneForm({
             })}
           </div>
         ) : (
-          <div style={{ opacity: 0.7, fontSize: 13 }}>No participants found yet.</div>
+          <div style={{ opacity: 0.7, fontSize: 13 }}>
+            No participants found yet.
+          </div>
         )}
       </div>
 
@@ -293,14 +276,14 @@ export default function SceneForm({
         )}
       </div>
 
-      {/* Extra notes (kept, but not primary planning) */}
+      {/* Notes (kept separate from stages) */}
       <div style={{ display: "grid", gap: 10 }}>
         <div>
-          <FieldLabel>Extra notes</FieldLabel>
+          <FieldLabel>Notes</FieldLabel>
           <TextArea
             value={notes}
             onChange={setNotes}
-            placeholder="Anything else that doesn’t fit a stage…"
+            placeholder="Anything else that doesn’t fit the stage structure…"
           />
         </div>
       </div>
