@@ -12,6 +12,10 @@ import {
   uploadToolPhoto,
 } from "../../lib/toolsApi";
 
+// ---- module cache to reduce first-open jank ----
+// Keeps the last loaded vault + userTools so tab switches / remounts don’t flash “Loading…”.
+let toolsHomeCache = { vault: null, userTools: null, ts: 0 };
+
 function KebabMenu({ items, disabled }) {
   const [open, setOpen] = useState(false);
   const btnRef = useRef(null);
@@ -396,14 +400,7 @@ const InstanceRow = React.memo(function InstanceRow({
       }}
       onClick={(e) => e.stopPropagation()}
     >
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          gap: 10,
-          alignItems: "flex-start",
-        }}
-      >
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
         <div style={{ display: "grid", gap: 4, minWidth: 0 }}>
           <div style={{ fontSize: 12, opacity: 0.7, fontWeight: 800 }}>Instance</div>
           <div style={{ fontSize: 12, opacity: 0.65 }}>
@@ -426,11 +423,7 @@ const InstanceRow = React.memo(function InstanceRow({
             background: "rgba(255,255,255,0.03)",
           }}
         >
-          <img
-            src={photoUrl}
-            alt=""
-            style={{ display: "block", width: "100%", height: "auto" }}
-          />
+          <img src={photoUrl} alt="" style={{ display: "block", width: "100%", height: "auto" }} />
         </div>
       ) : (
         <div style={{ opacity: 0.7, fontSize: 13 }}>No photo yet.</div>
@@ -494,9 +487,7 @@ const InstanceRow = React.memo(function InstanceRow({
             disabled={busy}
             onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => e.stopPropagation()}
-            onChange={(e) =>
-              setDraftLabel((prev) => ({ ...prev, [tu.id]: e.target.value }))
-            }
+            onChange={(e) => setDraftLabel((prev) => ({ ...prev, [tu.id]: e.target.value }))}
             style={inputStyle(busy)}
           />
           <SmallButton
@@ -517,12 +508,12 @@ const InstanceRow = React.memo(function InstanceRow({
 
 export default function ToolsHome() {
   const [tab, setTab] = useState("drawer"); // drawer | vault
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !(toolsHomeCache.vault && toolsHomeCache.userTools));
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
-  const [vault, setVault] = useState([]);
-  const [userTools, setUserTools] = useState([]);
+  const [vault, setVault] = useState(() => toolsHomeCache.vault || []);
+  const [userTools, setUserTools] = useState(() => toolsHomeCache.userTools || []);
 
   // Expand/collapse state — MULTIPLE open per section (GROUP KEYS)
   const [openOwned, setOpenOwned] = useState(() => new Set());
@@ -534,17 +525,26 @@ export default function ToolsHome() {
   const [photoUrlById, setPhotoUrlById] = useState({}); // { [tools_user_id]: signedUrl }
   const [photoPathById, setPhotoPathById] = useState({}); // { [tools_user_id]: photo_path we last loaded }
 
-  async function reload() {
-    setLoading(true);
+  async function reload(opts = {}) {
+    const silent = !!opts.silent;
+
+    // If we already have something to show, don't flip the screen into a "Loading…" state.
+    const hasExisting =
+      (Array.isArray(vault) && vault.length > 0) || (Array.isArray(userTools) && userTools.length > 0);
+
+    if (!silent || !hasExisting) setLoading(true);
+
     setErr("");
     try {
       const [v, ut] = await Promise.all([fetchToolVault(), fetchUserTools()]);
       setVault(v);
       setUserTools(ut);
+
+      toolsHomeCache = { vault: v, userTools: ut, ts: Date.now() };
     } catch (e) {
       setErr(e?.message || "Failed to load tools.");
     } finally {
-      setLoading(false);
+      if (!silent || !hasExisting) setLoading(false);
     }
   }
 
@@ -552,7 +552,7 @@ export default function ToolsHome() {
     let alive = true;
     (async () => {
       if (!alive) return;
-      await reload();
+      await reload({ silent: toolsHomeCache.vault && toolsHomeCache.userTools });
     })();
     return () => {
       alive = false;
@@ -636,7 +636,7 @@ export default function ToolsHome() {
     setBusy(true);
     try {
       await addGlobalToolToUser(toolGlobalId, status);
-      await reload();
+      await reload({ silent: true });
     } catch (e) {
       setErr(e?.message || "Could not add tool.");
     } finally {
@@ -650,7 +650,7 @@ export default function ToolsHome() {
     setBusy(true);
     try {
       await addGlobalToolToUser(toolGlobalId, status);
-      await reload();
+      await reload({ silent: true });
       // Keep that group open after add
       if (status === "owned") {
         setOpenOwned((prev) => {
@@ -677,7 +677,7 @@ export default function ToolsHome() {
     setBusy(true);
     try {
       await updateUserToolStatus(toolUserId, "owned");
-      await reload();
+      await reload({ silent: true });
     } catch (e) {
       setErr(e?.message || "Could not move tool.");
     } finally {
@@ -693,7 +693,7 @@ export default function ToolsHome() {
     setBusy(true);
     try {
       await deleteUserTool(toolUserId);
-      await reload();
+      await reload({ silent: true });
     } catch (e) {
       setErr(e?.message || "Could not remove tool.");
     } finally {
@@ -725,7 +725,7 @@ export default function ToolsHome() {
     setBusy(true);
     try {
       await updateUserToolInstanceDetails(toolUserId, { instance_label: nextLabel || null });
-      await reload();
+      await reload({ silent: true });
     } catch (e) {
       setErr(e?.message || "Could not save label.");
     } finally {
@@ -742,7 +742,7 @@ export default function ToolsHome() {
       await updateUserToolInstanceDetails(toolUserId, { photo_path });
       setPhotoPathById((prev) => ({ ...prev, [toolUserId]: photo_path }));
       setPhotoUrlById((prev) => ({ ...prev, [toolUserId]: signedUrl || null }));
-      await reload();
+      await reload({ silent: true });
     } catch (e) {
       setErr(e?.message || "Could not upload photo.");
     } finally {
@@ -781,7 +781,7 @@ export default function ToolsHome() {
                 { value: "vault", label: "Vault" },
               ]}
             />
-            <SmallButton onClick={reload} disabled={loading || busy} title="Refresh tools">
+            <SmallButton onClick={() => reload()} disabled={loading || busy} title="Refresh tools">
               {loading ? "Loading…" : "Refresh"}
             </SmallButton>
           </div>
