@@ -115,31 +115,28 @@ function KebabMenu({ items, disabled }) {
 }
 
 function ExpandChevron({ open }) {
+  // Right when closed, Down when open, no background box
   return (
-    <div
+    <span
       aria-hidden="true"
       style={{
-        width: 28,
-        height: 28,
-        borderRadius: 10,
-        display: "grid",
-        placeItems: "center",
-        background: "rgba(255,255,255,0.05)",
-        opacity: 0.85,
-        transform: open ? "rotate(180deg)" : "rotate(0deg)",
+        display: "inline-block",
+        fontSize: 16,
+        lineHeight: 1,
+        opacity: 0.8,
+        transform: open ? "rotate(90deg)" : "rotate(0deg)",
         transition: "transform 160ms ease",
         userSelect: "none",
         flex: "0 0 auto",
       }}
     >
-      ▾
-    </div>
+      ▸
+    </span>
   );
 }
 
 function ToolRow({ tool, menuItems, open, onToggle, expandedContent }) {
   const icon = tool.icon || "🧰";
-  const safety = tool.safety_level ? String(tool.safety_level).toUpperCase() : null;
 
   return (
     <div
@@ -187,7 +184,7 @@ function ToolRow({ tool, menuItems, open, onToggle, expandedContent }) {
               <div style={{ fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {tool.name}
               </div>
-              {safety ? <span style={{ opacity: 0.6, fontSize: 12 }}>{safety}</span> : null}
+              {/* Safety label removed */}
             </div>
           </div>
 
@@ -292,7 +289,7 @@ export default function ToolsHome() {
   const [vault, setVault] = useState([]);
   const [userTools, setUserTools] = useState([]);
 
-  // Expand/collapse state (Option A) — MULTIPLE open per section
+  // Expand/collapse state — MULTIPLE open per section
   const [openOwned, setOpenOwned] = useState(() => new Set());
   const [openCraving, setOpenCraving] = useState(() => new Set());
   const [openVault, setOpenVault] = useState(() => new Set());
@@ -392,7 +389,7 @@ export default function ToolsHome() {
   return (
     <div>
       <Page style={{ display: "grid", gap: 14 }}>
-        {/* Contextual actions row (no page title, no sign out) */}
+        {/* Contextual actions row */}
         <div
           style={{
             display: "flex",
@@ -405,10 +402,7 @@ export default function ToolsHome() {
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <Segmented
               value={tab}
-              onChange={(next) => {
-                setTab(next);
-                // Keep open states per section; no reset needed for multiple-open browsing.
-              }}
+              onChange={(next) => setTab(next)}
               options={[
                 { value: "drawer", label: "Drawer" },
                 { value: "vault", label: "Vault" },
@@ -446,14 +440,13 @@ export default function ToolsHome() {
                     const g = t.tools_global;
                     const name = g?.name || t.custom_name || "Untitled";
                     const icon = g?.icon || t.custom_icon || "🧰";
-                    const safety = g?.safety_level || null;
 
                     const open = has(openOwned, t.id);
 
                     return (
                       <ToolRow
                         key={t.id}
-                        tool={{ name, icon, safety_level: safety }}
+                        tool={{ name, icon }}
                         open={open}
                         onToggle={() => setOpenOwned((prev) => toggleInSet(prev, t.id))}
                         expandedContent={
@@ -485,14 +478,13 @@ export default function ToolsHome() {
                     const g = t.tools_global;
                     const name = g?.name || t.custom_name || "Untitled";
                     const icon = g?.icon || t.custom_icon || "🧰";
-                    const safety = g?.safety_level || null;
 
                     const open = has(openCraving, t.id);
 
                     return (
                       <ToolRow
                         key={t.id}
-                        tool={{ name, icon, safety_level: safety }}
+                        tool={{ name, icon }}
                         open={open}
                         onToggle={() => setOpenCraving((prev) => toggleInSet(prev, t.id))}
                         expandedContent={
@@ -547,7 +539,7 @@ export default function ToolsHome() {
                 return (
                   <ToolRow
                     key={t.id}
-                    tool={{ name: t.name, icon: t.icon || "🧰", safety_level: t.safety_level || null }}
+                    tool={{ name: t.name, icon: t.icon || "🧰" }}
                     open={open}
                     onToggle={() => setOpenVault((prev) => toggleInSet(prev, t.id))}
                     expandedContent={
@@ -559,7 +551,13 @@ export default function ToolsHome() {
                               e.stopPropagation();
                               addTo("craving", t.id);
                             }}
-                            title={inOwned ? "Already in Owned" : inCraving ? "Already in Craving" : "Add to Craving Drawer"}
+                            title={
+                              inOwned
+                                ? "Already in Owned"
+                                : inCraving
+                                ? "Already in Craving"
+                                : "Add to Craving Drawer"
+                            }
                           >
                             + Craving
                           </SmallButton>
