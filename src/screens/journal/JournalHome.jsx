@@ -10,6 +10,15 @@ import {
   updateJournalEntry,
 } from "../../lib/journalApi";
 
+/* ---------------- module cache to reduce jank ----------------
+   Keeps the last loaded entries across unmount/remount (tab switches).
+   Enables silent refresh without flipping the screen into Loading…
+*/
+let journalHomeCache = {
+  entriesByUserId: {}, // { [userId]: entries[] }
+  tsByUserId: {}, // { [userId]: number }
+};
+
 const ENTRY_TYPES = [
   { value: "reflection", label: "Reflection" },
   { value: "planning", label: "Planning" },
@@ -222,7 +231,6 @@ function KebabButton({ onClick, title = "More actions" }) {
   );
 }
 
-
 function KebabMenu({ onEdit, onDelete }) {
   return (
     <div
@@ -290,10 +298,12 @@ export default function JournalHome({ supabase, session }) {
   const location = useLocation();
   const userId = session?.user?.id;
 
-  const [loading, setLoading] = useState(true);
+  const cachedForUser = userId ? journalHomeCache.entriesByUserId?.[userId] : null;
+
+  const [loading, setLoading] = useState(() => !(userId && Array.isArray(cachedForUser)));
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
-  const [entries, setEntries] = useState([]);
+  const [entries, setEntries] = useState(() => (Array.isArray(cachedForUser) ? cachedForUser : []));
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState(null);
   const handledEditStateRef = useRef(false);
@@ -302,23 +312,46 @@ export default function JournalHome({ supabase, session }) {
   const [menuOpenForId, setMenuOpenForId] = useState(null);
   const menuRootRef = useRef(null);
 
-  async function load() {
+  function persistCache(nextEntries) {
     if (!userId) return;
-    setLoading(true);
+    journalHomeCache.entriesByUserId[userId] = Array.isArray(nextEntries) ? nextEntries : [];
+    journalHomeCache.tsByUserId[userId] = Date.now();
+  }
+
+  async function load(opts = {}) {
+    if (!userId) return;
+    const silent = !!opts.silent;
+
+    const hasExisting = Array.isArray(entries) && entries.length > 0;
+    if (!silent || !hasExisting) setLoading(true);
+
     setErr("");
     try {
       const data = await fetchJournalEntries({ supabase, userId, limit: 80 });
-      setEntries(Array.isArray(data) ? data : []);
+      const next = Array.isArray(data) ? data : [];
+      setEntries(next);
+      persistCache(next);
     } catch (e) {
       setErr(e?.message || "Failed to load journal entries.");
       setEntries([]);
+      persistCache([]);
     } finally {
-      setLoading(false);
+      if (!silent || !hasExisting) setLoading(false);
     }
   }
 
   useEffect(() => {
-    load();
+    if (!userId) return;
+
+    // Seed from cache on user change, then refresh silently.
+    const cached = journalHomeCache.entriesByUserId?.[userId];
+    if (Array.isArray(cached)) {
+      setEntries(cached);
+      setLoading(false);
+      load({ silent: true });
+    } else {
+      load();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
@@ -344,7 +377,10 @@ export default function JournalHome({ supabase, session }) {
         try {
           const fresh = await fetchJournalEntries({ supabase, userId, limit: 200 });
           found = (fresh || []).find((e) => e.id === editId) || null;
-          if (Array.isArray(fresh) && fresh.length) setEntries(fresh);
+          if (Array.isArray(fresh) && fresh.length) {
+            setEntries(fresh);
+            persistCache(fresh);
+          }
         } catch {
           // ignore; we'll open new editor as fallback below
         }
@@ -361,8 +397,6 @@ export default function JournalHome({ supabase, session }) {
     if (!menuOpenForId) return;
 
     function onDocDown(e) {
-      // If click is outside any of our menu roots (we render menu inside the card wrapper),
-      // we close. This is intentionally simple and reliable.
       if (menuRootRef.current && menuRootRef.current.contains(e.target)) return;
       setMenuOpenForId(null);
     }
@@ -429,7 +463,7 @@ export default function JournalHome({ supabase, session }) {
         showToast?.("Created");
       }
       setEditing(null);
-      await load();
+      await load({ silent: true });
     } catch (e) {
       setErr(e?.message || "Save failed.");
     } finally {
@@ -445,7 +479,7 @@ export default function JournalHome({ supabase, session }) {
     try {
       await deleteJournalEntry({ supabase, id });
       showToast?.("Deleted");
-      await load();
+      await load({ silent: true });
     } catch (e) {
       setErr(e?.message || "Delete failed.");
     }
@@ -478,7 +512,7 @@ export default function JournalHome({ supabase, session }) {
             <SmallButton onClick={() => setEditing({ mode: "new" })} disabled={saving}>
               New entry
             </SmallButton>
-            <SmallButton onClick={load} disabled={loading || saving}>
+            <SmallButton onClick={() => load()} disabled={loading || saving}>
               {loading ? "Loading…" : "Refresh"}
             </SmallButton>
           </div>
@@ -604,26 +638,22 @@ export default function JournalHome({ supabase, session }) {
 
                             <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
                               <div onClick={(ev) => ev.stopPropagation()}>
-                                <KebabButton
-                                  onClick={() => toggleMenu(e.id)}
-                                  title="Entry actions"
-                                />
+                                <KebabButton onClick={() => toggleMenu(e.id)} title="Entry actions" />
                               </div>
                             </div>
                           </div>
 
                           {menuOpen ? (
-                            <KebabMenu
-                              onEdit={() => handleMenuEdit(e)}
-                              onDelete={() => handleMenuDelete(e)}
-                            />
+                            <KebabMenu onEdit={() => handleMenuEdit(e)} onDelete={() => handleMenuDelete(e)} />
                           ) : null}
 
                           {preview ? (
                             <div style={{ opacity: 0.88, whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{preview}</div>
                           ) : null}
 
-                          {e.scene_id ? <div style={{ fontSize: 12, opacity: 0.65 }}>Linked scene: {e.scene_id}</div> : null}
+                          {e.scene_id ? (
+                            <div style={{ fontSize: 12, opacity: 0.65 }}>Linked scene: {e.scene_id}</div>
+                          ) : null}
                         </div>
                       </Card>
                     </div>
