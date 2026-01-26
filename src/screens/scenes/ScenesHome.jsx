@@ -25,6 +25,7 @@ const PLANNING_STAGES = [
   "play",
   "aftercare",
   "integration",
+  "complete",
 ];
 
 const STAGE_LABELS = {
@@ -36,6 +37,7 @@ const STAGE_LABELS = {
   play: "Play",
   aftercare: "Aftercare",
   integration: "Integrate",
+  complete: "Complete",
 };
 
 function nextStage(current) {
@@ -165,9 +167,7 @@ export default function ScenesHome() {
     try {
       await updateScenePlanningStage(scene.id, next);
       setScenes((prev) =>
-        prev.map((s) =>
-          s.id === scene.id ? { ...s, planning_stage: next } : s
-        )
+        prev.map((s) => (s.id === scene.id ? { ...s, planning_stage: next } : s))
       );
     } catch (err) {
       console.error(err);
@@ -271,9 +271,7 @@ export default function ScenesHome() {
                 ?.map((st) => st?.tools_user)
                 .filter(Boolean) ?? [];
 
-            const sections = parseHashSections(
-              full?.emotional_notes ?? ""
-            );
+            const sections = parseHashSections(full?.emotional_notes ?? "");
 
             return (
               <Card
@@ -323,7 +321,7 @@ export default function ScenesHome() {
                         alignSelf: "flex-start",
                       }}
                     >
-                      {STAGE_LABELS[stage]}
+                      {STAGE_LABELS[stage] || "Intent"}
                     </button>
                   </div>
 
@@ -339,7 +337,9 @@ export default function ScenesHome() {
                           Participants
                         </div>
                         {participants.length ? (
-                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <div
+                            style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
+                          >
                             {participants.map((p) => (
                               <Chip key={p.id}>
                                 {pickParticipantLabel(p)}
@@ -378,7 +378,9 @@ export default function ScenesHome() {
                           <div style={{ fontSize: 12, opacity: 0.7 }}>
                             Tools
                           </div>
-                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <div
+                            style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
+                          >
                             {tools.map((tu) => (
                               <Chip key={tu.id}>
                                 {pickToolIcon(tu)} {pickToolLabel(tu)}
