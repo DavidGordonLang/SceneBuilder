@@ -3,7 +3,6 @@ import { useNavigate, useParams } from "react-router-dom";
 import { SmallButton } from "../../components/routesUi";
 import Page from "../../components/Page";
 import {
-  convertNotesToSceneBlocks,
   fetchOwnedToolsForPicker,
   fetchParticipants,
   fetchSceneById,
@@ -18,7 +17,6 @@ export default function SceneEdit({ supabase }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [notice, setNotice] = useState("");
 
   const [participants, setParticipants] = useState([]);
   const [ownedTools, setOwnedTools] = useState([]);
@@ -27,7 +25,6 @@ export default function SceneEdit({ supabase }) {
   async function loadAll() {
     setLoading(true);
     setErr("");
-    // IMPORTANT: do NOT clear notice here — convert uses loadAll and we want the success message to stay
     try {
       const [scene, ps, ot] = await Promise.all([
         fetchSceneById(id),
@@ -47,6 +44,8 @@ export default function SceneEdit({ supabase }) {
         scheduled_at: scene?.scheduled_for || null,
         participantIds,
         toolUserIds,
+        // blocks will be wired into the form next (blocks-first editor)
+        blocks: scene?.scene_blocks || [],
       });
 
       setParticipants(ps);
@@ -62,7 +61,6 @@ export default function SceneEdit({ supabase }) {
     let alive = true;
     (async () => {
       if (!alive) return;
-      setNotice(""); // clear notice only on fresh navigation to this screen
       await loadAll();
     })();
     return () => {
@@ -74,43 +72,12 @@ export default function SceneEdit({ supabase }) {
   async function handleSubmit(payload) {
     setBusy(true);
     setErr("");
-    setNotice("");
     try {
       await updateScene(id, payload);
       return { sceneId: id };
     } catch (e) {
       setErr(e?.message || "Could not update scene.");
       return null;
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleConvertNotesToStages() {
-    if (!initial) return;
-
-    const notesText = String(initial.notes || "").trim();
-    if (!notesText) {
-      setErr("No notes to convert yet.");
-      setNotice("");
-      return;
-    }
-
-    const ok = window.confirm(
-      "Convert the current saved notes into staged blocks?\n\nThis will create (or replace) scene blocks, but it will NOT delete your notes."
-    );
-    if (!ok) return;
-
-    setBusy(true);
-    setErr("");
-    setNotice("");
-    try {
-      const n = await convertNotesToSceneBlocks(id, notesText);
-      setNotice(`Converted notes into ${n} stage${n === 1 ? "" : "s"}.`);
-      // Reload so future screens can use blocks (but keep the notice now)
-      await loadAll();
-    } catch (e) {
-      setErr(e?.message || "Could not convert notes to stages.");
     } finally {
       setBusy(false);
     }
@@ -132,32 +99,9 @@ export default function SceneEdit({ supabase }) {
           <SmallButton onClick={() => navigate(-1)}>← Back</SmallButton>
           <div style={{ fontWeight: 900, fontSize: 18 }}>Edit Scene</div>
         </div>
-
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <SmallButton onClick={handleConvertNotesToStages} disabled={loading || busy || !initial}>
-            Convert notes → stages
-          </SmallButton>
-        </div>
       </Page>
 
       <Page>
-        {notice ? (
-          <div
-            style={{
-              padding: 10,
-              borderRadius: 12,
-              border: "1px solid rgba(255,255,255,0.10)",
-              background: "rgba(255,255,255,0.03)",
-              marginBottom: 12,
-              fontSize: 13,
-              opacity: 0.9,
-              lineHeight: 1.4,
-            }}
-          >
-            {notice}
-          </div>
-        ) : null}
-
         {loading ? (
           <div style={{ opacity: 0.7 }}>Loading…</div>
         ) : (
