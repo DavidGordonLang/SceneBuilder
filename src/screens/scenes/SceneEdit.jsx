@@ -44,7 +44,6 @@ function nextStage(current) {
 }
 
 function stableStringify(obj) {
-  // good enough for “dirty” checks (no functions)
   try {
     return JSON.stringify(obj);
   } catch {
@@ -69,12 +68,10 @@ export default function SceneEdit() {
 
   // latest form payload snapshot + baseline for dirty checks
   const latestPayloadRef = useRef(null);
-  const baselineRef = useRef(null);
+  const baselineRef = useRef(null); // IMPORTANT: baseline is set from the form's first canonical payload
   const [isDirty, setIsDirty] = useState(false);
-  const [canSubmit, setCanSubmit] = useState(false);
 
   const openSceneId = useMemo(() => {
-    // if we came from ScenesHome we already have it, else use id
     return location?.state?.openSceneId || id;
   }, [location?.state?.openSceneId, id]);
 
@@ -110,21 +107,10 @@ export default function SceneEdit() {
       setInitial(init);
       setPlanningStage(scene?.planning_stage || "intent");
 
-      // baseline (for dirty check)
-      const baselinePayload = {
-        title: String(init.title || "").trim(),
-        intent: String(init.intent || "").trim(),
-        notes: String(init.notes || "").trim(),
-        scheduled_at: init.scheduled_at || null,
-        participantIds: Array.from(participantIds),
-        toolUserIds: Array.from(toolUserIds),
-        blocks: Array.isArray(init.blocks) ? init.blocks : [],
-      };
-
-      baselineRef.current = stableStringify(baselinePayload);
-      latestPayloadRef.current = baselinePayload;
+      // reset dirty tracking – baseline will be set from SceneForm's first onStateChange
+      baselineRef.current = null;
+      latestPayloadRef.current = null;
       setIsDirty(false);
-      setCanSubmit(Boolean(String(init.title || "").trim()));
 
       setParticipants(ps);
       setOwnedTools(ot);
@@ -155,9 +141,11 @@ export default function SceneEdit() {
     setErr("");
     try {
       await updateScene(id, payload);
-      // update baseline to the saved payload
+
+      // After a successful save, reset baseline to the just-saved payload
       baselineRef.current = stableStringify(payload);
       setIsDirty(false);
+
       return true;
     } catch (e) {
       setErr(e?.message || "Could not update scene.");
@@ -168,8 +156,8 @@ export default function SceneEdit() {
   }
 
   async function handleBack() {
-    // If nothing changed, just go back
-    if (!isDirty) {
+    // If we haven't established baseline yet (rare), treat as not dirty
+    if (!baselineRef.current || !isDirty) {
       goBackToScenesHome();
       return;
     }
@@ -178,9 +166,7 @@ export default function SceneEdit() {
     if (ok) {
       const saved = await saveNow();
       if (saved) goBackToScenesHome();
-      // if save fails, we stay on page and show error
     } else {
-      // discard changes
       goBackToScenesHome();
     }
   }
@@ -194,15 +180,14 @@ export default function SceneEdit() {
     try {
       await updateScenePlanningStage(id, next);
     } catch (e) {
-      // rollback if server fails
-      setPlanningStage((prev) => prev);
       console.error(e);
+      // if it fails, we don’t know the previous stage reliably; reload is safest
+      await loadAll();
     }
   }
 
   return (
     <div>
-      {/* Top row: Back + title + pill */}
       <Page
         style={{
           display: "flex",
@@ -252,16 +237,22 @@ export default function SceneEdit() {
             submitLabel="Save"
             backTo="/scenes"
             showActions={false}
-            onStateChange={(payload, meta) => {
+            onStateChange={(payload) => {
               latestPayloadRef.current = payload;
-              setCanSubmit(Boolean(meta?.canSubmit));
 
-              const baseline = baselineRef.current || "";
               const current = stableStringify(payload);
-              setIsDirty(current !== baseline);
+
+              // First canonical payload becomes baseline (so no false "dirty" from shape differences)
+              if (!baselineRef.current) {
+                baselineRef.current = current;
+                setIsDirty(false);
+                return;
+              }
+
+              setIsDirty(current !== baselineRef.current);
             }}
             onSubmit={async (payload) => {
-              // not used in edit mode, but keep signature to avoid runtime surprises
+              // not used in edit mode; kept for compatibility
               latestPayloadRef.current = payload;
               return { sceneId: id };
             }}
