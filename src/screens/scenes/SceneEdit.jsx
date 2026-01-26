@@ -27,7 +27,7 @@ export default function SceneEdit({ supabase }) {
   async function loadAll() {
     setLoading(true);
     setErr("");
-    setNotice("");
+    // IMPORTANT: do NOT clear notice here — convert uses loadAll and we want the success message to stay
     try {
       const [scene, ps, ot] = await Promise.all([
         fetchSceneById(id),
@@ -62,6 +62,7 @@ export default function SceneEdit({ supabase }) {
     let alive = true;
     (async () => {
       if (!alive) return;
+      setNotice(""); // clear notice only on fresh navigation to this screen
       await loadAll();
     })();
     return () => {
@@ -106,7 +107,7 @@ export default function SceneEdit({ supabase }) {
     try {
       const n = await convertNotesToSceneBlocks(id, notesText);
       setNotice(`Converted notes into ${n} stage${n === 1 ? "" : "s"}.`);
-      // Reload so the app has the latest (blocks now exist, used elsewhere next)
+      // Reload so future screens can use blocks (but keep the notice now)
       await loadAll();
     } catch (e) {
       setErr(e?.message || "Could not convert notes to stages.");
@@ -132,7 +133,6 @@ export default function SceneEdit({ supabase }) {
           <div style={{ fontWeight: 900, fontSize: 18 }}>Edit Scene</div>
         </div>
 
-        {/* Convert notes -> stages (safe bridge step) */}
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <SmallButton onClick={handleConvertNotesToStages} disabled={loading || busy || !initial}>
             Convert notes → stages
