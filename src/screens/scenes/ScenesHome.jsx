@@ -97,8 +97,11 @@ function parseHashSections(raw) {
     });
   }
 
+  // KEY CHANGE:
+  // If the notes don't contain headings, don't pretend it's a "Plan" stage.
+  // Notes should show ONLY in the Notes block at the bottom (when open).
   if (!sawHeading) {
-    return [{ title: "Plan", body: text }];
+    return [];
   }
 
   return sections.filter(
@@ -257,7 +260,6 @@ export default function ScenesHome() {
       return next;
     });
 
-    // KEY FIX: details may be cached as "ready" from earlier open.
     // Invalidate so we always reflect freshly saved blocks/participants/tools after edit.
     invalidateDetails(openSceneId);
 
