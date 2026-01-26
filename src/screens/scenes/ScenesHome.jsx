@@ -147,6 +147,26 @@ export default function ScenesHome() {
     };
   }
 
+  function invalidateDetails(sceneId) {
+    // Remove from BOTH local state + module cache so ensureDetails will refetch.
+    setDetails((prev) => {
+      const next = { ...prev };
+      delete next[sceneId];
+      persistCache(scenes, next);
+      return next;
+    });
+
+    if (scenesHomeCache.details && scenesHomeCache.details[sceneId]) {
+      const nextCacheDetails = { ...scenesHomeCache.details };
+      delete nextCacheDetails[sceneId];
+      scenesHomeCache = {
+        ...scenesHomeCache,
+        details: nextCacheDetails,
+        ts: Date.now(),
+      };
+    }
+  }
+
   async function reload(opts = {}) {
     const silent = !!opts.silent;
 
@@ -183,7 +203,8 @@ export default function ScenesHome() {
   async function ensureDetails(sceneId) {
     // Check local first…
     const existingLocal = details?.[sceneId];
-    if (existingLocal?.status === "loading" || existingLocal?.status === "ready") return;
+    if (existingLocal?.status === "loading" || existingLocal?.status === "ready")
+      return;
 
     // …then check module cache in case we remounted.
     const existingCached = scenesHomeCache.details?.[sceneId];
@@ -236,6 +257,11 @@ export default function ScenesHome() {
       return next;
     });
 
+    // KEY FIX: details may be cached as "ready" from earlier open.
+    // Invalidate so we always reflect freshly saved blocks/participants/tools after edit.
+    invalidateDetails(openSceneId);
+
+    // Now re-fetch
     ensureDetails(openSceneId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location?.state?.openSceneId]);
@@ -349,8 +375,7 @@ export default function ScenesHome() {
             const det = details?.[s.id];
             const full = det?.status === "ready" ? det.data : null;
 
-            const notesText =
-              (full?.emotional_notes ?? s.emotional_notes ?? "").trim();
+            const notesText = (full?.emotional_notes ?? s.emotional_notes ?? "").trim();
 
             const participants =
               full?.scene_participants
@@ -385,14 +410,10 @@ export default function ScenesHome() {
                     <div>
                       <div style={{ fontWeight: 800 }}>{s.title}</div>
                       {intent && (
-                        <div style={{ fontSize: 13, opacity: 0.85 }}>
-                          {intent}
-                        </div>
+                        <div style={{ fontSize: 13, opacity: 0.85 }}>{intent}</div>
                       )}
                       {when && (
-                        <div style={{ fontSize: 12, opacity: 0.7 }}>
-                          {when}
-                        </div>
+                        <div style={{ fontSize: 12, opacity: 0.7 }}>{when}</div>
                       )}
                     </div>
 
@@ -492,13 +513,13 @@ export default function ScenesHome() {
 
                       {tools.length > 0 && (
                         <div>
-                          <div style={{ fontSize: 12, opacity: 0.7 }}>
-                            Tools
-                          </div>
+                          <div style={{ fontSize: 12, opacity: 0.7 }}>Tools</div>
                           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                             {tools.map((tu) => (
                               <Chip key={tu.id}>
-                                <span style={{ marginRight: 6 }}>{pickToolIcon(tu)}</span>
+                                <span style={{ marginRight: 6 }}>
+                                  {pickToolIcon(tu)}
+                                </span>
                                 {pickToolLabel(tu)}
                               </Chip>
                             ))}
