@@ -6,7 +6,10 @@ import {
   deleteUserTool,
   fetchToolVault,
   fetchUserTools,
+  getToolPhotoSignedUrl,
+  updateUserToolInstanceDetails,
   updateUserToolStatus,
+  uploadToolPhoto,
 } from "../../lib/toolsApi";
 
 function KebabMenu({ items, disabled }) {
@@ -184,7 +187,6 @@ function ToolRow({ tool, menuItems, open, onToggle, expandedContent }) {
               <div style={{ fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {tool.name}
               </div>
-              {/* Safety label removed */}
             </div>
           </div>
 
@@ -294,6 +296,11 @@ export default function ToolsHome() {
   const [openCraving, setOpenCraving] = useState(() => new Set());
   const [openVault, setOpenVault] = useState(() => new Set());
 
+  // Per-instance UI state
+  const [draftLabel, setDraftLabel] = useState({}); // { [tools_user_id]: string }
+  const [photoUrlById, setPhotoUrlById] = useState({}); // { [tools_user_id]: signedUrl }
+  const [photoPathById, setPhotoPathById] = useState({}); // { [tools_user_id]: photo_path we last loaded }
+
   async function reload() {
     setLoading(true);
     setErr("");
@@ -377,6 +384,55 @@ export default function ToolsHome() {
     }
   }
 
+  async function ensureSignedPhotoUrl(toolUserId, photo_path) {
+    const path = String(photo_path || "").trim();
+    if (!path) return;
+
+    // If we already have a signed url for this exact path, skip
+    if (photoPathById?.[toolUserId] === path && photoUrlById?.[toolUserId]) return;
+
+    try {
+      const signedUrl = await getToolPhotoSignedUrl(path);
+      setPhotoPathById((prev) => ({ ...prev, [toolUserId]: path }));
+      setPhotoUrlById((prev) => ({ ...prev, [toolUserId]: signedUrl }));
+    } catch (e) {
+      // Non-fatal: don’t break the screen if signing fails
+      // eslint-disable-next-line no-console
+      console.warn("Failed to load signed tool photo URL:", e);
+    }
+  }
+
+  async function saveLabel(toolUserId) {
+    const nextLabel = String(draftLabel?.[toolUserId] ?? "").trim();
+    setErr("");
+    setBusy(true);
+    try {
+      await updateUserToolInstanceDetails(toolUserId, { instance_label: nextLabel || null });
+      await reload();
+    } catch (e) {
+      setErr(e?.message || "Could not save label.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleUpload(toolUserId, file) {
+    if (!file) return;
+    setErr("");
+    setBusy(true);
+    try {
+      const { photo_path, signedUrl } = await uploadToolPhoto(toolUserId, file);
+      await updateUserToolInstanceDetails(toolUserId, { photo_path });
+      setPhotoPathById((prev) => ({ ...prev, [toolUserId]: photo_path }));
+      setPhotoUrlById((prev) => ({ ...prev, [toolUserId]: signedUrl || null }));
+      await reload();
+    } catch (e) {
+      setErr(e?.message || "Could not upload photo.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const infoText =
     tab === "drawer"
       ? loading
@@ -440,19 +496,137 @@ export default function ToolsHome() {
                     const g = t.tools_global;
                     const name = g?.name || t.custom_name || "Untitled";
                     const icon = g?.icon || t.custom_icon || "🧰";
-
                     const open = has(openOwned, t.id);
+
+                    const labelValue =
+                      draftLabel?.[t.id] !== undefined
+                        ? draftLabel[t.id]
+                        : t.instance_label || "";
+
+                    const photoUrl = photoUrlById?.[t.id] || null;
 
                     return (
                       <ToolRow
                         key={t.id}
                         tool={{ name, icon }}
                         open={open}
-                        onToggle={() => setOpenOwned((prev) => toggleInSet(prev, t.id))}
+                        onToggle={() => {
+                          setOpenOwned((prev) => toggleInSet(prev, t.id));
+                          if (!open) ensureSignedPhotoUrl(t.id, t.photo_path);
+                        }}
                         expandedContent={
-                          <div style={{ display: "grid", gap: 8 }}>
-                            <div style={{ opacity: 0.75 }}>
-                              This will later support multiple owned instances and photos per item.
+                          <div style={{ display: "grid", gap: 10 }}>
+                            {/* Photo preview */}
+                            {photoUrl ? (
+                              <div
+                                style={{
+                                  width: "100%",
+                                  maxWidth: 320,
+                                  borderRadius: 14,
+                                  border: "1px solid rgba(255,255,255,0.10)",
+                                  overflow: "hidden",
+                                  background: "rgba(255,255,255,0.03)",
+                                }}
+                              >
+                                <img
+                                  src={photoUrl}
+                                  alt=""
+                                  style={{ display: "block", width: "100%", height: "auto" }}
+                                />
+                              </div>
+                            ) : (
+                              <div style={{ opacity: 0.7, fontSize: 13 }}>
+                                No photo yet.
+                              </div>
+                            )}
+
+                            {/* Upload photo */}
+                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                              <label
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: 8,
+                                  padding: "10px 12px",
+                                  borderRadius: 12,
+                                  border: "1px solid rgba(255,255,255,0.18)",
+                                  background: "rgba(255,255,255,0.06)",
+                                  cursor: busy ? "not-allowed" : "pointer",
+                                  fontWeight: 800,
+                                  fontSize: 12,
+                                  opacity: busy ? 0.6 : 1,
+                                }}
+                                title="Upload a photo for this tool instance"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                📷 Upload photo
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  disabled={busy}
+                                  style={{ display: "none" }}
+                                  onChange={(e) => {
+                                    e.stopPropagation();
+                                    const file = e.target.files?.[0];
+                                    e.target.value = "";
+                                    handleUpload(t.id, file);
+                                  }}
+                                />
+                              </label>
+
+                              {t.photo_path ? (
+                                <SmallButton
+                                  disabled={busy}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    // refresh signed url
+                                    ensureSignedPhotoUrl(t.id, t.photo_path);
+                                  }}
+                                  title="Refresh photo preview"
+                                >
+                                  Refresh photo
+                                </SmallButton>
+                              ) : null}
+                            </div>
+
+                            {/* Label */}
+                            <div style={{ display: "grid", gap: 6 }}>
+                              <div style={{ fontSize: 12, opacity: 0.7 }}>Label</div>
+                              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                                <input
+                                  value={labelValue}
+                                  placeholder='e.g. "Black cuffs", "Travel kit"'
+                                  disabled={busy}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onChange={(e) =>
+                                    setDraftLabel((prev) => ({ ...prev, [t.id]: e.target.value }))
+                                  }
+                                  style={{
+                                    flex: "1 1 220px",
+                                    height: 40,
+                                    borderRadius: 12,
+                                    border: "1px solid rgba(255,255,255,0.12)",
+                                    background: "rgba(255,255,255,0.04)",
+                                    color: "#f3f3f7",
+                                    padding: "0 12px",
+                                    outline: "none",
+                                  }}
+                                />
+                                <SmallButton
+                                  disabled={busy}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    saveLabel(t.id);
+                                  }}
+                                  title="Save label"
+                                >
+                                  Save
+                                </SmallButton>
+                              </div>
+                            </div>
+
+                            <div style={{ opacity: 0.65, fontSize: 12, lineHeight: 1.35 }}>
+                              This is one owned instance. Later we’ll group identical tools into a single card with multiple instances inside.
                             </div>
                           </div>
                         }
@@ -478,19 +652,133 @@ export default function ToolsHome() {
                     const g = t.tools_global;
                     const name = g?.name || t.custom_name || "Untitled";
                     const icon = g?.icon || t.custom_icon || "🧰";
-
                     const open = has(openCraving, t.id);
+
+                    const labelValue =
+                      draftLabel?.[t.id] !== undefined
+                        ? draftLabel[t.id]
+                        : t.instance_label || "";
+
+                    const photoUrl = photoUrlById?.[t.id] || null;
 
                     return (
                       <ToolRow
                         key={t.id}
                         tool={{ name, icon }}
                         open={open}
-                        onToggle={() => setOpenCraving((prev) => toggleInSet(prev, t.id))}
+                        onToggle={() => {
+                          setOpenCraving((prev) => toggleInSet(prev, t.id));
+                          if (!open) ensureSignedPhotoUrl(t.id, t.photo_path);
+                        }}
                         expandedContent={
-                          <div style={{ display: "grid", gap: 8 }}>
-                            <div style={{ opacity: 0.75 }}>
-                              This will later support multiple owned instances and photos per item.
+                          <div style={{ display: "grid", gap: 10 }}>
+                            {photoUrl ? (
+                              <div
+                                style={{
+                                  width: "100%",
+                                  maxWidth: 320,
+                                  borderRadius: 14,
+                                  border: "1px solid rgba(255,255,255,0.10)",
+                                  overflow: "hidden",
+                                  background: "rgba(255,255,255,0.03)",
+                                }}
+                              >
+                                <img
+                                  src={photoUrl}
+                                  alt=""
+                                  style={{ display: "block", width: "100%", height: "auto" }}
+                                />
+                              </div>
+                            ) : (
+                              <div style={{ opacity: 0.7, fontSize: 13 }}>
+                                No photo yet.
+                              </div>
+                            )}
+
+                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                              <label
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: 8,
+                                  padding: "10px 12px",
+                                  borderRadius: 12,
+                                  border: "1px solid rgba(255,255,255,0.18)",
+                                  background: "rgba(255,255,255,0.06)",
+                                  cursor: busy ? "not-allowed" : "pointer",
+                                  fontWeight: 800,
+                                  fontSize: 12,
+                                  opacity: busy ? 0.6 : 1,
+                                }}
+                                title="Upload a photo for this tool instance"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                📷 Upload photo
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  disabled={busy}
+                                  style={{ display: "none" }}
+                                  onChange={(e) => {
+                                    e.stopPropagation();
+                                    const file = e.target.files?.[0];
+                                    e.target.value = "";
+                                    handleUpload(t.id, file);
+                                  }}
+                                />
+                              </label>
+
+                              {t.photo_path ? (
+                                <SmallButton
+                                  disabled={busy}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    ensureSignedPhotoUrl(t.id, t.photo_path);
+                                  }}
+                                  title="Refresh photo preview"
+                                >
+                                  Refresh photo
+                                </SmallButton>
+                              ) : null}
+                            </div>
+
+                            <div style={{ display: "grid", gap: 6 }}>
+                              <div style={{ fontSize: 12, opacity: 0.7 }}>Label</div>
+                              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                                <input
+                                  value={labelValue}
+                                  placeholder='e.g. "Want to buy", "Wishlist"'
+                                  disabled={busy}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onChange={(e) =>
+                                    setDraftLabel((prev) => ({ ...prev, [t.id]: e.target.value }))
+                                  }
+                                  style={{
+                                    flex: "1 1 220px",
+                                    height: 40,
+                                    borderRadius: 12,
+                                    border: "1px solid rgba(255,255,255,0.12)",
+                                    background: "rgba(255,255,255,0.04)",
+                                    color: "#f3f3f7",
+                                    padding: "0 12px",
+                                    outline: "none",
+                                  }}
+                                />
+                                <SmallButton
+                                  disabled={busy}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    saveLabel(t.id);
+                                  }}
+                                  title="Save label"
+                                >
+                                  Save
+                                </SmallButton>
+                              </div>
+                            </div>
+
+                            <div style={{ opacity: 0.65, fontSize: 12, lineHeight: 1.35 }}>
+                              Same instance model as Owned. Grouping + multi-instance UI comes next.
                             </div>
                           </div>
                         }
