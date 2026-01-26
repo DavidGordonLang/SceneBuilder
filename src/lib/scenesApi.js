@@ -27,6 +27,16 @@ export async function fetchSceneById(sceneId) {
     .select(
       `
       *,
+      scene_blocks(
+        id,
+        scene_id,
+        sort_order,
+        title,
+        body,
+        duration_minutes,
+        created_at,
+        updated_at
+      ),
       scene_participants(
         participant_id,
         participants(*)
@@ -48,6 +58,14 @@ export async function fetchSceneById(sceneId) {
     .single();
 
   if (error) throw error;
+
+  // Ensure stable ordering for blocks even if PostgREST returns unsorted arrays
+  if (data?.scene_blocks && Array.isArray(data.scene_blocks)) {
+    data.scene_blocks = [...data.scene_blocks].sort(
+      (a, b) => (a?.sort_order ?? 0) - (b?.sort_order ?? 0)
+    );
+  }
+
   return data;
 }
 
@@ -84,13 +102,12 @@ export async function fetchOwnedToolsForPicker() {
 
 /**
  * IMPORTANT: public.scenes schema (current):
- * - has: title, status, scheduled_for, emotional_state, emotional_notes, etc.
- * - does NOT have: intent, notes, scheduled_at
+ * - has: title, status, scheduled_for, emotional_state, emotional_notes, planning_stage, etc.
  *
  * We map:
  * - form.intent -> emotional_state
  * - form.notes  -> emotional_notes
- * - scheduled_at -> scheduled_for
+ * - scheduled_at -> scheduled_for (even if UI hidden for now)
  */
 export async function createScene({
   title,
@@ -111,6 +128,7 @@ export async function createScene({
       scheduled_for: scheduled_at || null,
       emotional_state: intent ? String(intent).trim() : null,
       emotional_notes: notes ? String(notes).trim() : null,
+      planning_stage: "intent",
     })
     .select("*")
     .single();
@@ -177,5 +195,23 @@ export async function updateScene(
     }
   }
 
+  return true;
+}
+
+/**
+ * Update planning_stage for a scene (prep/lifecycle progress pill).
+ * Allowed values (by DB check constraint): intent, negotiation, planning, connection,
+ * exchange, play, aftercare, integration
+ */
+export async function updateScenePlanningStage(sceneId, planningStage) {
+  const next = String(planningStage || "").trim();
+  if (!next) throw new Error("planning_stage is required.");
+
+  const { error } = await supabase
+    .from("scenes")
+    .update({ planning_stage: next })
+    .eq("id", sceneId);
+
+  if (error) throw error;
   return true;
 }
