@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { SmallButton } from "../../components/routesUi";
 import Page from "../../components/Page";
@@ -9,7 +9,7 @@ import {
 } from "../../lib/scenesApi";
 import SceneForm from "./SceneForm";
 
-export default function SceneCreate({ supabase }) {
+export default function SceneCreate() {
   const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
@@ -18,6 +18,8 @@ export default function SceneCreate({ supabase }) {
 
   const [participants, setParticipants] = useState([]);
   const [ownedTools, setOwnedTools] = useState([]);
+
+  const latestPayloadRef = useRef(null);
 
   useEffect(() => {
     let alive = true;
@@ -45,17 +47,37 @@ export default function SceneCreate({ supabase }) {
     };
   }, []);
 
-  async function handleSubmit(payload) {
+  async function saveNow() {
+    const payload = latestPayloadRef.current;
+    if (!payload?.title?.trim()) {
+      setErr("Title is required.");
+      return null;
+    }
+
     setBusy(true);
     setErr("");
     try {
       const scene = await createScene(payload);
-      return { sceneId: scene.id };
+      return scene?.id || null;
     } catch (e) {
       setErr(e?.message || "Could not create scene.");
       return null;
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function handleBack() {
+    if (busy) return;
+    // No confirm on create — just leave
+    navigate("/scenes");
+  }
+
+  async function handleSave() {
+    if (busy) return;
+    const newId = await saveNow();
+    if (newId) {
+      navigate("/scenes", { state: { openSceneId: newId } });
     }
   }
 
@@ -71,10 +93,16 @@ export default function SceneCreate({ supabase }) {
             gap: 10,
           }}
         >
-          <SmallButton onClick={() => navigate("/scenes")} title="Back to scenes">
+          <SmallButton onClick={handleBack} title="Back to scenes" disabled={busy}>
             ← Back
           </SmallButton>
-          <div style={{ fontSize: 12, opacity: 0.7 }}>New scene</div>
+
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <div style={{ fontSize: 12, opacity: 0.7 }}>New scene</div>
+            <SmallButton onClick={handleSave} disabled={busy}>
+              {busy ? "Saving…" : "Save"}
+            </SmallButton>
+          </div>
         </div>
 
         {loading ? (
@@ -84,11 +112,15 @@ export default function SceneCreate({ supabase }) {
             initial={{}}
             participants={participants}
             ownedTools={ownedTools}
-            onSubmit={handleSubmit}
+            onSubmit={async () => null} // create handled by this screen
             busy={busy}
             err={err}
-            submitLabel="Save Draft"
+            submitLabel="Save"
             backTo="/scenes"
+            showActions={false}
+            onStateChange={(payload) => {
+              latestPayloadRef.current = payload;
+            }}
           />
         )}
       </Page>
