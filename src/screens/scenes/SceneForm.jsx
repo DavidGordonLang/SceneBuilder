@@ -32,11 +32,145 @@ function normalizeTitle(t) {
   return String(t || "").trim().toLowerCase();
 }
 
+/* ---------------- legacy notes -> blocks seeding ----------------
+   If older scenes have stage text stored in Notes with "# Heading" sections,
+   prefill the default blocks so the per-stage editor becomes the source of truth.
+*/
+
+function parseHashSections(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return [];
+
+  const lines = text.split(/\r?\n/);
+  const sections = [];
+  let current = { title: "", bodyLines: [] };
+  let sawHeading = false;
+
+  for (const line of lines) {
+    const m = line.match(/^\s*#\s+(.*)\s*$/);
+    if (m) {
+      sawHeading = true;
+
+      // flush previous
+      if (current && (current.title || current.bodyLines.length)) {
+        sections.push({
+          title: String(current.title || "").trim(),
+          body: current.bodyLines.join("\n").trim(),
+        });
+      }
+
+      current = { title: String(m[1] || "").trim(), bodyLines: [] };
+    } else {
+      current.bodyLines.push(line);
+    }
+  }
+
+  if (current && (current.title || current.bodyLines.length)) {
+    sections.push({
+      title: String(current.title || "").trim(),
+      body: current.bodyLines.join("\n").trim(),
+    });
+  }
+
+  // If there were no headings, don't treat it as structured stages.
+  if (!sawHeading) return [];
+
+  return sections
+    .map((s) => ({ title: s.title || "Section", body: s.body || "" }))
+    .filter((s) => (s.title || "").trim() || (s.body || "").trim());
+}
+
+function mapHeadingToDefaultTitle(heading) {
+  const h = normalizeTitle(heading);
+
+  // intent
+  if (h.includes("intent") || h.includes("desire")) return "Intent / Desire";
+
+  // negotiation
+  if (h.includes("negot")) return "Negotiation";
+
+  // planning / design
+  if (h.includes("plan") || h.includes("design")) return "Planning / Scene Design";
+
+  // connection / warmup
+  if (h.includes("connect") || h.includes("warm") || h.includes("pre-scene") || h.includes("pre scene"))
+    return "Pre-Scene Connection";
+
+  // exchange / induction / power
+  if (h.includes("exchange") || h.includes("induction") || h.includes("power"))
+    return "Induction / Power Exchange";
+
+  // scene proper / play
+  if (h.includes("scene") || h.includes("play")) return "The Scene Proper";
+
+  // peak / climax
+  if (h.includes("peak") || h.includes("climax")) return "Peak / Climax";
+
+  // de-escalation / landing
+  if (h.includes("de-escal") || h.includes("de escal") || h.includes("land") || h.includes("come down"))
+    return "De-Escalation";
+
+  // aftercare
+  if (h.includes("aftercare")) return "Aftercare";
+
+  // drop
+  if (h.includes("drop")) return "After-Aftercare / Drop Window";
+
+  // integration / debrief
+  if (h.includes("integrat") || h.includes("debrief")) return "Integration / Debrief";
+
+  return null;
+}
+
+function seedDefaultBlocksFromNotes(notes) {
+  const sections = parseHashSections(notes);
+  if (!sections.length) return null;
+
+  const bodyByDefaultTitle = new Map();
+
+  for (const s of sections) {
+    const mappedTitle = mapHeadingToDefaultTitle(s.title);
+    if (!mappedTitle) continue;
+
+    const prev = bodyByDefaultTitle.get(mappedTitle);
+    const nextBody = String(s.body || "").trim();
+    if (!nextBody) continue;
+
+    // If multiple headings map to same stage, append with spacing.
+    bodyByDefaultTitle.set(mappedTitle, prev ? `${prev}\n\n${nextBody}` : nextBody);
+  }
+
+  // Only seed if we mapped at least one section meaningfully.
+  if (bodyByDefaultTitle.size === 0) return null;
+
+  return DEFAULT_BLOCKS.map((d, idx) => ({
+    id: null,
+    sort_order: (idx + 1) * 10,
+    title: d.title,
+    body: bodyByDefaultTitle.get(d.title) || "",
+    duration_minutes: null,
+  }));
+}
+
 function buildBlocksAlwaysDefaults(initial) {
   const existing = Array.isArray(initial?.blocks) ? initial.blocks : [];
 
+  // If we have any meaningful existing block data, keep current behaviour.
+  const hasMeaningfulExisting = existing.some((b) => {
+    const body = String(b?.body || "").trim();
+    return !!b?.id || body.length > 0;
+  });
+
+  // If blocks are empty/blank but notes are structured, seed defaults from notes headings.
+  let seededFromNotes = null;
+  if (!hasMeaningfulExisting) {
+    seededFromNotes = seedDefaultBlocksFromNotes(initial?.notes);
+  }
+
+  const source = seededFromNotes || existing;
+
   const byTitle = new Map();
-  for (const b of existing) {
+  for (const b of source) {
     const k = normalizeTitle(b?.title);
     if (!k) continue;
     if (!byTitle.has(k)) byTitle.set(k, b);
