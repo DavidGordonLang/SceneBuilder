@@ -14,6 +14,16 @@ import {
 } from "../../lib/sceneHelpers";
 import { useLocation, useNavigate } from "react-router-dom";
 
+/* ---------------- module cache to reduce jank ----------------
+   - Keeps list + per-scene details across unmount/remount (tab switches)
+   - Enables silent refresh without flipping the whole screen into Loading…
+*/
+let scenesHomeCache = {
+  scenes: null, // array
+  details: null, // map { [sceneId]: { status, data, error } }
+  ts: 0,
+};
+
 /* ---------------- planning stage config ---------------- */
 
 const PLANNING_STAGES = [
@@ -119,24 +129,42 @@ export default function ScenesHome() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const [loading, setLoading] = useState(true);
+  const hasCache = Array.isArray(scenesHomeCache.scenes);
+
+  const [loading, setLoading] = useState(() => !hasCache);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [scenes, setScenes] = useState([]);
+  const [scenes, setScenes] = useState(() => scenesHomeCache.scenes || []);
 
   const [openScenes, setOpenScenes] = useState(() => new Set());
-  const [details, setDetails] = useState({});
+  const [details, setDetails] = useState(() => scenesHomeCache.details || {});
 
-  async function reload() {
-    setLoading(true);
+  function persistCache(nextScenes, nextDetails) {
+    scenesHomeCache = {
+      scenes: Array.isArray(nextScenes) ? nextScenes : scenesHomeCache.scenes,
+      details: nextDetails ? nextDetails : scenesHomeCache.details,
+      ts: Date.now(),
+    };
+  }
+
+  async function reload(opts = {}) {
+    const silent = !!opts.silent;
+
+    // If we already have something to show, don't flip the screen into a "Loading…" state.
+    const hasExisting = Array.isArray(scenes) && scenes.length > 0;
+
+    if (!silent || !hasExisting) setLoading(true);
+
     setErr("");
     try {
       const data = await fetchScenes();
-      setScenes(data || []);
+      const nextScenes = data || [];
+      setScenes(nextScenes);
+      persistCache(nextScenes, details);
     } catch (e) {
       setErr(e?.message || "Failed to load scenes.");
     } finally {
-      setLoading(false);
+      if (!silent || !hasExisting) setLoading(false);
     }
   }
 
@@ -144,36 +172,56 @@ export default function ScenesHome() {
     let alive = true;
     (async () => {
       if (!alive) return;
-      await reload();
+      await reload({ silent: hasCache });
     })();
     return () => {
       alive = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function ensureDetails(sceneId) {
-    const existing = details?.[sceneId];
-    if (existing?.status === "loading" || existing?.status === "ready") return;
+    // Check local first…
+    const existingLocal = details?.[sceneId];
+    if (existingLocal?.status === "loading" || existingLocal?.status === "ready") return;
 
-    setDetails((prev) => ({
-      ...prev,
-      [sceneId]: { status: "loading" },
-    }));
+    // …then check module cache in case we remounted.
+    const existingCached = scenesHomeCache.details?.[sceneId];
+    if (existingCached?.status === "ready") {
+      setDetails((prev) => {
+        const next = { ...prev, [sceneId]: existingCached };
+        persistCache(scenes, next);
+        return next;
+      });
+      return;
+    }
+    if (existingCached?.status === "loading") return;
+
+    setDetails((prev) => {
+      const next = { ...prev, [sceneId]: { status: "loading" } };
+      persistCache(scenes, next);
+      return next;
+    });
 
     try {
       const full = await fetchSceneById(sceneId);
-      setDetails((prev) => ({
-        ...prev,
-        [sceneId]: { status: "ready", data: full },
-      }));
+      setDetails((prev) => {
+        const next = { ...prev, [sceneId]: { status: "ready", data: full } };
+        persistCache(scenes, next);
+        return next;
+      });
     } catch (e) {
-      setDetails((prev) => ({
-        ...prev,
-        [sceneId]: {
-          status: "error",
-          error: e?.message || "Failed to load scene details.",
-        },
-      }));
+      setDetails((prev) => {
+        const next = {
+          ...prev,
+          [sceneId]: {
+            status: "error",
+            error: e?.message || "Failed to load scene details.",
+          },
+        };
+        persistCache(scenes, next);
+        return next;
+      });
     }
   }
 
@@ -189,8 +237,6 @@ export default function ScenesHome() {
     });
 
     ensureDetails(openSceneId);
-    // We intentionally do NOT clear location.state here (router doesn't support it cleanly)
-    // If you navigate away and back, it won't keep re-triggering in practice.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location?.state?.openSceneId]);
 
@@ -201,9 +247,13 @@ export default function ScenesHome() {
 
     try {
       await updateScenePlanningStage(scene.id, next);
-      setScenes((prev) =>
-        prev.map((s) => (s.id === scene.id ? { ...s, planning_stage: next } : s))
-      );
+      setScenes((prev) => {
+        const nextScenes = prev.map((s) =>
+          s.id === scene.id ? { ...s, planning_stage: next } : s
+        );
+        persistCache(nextScenes, details);
+        return nextScenes;
+      });
     } catch (err) {
       console.error(err);
     }
@@ -234,10 +284,11 @@ export default function ScenesHome() {
       setDetails((prev) => {
         const next = { ...prev };
         delete next[sceneId];
+        persistCache(scenes, next);
         return next;
       });
 
-      await reload();
+      await reload({ silent: true });
     } catch (e) {
       setErr(e?.message || "Could not delete scene.");
     } finally {
@@ -258,8 +309,10 @@ export default function ScenesHome() {
           }}
         >
           <div style={{ display: "flex", gap: 10 }}>
-            <SmallButton asLink to="/scenes/new">+ New scene</SmallButton>
-            <SmallButton onClick={reload} disabled={loading || busy}>
+            <SmallButton asLink to="/scenes/new">
+              + New scene
+            </SmallButton>
+            <SmallButton onClick={() => reload()} disabled={loading || busy}>
               {loading ? "Loading…" : "Refresh"}
             </SmallButton>
           </div>
