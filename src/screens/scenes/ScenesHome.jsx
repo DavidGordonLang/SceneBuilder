@@ -261,6 +261,10 @@ export default function ScenesHome() {
             const det = details?.[s.id];
             const full = det?.status === "ready" ? det.data : null;
 
+            // ✅ IMPORTANT: fallback to list data so notes show even while full is loading
+            const notesText =
+              (full?.emotional_notes ?? s.emotional_notes ?? "").trim();
+
             const participants =
               full?.scene_participants
                 ?.map((sp) => sp?.participants)
@@ -271,7 +275,7 @@ export default function ScenesHome() {
                 ?.map((st) => st?.tools_user)
                 .filter(Boolean) ?? [];
 
-            const sections = parseHashSections(full?.emotional_notes ?? "");
+            const sections = parseHashSections(notesText);
 
             return (
               <Card
@@ -331,15 +335,32 @@ export default function ScenesHome() {
                       style={{ display: "grid", gap: 12 }}
                       onClick={(e) => e.stopPropagation()}
                     >
+                      {det?.status === "loading" ? (
+                        <div style={{ opacity: 0.75, fontSize: 13 }}>
+                          Loading details…
+                        </div>
+                      ) : det?.status === "error" ? (
+                        <div
+                          style={{
+                            padding: 10,
+                            borderRadius: 12,
+                            border: "1px solid rgba(255,80,80,0.30)",
+                            background: "rgba(255,80,80,0.08)",
+                            lineHeight: 1.4,
+                            fontSize: 13,
+                          }}
+                        >
+                          {det.error || "Failed to load scene details."}
+                        </div>
+                      ) : null}
+
                       {/* participants */}
                       <div>
                         <div style={{ fontSize: 12, opacity: 0.7 }}>
                           Participants
                         </div>
                         {participants.length ? (
-                          <div
-                            style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
-                          >
+                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                             {participants.map((p) => (
                               <Chip key={p.id}>
                                 {pickParticipantLabel(p)}
@@ -353,24 +374,30 @@ export default function ScenesHome() {
                         )}
                       </div>
 
-                      {/* sections */}
-                      {sections.map((sec, idx) => (
-                        <div
-                          key={idx}
-                          style={{
-                            padding: 10,
-                            borderRadius: 14,
-                            background: "rgba(255,255,255,0.03)",
-                          }}
-                        >
-                          <div style={{ fontWeight: 850, fontSize: 13 }}>
-                            {sec.title}
-                          </div>
-                          <div style={{ fontSize: 13, opacity: 0.9 }}>
-                            {sec.body}
-                          </div>
+                      {/* sections (from notes) */}
+                      {sections.length ? (
+                        <div style={{ display: "grid", gap: 10 }}>
+                          {sections.map((sec, idx) => (
+                            <div
+                              key={`${sec.title}-${idx}`}
+                              style={{
+                                padding: 10,
+                                borderRadius: 14,
+                                background: "rgba(255,255,255,0.03)",
+                              }}
+                            >
+                              <div style={{ fontWeight: 850, fontSize: 13 }}>
+                                {sec.title}
+                              </div>
+                              {sec.body ? (
+                                <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.4, opacity: 0.9 }}>
+                                  {sec.body}
+                                </div>
+                              ) : null}
+                            </div>
+                          ))}
                         </div>
-                      ))}
+                      ) : null}
 
                       {/* tools */}
                       {tools.length > 0 && (
@@ -378,12 +405,11 @@ export default function ScenesHome() {
                           <div style={{ fontSize: 12, opacity: 0.7 }}>
                             Tools
                           </div>
-                          <div
-                            style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
-                          >
+                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                             {tools.map((tu) => (
                               <Chip key={tu.id}>
-                                {pickToolIcon(tu)} {pickToolLabel(tu)}
+                                <span style={{ marginRight: 6 }}>{pickToolIcon(tu)}</span>
+                                {pickToolLabel(tu)}
                               </Chip>
                             ))}
                           </div>
