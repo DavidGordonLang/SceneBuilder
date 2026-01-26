@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Card,
@@ -35,7 +35,6 @@ function normalizeTitle(t) {
 function buildBlocksAlwaysDefaults(initial) {
   const existing = Array.isArray(initial?.blocks) ? initial.blocks : [];
 
-  // Build a lookup from existing blocks by title (best-effort merge)
   const byTitle = new Map();
   for (const b of existing) {
     const k = normalizeTitle(b?.title);
@@ -43,11 +42,9 @@ function buildBlocksAlwaysDefaults(initial) {
     if (!byTitle.has(k)) byTitle.set(k, b);
   }
 
-  // Always render the full framework (11 blocks)
   return DEFAULT_BLOCKS.map((d, idx) => {
     const match = byTitle.get(normalizeTitle(d.title));
     return {
-      // keep id if it matches an existing block with same title
       id: match?.id || null,
       sort_order:
         typeof match?.sort_order === "number" ? match.sort_order : (idx + 1) * 10,
@@ -70,6 +67,8 @@ export default function SceneForm({
   err,
   submitLabel = "Save Draft",
   backTo,
+  showActions = true,
+  onStateChange, // optional: (payload, { canSubmit }) => void
 }) {
   const navigate = useNavigate();
 
@@ -116,13 +115,38 @@ export default function SceneForm({
     });
   }
 
+  // Report state upwards (Edit screen controls save/back)
+  useEffect(() => {
+    if (typeof onStateChange !== "function") return;
+
+    const payload = {
+      title: title.trim(),
+      intent: intent.trim(),
+      notes: notes.trim(),
+      scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null,
+      participantIds: Array.from(selectedParticipants),
+      toolUserIds: Array.from(selectedTools),
+      blocks: blocks.map((b, idx) => ({
+        id: b.id || null,
+        sort_order:
+          typeof b.sort_order === "number" ? b.sort_order : (idx + 1) * 10,
+        title: b.title,
+        body: b.body,
+        duration_minutes: b.duration_minutes ?? null,
+      })),
+    };
+
+    onStateChange(payload, { canSubmit });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [title, intent, notes, scheduledAt, selectedParticipants, selectedTools, blocks, canSubmit]);
+
   async function handleSubmit() {
     if (!title.trim()) return;
 
     const payload = {
       title: title.trim(),
       intent: intent.trim(),
-      notes: notes.trim(), // Notes stay Notes (separate from stages)
+      notes: notes.trim(),
       scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null,
       participantIds: Array.from(selectedParticipants),
       toolUserIds: Array.from(selectedTools),
@@ -164,16 +188,24 @@ export default function SceneForm({
       <div style={{ display: "grid", gap: 10 }}>
         <div>
           <FieldLabel>Title *</FieldLabel>
-          <TextInput value={title} onChange={setTitle} placeholder="e.g. Rope + sensory focus" />
+          <TextInput
+            value={title}
+            onChange={setTitle}
+            placeholder="e.g. Rope + sensory focus"
+          />
         </div>
 
         <div>
           <FieldLabel>Intent</FieldLabel>
-          <TextInput value={intent} onChange={setIntent} placeholder="What are you aiming to create?" />
+          <TextInput
+            value={intent}
+            onChange={setIntent}
+            placeholder="What are you aiming to create?"
+          />
         </div>
       </div>
 
-      {/* Stages (always show full framework) */}
+      {/* Stages */}
       <div style={{ display: "grid", gap: 10 }}>
         <div style={{ fontWeight: 900 }}>Stages</div>
 
@@ -276,7 +308,7 @@ export default function SceneForm({
         )}
       </div>
 
-      {/* Notes (kept separate from stages) */}
+      {/* Notes */}
       <div style={{ display: "grid", gap: 10 }}>
         <div>
           <FieldLabel>Notes</FieldLabel>
@@ -288,19 +320,25 @@ export default function SceneForm({
         </div>
       </div>
 
-      {/* Actions */}
-      <div style={{ display: "flex", gap: 10 }}>
-        <SmallButton disabled={busy} onClick={() => navigate(backTo || "/scenes")} title="Cancel">
-          Cancel
-        </SmallButton>
-        <SmallButton
-          disabled={!canSubmit}
-          onClick={handleSubmit}
-          title={title.trim() ? submitLabel : "Title is required"}
-        >
-          {busy ? "Saving…" : submitLabel}
-        </SmallButton>
-      </div>
+      {/* Actions (optional; Edit screen will hide these) */}
+      {showActions ? (
+        <div style={{ display: "flex", gap: 10 }}>
+          <SmallButton
+            disabled={busy}
+            onClick={() => navigate(backTo || "/scenes")}
+            title="Cancel"
+          >
+            Cancel
+          </SmallButton>
+          <SmallButton
+            disabled={!canSubmit}
+            onClick={handleSubmit}
+            title={title.trim() ? submitLabel : "Title is required"}
+          >
+            {busy ? "Saving…" : submitLabel}
+          </SmallButton>
+        </div>
+      ) : null}
     </div>
   );
 }
