@@ -12,7 +12,7 @@ import {
   pickToolIcon,
   pickToolLabel,
 } from "../../lib/sceneHelpers";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
 /* ---------------- planning stage config ---------------- */
 
@@ -117,6 +117,7 @@ function sectionsFromBlocks(blocks) {
 
 export default function ScenesHome() {
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -176,6 +177,23 @@ export default function ScenesHome() {
     }
   }
 
+  // When returning from Edit, open the requested card and load details
+  useEffect(() => {
+    const openSceneId = location?.state?.openSceneId;
+    if (!openSceneId) return;
+
+    setOpenScenes((prev) => {
+      const next = new Set(prev);
+      next.add(openSceneId);
+      return next;
+    });
+
+    ensureDetails(openSceneId);
+    // We intentionally do NOT clear location.state here (router doesn't support it cleanly)
+    // If you navigate away and back, it won't keep re-triggering in practice.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location?.state?.openSceneId]);
+
   async function cyclePlanningStage(e, scene) {
     e.stopPropagation();
     const current = scene.planning_stage || "intent";
@@ -184,9 +202,7 @@ export default function ScenesHome() {
     try {
       await updateScenePlanningStage(scene.id, next);
       setScenes((prev) =>
-        prev.map((s) =>
-          s.id === scene.id ? { ...s, planning_stage: next } : s
-        )
+        prev.map((s) => (s.id === scene.id ? { ...s, planning_stage: next } : s))
       );
     } catch (err) {
       console.error(err);
@@ -232,7 +248,6 @@ export default function ScenesHome() {
   return (
     <div>
       <Page style={{ display: "grid", gap: 12 }}>
-        {/* header */}
         <div
           style={{
             display: "flex",
@@ -281,7 +296,6 @@ export default function ScenesHome() {
             const det = details?.[s.id];
             const full = det?.status === "ready" ? det.data : null;
 
-            // Notes (kept separate now, but shown if present)
             const notesText =
               (full?.emotional_notes ?? s.emotional_notes ?? "").trim();
 
@@ -295,7 +309,6 @@ export default function ScenesHome() {
                 ?.map((st) => st?.tools_user)
                 .filter(Boolean) ?? [];
 
-            // Prefer stage blocks; fallback to old notes parsing for now
             const blockSections = sectionsFromBlocks(full?.scene_blocks);
             const fallbackSections = parseHashSections(notesText);
             const sections = blockSections.length ? blockSections : fallbackSections;
@@ -309,7 +322,6 @@ export default function ScenesHome() {
                 }}
               >
                 <div style={{ display: "grid", gap: 10 }}>
-                  {/* header row */}
                   <div
                     style={{
                       display: "flex",
@@ -331,10 +343,8 @@ export default function ScenesHome() {
                       )}
                     </div>
 
-                    {/* planning stage pill */}
                     <button
                       onClick={(e) => cyclePlanningStage(e, s)}
-                      data-stage={stage}
                       title="Tap to change planning stage"
                       style={{
                         padding: "4px 10px",
@@ -352,7 +362,6 @@ export default function ScenesHome() {
                     </button>
                   </div>
 
-                  {/* expanded */}
                   {isOpen && (
                     <div
                       style={{ display: "grid", gap: 12 }}
@@ -377,7 +386,6 @@ export default function ScenesHome() {
                         </div>
                       ) : null}
 
-                      {/* participants */}
                       <div>
                         <div style={{ fontSize: 12, opacity: 0.7 }}>
                           Participants
@@ -385,9 +393,7 @@ export default function ScenesHome() {
                         {participants.length ? (
                           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                             {participants.map((p) => (
-                              <Chip key={p.id}>
-                                {pickParticipantLabel(p)}
-                              </Chip>
+                              <Chip key={p.id}>{pickParticipantLabel(p)}</Chip>
                             ))}
                           </div>
                         ) : (
@@ -397,7 +403,6 @@ export default function ScenesHome() {
                         )}
                       </div>
 
-                      {/* stages (from blocks, or fallback notes parsing) */}
                       {sections.length ? (
                         <div style={{ display: "grid", gap: 10 }}>
                           {sections.map((sec, idx) => (
@@ -432,7 +437,6 @@ export default function ScenesHome() {
                         </div>
                       )}
 
-                      {/* tools */}
                       {tools.length > 0 && (
                         <div>
                           <div style={{ fontSize: 12, opacity: 0.7 }}>
@@ -449,12 +453,9 @@ export default function ScenesHome() {
                         </div>
                       )}
 
-                      {/* notes (separate from stages) */}
                       {notesText ? (
                         <div style={{ display: "grid", gap: 6 }}>
-                          <div style={{ fontSize: 12, opacity: 0.7 }}>
-                            Notes
-                          </div>
+                          <div style={{ fontSize: 12, opacity: 0.7 }}>Notes</div>
                           <div
                             style={{
                               padding: 10,
@@ -474,7 +475,9 @@ export default function ScenesHome() {
                         <SmallButton
                           onClick={(e) => {
                             e.stopPropagation();
-                            navigate(`/scenes/${s.id}/edit`);
+                            navigate(`/scenes/${s.id}/edit`, {
+                              state: { fromScenesHome: true, openSceneId: s.id },
+                            });
                           }}
                         >
                           Edit
