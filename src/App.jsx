@@ -5,14 +5,12 @@ import {
   Routes,
   Navigate,
   useLocation,
-  useNavigate,
 } from "react-router-dom";
 import { supabase } from "./lib/supabaseClient";
 import { ToastProvider } from "./ui/ToastContext.jsx";
 
 import ScenesHome from "./screens/scenes/ScenesHome";
 import SceneCreate from "./screens/scenes/SceneCreate";
-import SceneView from "./screens/scenes/SceneView";
 import SceneEdit from "./screens/scenes/SceneEdit";
 
 import ToolsHome from "./screens/tools/ToolsHome";
@@ -215,7 +213,6 @@ function MinimalAuthScreen() {
 }
 
 function HomeRedirect() {
-  // Keep /home stable; point it at /scenes for now.
   return <Navigate to="/scenes" replace />;
 }
 
@@ -258,9 +255,6 @@ function AuthedShell({ session }) {
               <PillLink to="/tools" label="Tools" end />
               <PillLink to="/journal" label="Journal" end />
             </div>
-
-            {/* Contextual actions row will live inside each screen for now.
-                Later we can lift it into the shell once we migrate TopBar usage. */}
           </div>
         </>
       ) : null}
@@ -274,7 +268,8 @@ function AuthedShell({ session }) {
             {/* Scenes */}
             <Route path="/scenes" element={<ScenesHome supabase={supabase} />} />
             <Route path="/scenes/new" element={<SceneCreate supabase={supabase} session={session} />} />
-            <Route path="/scenes/:id" element={<SceneView supabase={supabase} session={session} />} />
+            {/* Old SceneView route is retired: keep the URL but redirect into ScenesHome */}
+            <Route path="/scenes/:id" element={<Navigate to="/scenes" replace />} />
             <Route path="/scenes/:id/edit" element={<SceneEdit supabase={supabase} session={session} />} />
 
             {/* Tools */}
@@ -294,7 +289,10 @@ function AuthedShell({ session }) {
               path="/settings/kink-preferences"
               element={<KinkPreferencesScreen supabase={supabase} session={session} mode="settings" />}
             />
-            <Route path="/settings/partners" element={<div style={{ padding: 16, opacity: 0.75 }}>Coming soon.</div>} />
+            <Route
+              path="/settings/partners"
+              element={<div style={{ padding: 16, opacity: 0.75 }}>Coming soon.</div>}
+            />
 
             {/* Profile */}
             <Route path="/profile" element={<ProfileScreen supabase={supabase} session={session} />} />
@@ -342,10 +340,9 @@ function AuthedShell({ session }) {
                 gap: 10,
               }}
             >
-                           <PillLink to="/settings" label="Settings" end />
+              <PillLink to="/settings" label="Settings" end />
               <PillLink to="/home" label="Home" end />
               <PillLink to="/profile" label="Profile" end />
-
             </div>
           </nav>
         </>
