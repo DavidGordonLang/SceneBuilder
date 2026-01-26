@@ -99,7 +99,8 @@ function KebabMenu({ items, disabled }) {
                 border: "none",
                 borderRadius: 10,
                 padding: "10px 10px",
-                background: it.tone === "danger" ? "rgba(255,80,80,0.12)" : "rgba(255,255,255,0.06)",
+                background:
+                  it.tone === "danger" ? "rgba(255,80,80,0.12)" : "rgba(255,255,255,0.06)",
                 color: "#f3f3f7",
                 cursor: "pointer",
                 fontSize: 12,
@@ -181,12 +182,43 @@ function ToolRow({ tool, menuItems, open, onToggle, expandedContent }) {
       </div>
 
       <div style={{ minWidth: 0, display: "grid", gap: 8 }}>
-        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "baseline",
+            justifyContent: "space-between",
+            gap: 10,
+          }}
+        >
           <div style={{ minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
-              <div style={{ fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <div
+                style={{
+                  fontWeight: 800,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
                 {tool.name}
               </div>
+
+              {typeof tool.count === "number" ? (
+                <span
+                  style={{
+                    fontSize: 12,
+                    opacity: 0.65,
+                    border: "1px solid rgba(255,255,255,0.12)",
+                    background: "rgba(255,255,255,0.04)",
+                    padding: "2px 8px",
+                    borderRadius: 999,
+                    fontWeight: 800,
+                  }}
+                  title="Instances"
+                >
+                  {tool.count}
+                </span>
+              ) : null}
             </div>
           </div>
 
@@ -204,7 +236,7 @@ function ToolRow({ tool, menuItems, open, onToggle, expandedContent }) {
           <div
             style={{
               paddingTop: 2,
-              opacity: 0.9,
+              opacity: 0.95,
               fontSize: 13,
               lineHeight: 1.4,
               userSelect: "text",
@@ -264,7 +296,9 @@ function Section({ title, subtitle, children }) {
     <div style={{ display: "grid", gap: 10 }}>
       <div style={{ display: "grid", gap: 4 }}>
         <div style={{ fontWeight: 900, letterSpacing: 0.2 }}>{title}</div>
-        {subtitle ? <div style={{ opacity: 0.7, fontSize: 13, lineHeight: 1.35 }}>{subtitle}</div> : null}
+        {subtitle ? (
+          <div style={{ opacity: 0.7, fontSize: 13, lineHeight: 1.35 }}>{subtitle}</div>
+        ) : null}
       </div>
       {children}
     </div>
@@ -282,6 +316,20 @@ function toggleInSet(prevSet, id) {
   return next;
 }
 
+function inputStyle(disabled) {
+  return {
+    flex: "1 1 220px",
+    height: 40,
+    borderRadius: 12,
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "rgba(255,255,255,0.04)",
+    color: "#f3f3f7",
+    padding: "0 12px",
+    outline: "none",
+    opacity: disabled ? 0.7 : 1,
+  };
+}
+
 export default function ToolsHome() {
   const [tab, setTab] = useState("drawer"); // drawer | vault
   const [loading, setLoading] = useState(true);
@@ -291,7 +339,7 @@ export default function ToolsHome() {
   const [vault, setVault] = useState([]);
   const [userTools, setUserTools] = useState([]);
 
-  // Expand/collapse state — MULTIPLE open per section
+  // Expand/collapse state — MULTIPLE open per section (GROUP KEYS)
   const [openOwned, setOpenOwned] = useState(() => new Set());
   const [openCraving, setOpenCraving] = useState(() => new Set());
   const [openVault, setOpenVault] = useState(() => new Set());
@@ -342,6 +390,62 @@ export default function ToolsHome() {
     return s;
   }, [craving]);
 
+  function groupKeyForToolUser(tu) {
+    if (tu?.tool_global_id) return `g:${tu.tool_global_id}`;
+    // Custom / no global tool: group by visible name if present, otherwise isolate by id.
+    const base = String(tu?.custom_name || "").trim();
+    return base ? `c:${base.toLowerCase()}` : `u:${tu.id}`;
+  }
+
+  function groupLabelForToolUser(tu) {
+    const g = tu?.tools_global;
+    return g?.name || tu?.custom_name || "Untitled";
+  }
+
+  function groupIconForToolUser(tu) {
+    const g = tu?.tools_global;
+    return g?.icon || tu?.custom_icon || "🧰";
+  }
+
+  const ownedGroups = useMemo(() => {
+    const map = new Map();
+    for (const t of owned) {
+      const key = groupKeyForToolUser(t);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(t);
+    }
+    const arr = Array.from(map.entries()).map(([key, items]) => ({
+      key,
+      items,
+      name: groupLabelForToolUser(items[0]),
+      icon: groupIconForToolUser(items[0]),
+      tool_global_id: items[0]?.tool_global_id || null,
+      isCustom: !items[0]?.tool_global_id,
+    }));
+    // Stable ordering by display name
+    arr.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    return arr;
+  }, [owned]);
+
+  const cravingGroups = useMemo(() => {
+    const map = new Map();
+    for (const t of craving) {
+      const key = groupKeyForToolUser(t);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(t);
+    }
+    const arr = Array.from(map.entries()).map(([key, items]) => ({
+      key,
+      items,
+      name: groupLabelForToolUser(items[0]),
+      icon: groupIconForToolUser(items[0]),
+      tool_global_id: items[0]?.tool_global_id || null,
+      isCustom: !items[0]?.tool_global_id,
+    }));
+    arr.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    return arr;
+  }, [craving]);
+
   async function addTo(status, toolGlobalId) {
     setErr("");
     setBusy(true);
@@ -350,6 +454,34 @@ export default function ToolsHome() {
       await reload();
     } catch (e) {
       setErr(e?.message || "Could not add tool.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function addAnotherInstance(status, toolGlobalId, groupKeyToOpen) {
+    if (!toolGlobalId) return;
+    setErr("");
+    setBusy(true);
+    try {
+      await addGlobalToolToUser(toolGlobalId, status);
+      await reload();
+      // Keep that group open after add
+      if (status === "owned") {
+        setOpenOwned((prev) => {
+          const next = new Set(prev);
+          next.add(groupKeyToOpen);
+          return next;
+        });
+      } else {
+        setOpenCraving((prev) => {
+          const next = new Set(prev);
+          next.add(groupKeyToOpen);
+          return next;
+        });
+      }
+    } catch (e) {
+      setErr(e?.message || "Could not add another instance.");
     } finally {
       setBusy(false);
     }
@@ -396,7 +528,7 @@ export default function ToolsHome() {
       setPhotoPathById((prev) => ({ ...prev, [toolUserId]: path }));
       setPhotoUrlById((prev) => ({ ...prev, [toolUserId]: signedUrl }));
     } catch (e) {
-      // Non-fatal: don’t break the screen if signing fails
+      // Non-fatal
       // eslint-disable-next-line no-console
       console.warn("Failed to load signed tool photo URL:", e);
     }
@@ -431,6 +563,155 @@ export default function ToolsHome() {
     } finally {
       setBusy(false);
     }
+  }
+
+  function InstanceRow({ tu, status }) {
+    const labelValue = draftLabel?.[tu.id] !== undefined ? draftLabel[tu.id] : tu.instance_label || "";
+    const photoUrl = photoUrlById?.[tu.id] || null;
+
+    const displayName = tu?.tools_global?.name || tu?.custom_name || "Tool";
+
+    const menuItems =
+      status === "owned"
+        ? [
+            {
+              key: "remove",
+              label: "Remove",
+              tone: "danger",
+              onClick: () => removeFromDrawer(tu.id, displayName),
+            },
+          ]
+        : [
+            {
+              key: "move",
+              label: "Move to Owned",
+              onClick: () => moveCravingToOwned(tu.id),
+            },
+            {
+              key: "remove",
+              label: "Remove",
+              tone: "danger",
+              onClick: () => removeFromDrawer(tu.id, displayName),
+            },
+          ];
+
+    return (
+      <div
+        style={{
+          padding: 12,
+          borderRadius: 14,
+          border: "1px solid rgba(255,255,255,0.10)",
+          background: "rgba(255,255,255,0.02)",
+          display: "grid",
+          gap: 10,
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
+          <div style={{ display: "grid", gap: 4, minWidth: 0 }}>
+            <div style={{ fontSize: 12, opacity: 0.7, fontWeight: 800 }}>
+              Instance
+            </div>
+            <div style={{ fontSize: 12, opacity: 0.65 }}>
+              {tu.instance_label ? `“${tu.instance_label}”` : "No label"}
+            </div>
+          </div>
+
+          <KebabMenu items={menuItems} disabled={busy} />
+        </div>
+
+        {/* Photo */}
+        {photoUrl ? (
+          <div
+            style={{
+              width: "100%",
+              maxWidth: 320,
+              borderRadius: 14,
+              border: "1px solid rgba(255,255,255,0.10)",
+              overflow: "hidden",
+              background: "rgba(255,255,255,0.03)",
+            }}
+          >
+            <img src={photoUrl} alt="" style={{ display: "block", width: "100%", height: "auto" }} />
+          </div>
+        ) : (
+          <div style={{ opacity: 0.7, fontSize: 13 }}>No photo yet.</div>
+        )}
+
+        {/* Upload + refresh */}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <label
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "10px 12px",
+              borderRadius: 12,
+              border: "1px solid rgba(255,255,255,0.18)",
+              background: "rgba(255,255,255,0.06)",
+              cursor: busy ? "not-allowed" : "pointer",
+              fontWeight: 800,
+              fontSize: 12,
+              opacity: busy ? 0.6 : 1,
+            }}
+            title="Upload a photo for this tool instance"
+            onClick={(e) => e.stopPropagation()}
+          >
+            📷 Upload photo
+            <input
+              type="file"
+              accept="image/*"
+              disabled={busy}
+              style={{ display: "none" }}
+              onChange={(e) => {
+                e.stopPropagation();
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                handleUpload(tu.id, file);
+              }}
+            />
+          </label>
+
+          {tu.photo_path ? (
+            <SmallButton
+              disabled={busy}
+              onClick={(e) => {
+                e.stopPropagation();
+                ensureSignedPhotoUrl(tu.id, tu.photo_path);
+              }}
+              title="Refresh photo preview"
+            >
+              Refresh photo
+            </SmallButton>
+          ) : null}
+        </div>
+
+        {/* Label edit */}
+        <div style={{ display: "grid", gap: 6 }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>Label</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <input
+              value={labelValue}
+              placeholder='e.g. "Black cuffs", "Travel kit"'
+              disabled={busy}
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => setDraftLabel((prev) => ({ ...prev, [tu.id]: e.target.value }))}
+              style={inputStyle(busy)}
+            />
+            <SmallButton
+              disabled={busy}
+              onClick={(e) => {
+                e.stopPropagation();
+                saveLabel(tu.id);
+              }}
+              title="Save label"
+            >
+              Save
+            </SmallButton>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   const infoText =
@@ -489,155 +770,59 @@ export default function ToolsHome() {
 
         {tab === "drawer" ? (
           <div style={{ display: "grid", gap: 16 }}>
-            <Section title="Owned tools" subtitle={owned.length ? null : "No owned tools yet. Add some from the Vault."}>
+            <Section
+              title="Owned tools"
+              subtitle={owned.length ? null : "No owned tools yet. Add some from the Vault."}
+            >
               {owned.length ? (
                 <div style={{ display: "grid", gap: 10 }}>
-                  {owned.map((t) => {
-                    const g = t.tools_global;
-                    const name = g?.name || t.custom_name || "Untitled";
-                    const icon = g?.icon || t.custom_icon || "🧰";
-                    const open = has(openOwned, t.id);
-
-                    const labelValue =
-                      draftLabel?.[t.id] !== undefined
-                        ? draftLabel[t.id]
-                        : t.instance_label || "";
-
-                    const photoUrl = photoUrlById?.[t.id] || null;
+                  {ownedGroups.map((g) => {
+                    const open = has(openOwned, g.key);
 
                     return (
                       <ToolRow
-                        key={t.id}
-                        tool={{ name, icon }}
+                        key={g.key}
+                        tool={{ name: g.name, icon: g.icon, count: g.items.length }}
                         open={open}
                         onToggle={() => {
-                          setOpenOwned((prev) => toggleInSet(prev, t.id));
-                          if (!open) ensureSignedPhotoUrl(t.id, t.photo_path);
+                          setOpenOwned((prev) => toggleInSet(prev, g.key));
+                          if (!open) {
+                            // Load signed urls for any instances that have photos
+                            for (const tu of g.items) ensureSignedPhotoUrl(tu.id, tu.photo_path);
+                          }
                         }}
                         expandedContent={
-                          <div style={{ display: "grid", gap: 10 }}>
-                            {/* Photo preview */}
-                            {photoUrl ? (
-                              <div
-                                style={{
-                                  width: "100%",
-                                  maxWidth: 320,
-                                  borderRadius: 14,
-                                  border: "1px solid rgba(255,255,255,0.10)",
-                                  overflow: "hidden",
-                                  background: "rgba(255,255,255,0.03)",
-                                }}
-                              >
-                                <img
-                                  src={photoUrl}
-                                  alt=""
-                                  style={{ display: "block", width: "100%", height: "auto" }}
-                                />
-                              </div>
-                            ) : (
-                              <div style={{ opacity: 0.7, fontSize: 13 }}>
-                                No photo yet.
-                              </div>
-                            )}
-
-                            {/* Upload photo */}
+                          <div style={{ display: "grid", gap: 12 }}>
                             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                              <label
-                                style={{
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  gap: 8,
-                                  padding: "10px 12px",
-                                  borderRadius: 12,
-                                  border: "1px solid rgba(255,255,255,0.18)",
-                                  background: "rgba(255,255,255,0.06)",
-                                  cursor: busy ? "not-allowed" : "pointer",
-                                  fontWeight: 800,
-                                  fontSize: 12,
-                                  opacity: busy ? 0.6 : 1,
+                              <SmallButton
+                                disabled={busy || !g.tool_global_id}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  addAnotherInstance("owned", g.tool_global_id, g.key);
                                 }}
-                                title="Upload a photo for this tool instance"
-                                onClick={(e) => e.stopPropagation()}
+                                title={
+                                  g.tool_global_id
+                                    ? "Add another owned instance"
+                                    : "Custom tools can't add instances yet"
+                                }
                               >
-                                📷 Upload photo
-                                <input
-                                  type="file"
-                                  accept="image/*"
-                                  disabled={busy}
-                                  style={{ display: "none" }}
-                                  onChange={(e) => {
-                                    e.stopPropagation();
-                                    const file = e.target.files?.[0];
-                                    e.target.value = "";
-                                    handleUpload(t.id, file);
-                                  }}
-                                />
-                              </label>
-
-                              {t.photo_path ? (
-                                <SmallButton
-                                  disabled={busy}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    // refresh signed url
-                                    ensureSignedPhotoUrl(t.id, t.photo_path);
-                                  }}
-                                  title="Refresh photo preview"
-                                >
-                                  Refresh photo
-                                </SmallButton>
+                                + Add another
+                              </SmallButton>
+                              {g.isCustom ? (
+                                <div style={{ fontSize: 12, opacity: 0.65 }}>
+                                  (Custom tool grouping is temporary)
+                                </div>
                               ) : null}
                             </div>
 
-                            {/* Label */}
-                            <div style={{ display: "grid", gap: 6 }}>
-                              <div style={{ fontSize: 12, opacity: 0.7 }}>Label</div>
-                              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                                <input
-                                  value={labelValue}
-                                  placeholder='e.g. "Black cuffs", "Travel kit"'
-                                  disabled={busy}
-                                  onClick={(e) => e.stopPropagation()}
-                                  onChange={(e) =>
-                                    setDraftLabel((prev) => ({ ...prev, [t.id]: e.target.value }))
-                                  }
-                                  style={{
-                                    flex: "1 1 220px",
-                                    height: 40,
-                                    borderRadius: 12,
-                                    border: "1px solid rgba(255,255,255,0.12)",
-                                    background: "rgba(255,255,255,0.04)",
-                                    color: "#f3f3f7",
-                                    padding: "0 12px",
-                                    outline: "none",
-                                  }}
-                                />
-                                <SmallButton
-                                  disabled={busy}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    saveLabel(t.id);
-                                  }}
-                                  title="Save label"
-                                >
-                                  Save
-                                </SmallButton>
-                              </div>
-                            </div>
-
-                            <div style={{ opacity: 0.65, fontSize: 12, lineHeight: 1.35 }}>
-                              This is one owned instance. Later we’ll group identical tools into a single card with multiple instances inside.
+                            <div style={{ display: "grid", gap: 10 }}>
+                              {g.items.map((tu) => (
+                                <InstanceRow key={tu.id} tu={tu} status="owned" />
+                              ))}
                             </div>
                           </div>
                         }
-                        menuItems={[
-                          {
-                            key: "remove",
-                            label: "Remove",
-                            tone: "danger",
-                            onClick: () => removeFromDrawer(t.id, name),
-                          },
-                        ]}
+                        menuItems={null}
                       />
                     );
                   })}
@@ -645,156 +830,58 @@ export default function ToolsHome() {
               ) : null}
             </Section>
 
-            <Section title="Craving drawer" subtitle={craving.length ? null : "Nothing in craving yet. Add items from the Vault."}>
+            <Section
+              title="Craving drawer"
+              subtitle={craving.length ? null : "Nothing in craving yet. Add items from the Vault."}
+            >
               {craving.length ? (
                 <div style={{ display: "grid", gap: 10 }}>
-                  {craving.map((t) => {
-                    const g = t.tools_global;
-                    const name = g?.name || t.custom_name || "Untitled";
-                    const icon = g?.icon || t.custom_icon || "🧰";
-                    const open = has(openCraving, t.id);
-
-                    const labelValue =
-                      draftLabel?.[t.id] !== undefined
-                        ? draftLabel[t.id]
-                        : t.instance_label || "";
-
-                    const photoUrl = photoUrlById?.[t.id] || null;
+                  {cravingGroups.map((g) => {
+                    const open = has(openCraving, g.key);
 
                     return (
                       <ToolRow
-                        key={t.id}
-                        tool={{ name, icon }}
+                        key={g.key}
+                        tool={{ name: g.name, icon: g.icon, count: g.items.length }}
                         open={open}
                         onToggle={() => {
-                          setOpenCraving((prev) => toggleInSet(prev, t.id));
-                          if (!open) ensureSignedPhotoUrl(t.id, t.photo_path);
+                          setOpenCraving((prev) => toggleInSet(prev, g.key));
+                          if (!open) {
+                            for (const tu of g.items) ensureSignedPhotoUrl(tu.id, tu.photo_path);
+                          }
                         }}
                         expandedContent={
-                          <div style={{ display: "grid", gap: 10 }}>
-                            {photoUrl ? (
-                              <div
-                                style={{
-                                  width: "100%",
-                                  maxWidth: 320,
-                                  borderRadius: 14,
-                                  border: "1px solid rgba(255,255,255,0.10)",
-                                  overflow: "hidden",
-                                  background: "rgba(255,255,255,0.03)",
-                                }}
-                              >
-                                <img
-                                  src={photoUrl}
-                                  alt=""
-                                  style={{ display: "block", width: "100%", height: "auto" }}
-                                />
-                              </div>
-                            ) : (
-                              <div style={{ opacity: 0.7, fontSize: 13 }}>
-                                No photo yet.
-                              </div>
-                            )}
-
+                          <div style={{ display: "grid", gap: 12 }}>
                             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                              <label
-                                style={{
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  gap: 8,
-                                  padding: "10px 12px",
-                                  borderRadius: 12,
-                                  border: "1px solid rgba(255,255,255,0.18)",
-                                  background: "rgba(255,255,255,0.06)",
-                                  cursor: busy ? "not-allowed" : "pointer",
-                                  fontWeight: 800,
-                                  fontSize: 12,
-                                  opacity: busy ? 0.6 : 1,
+                              <SmallButton
+                                disabled={busy || !g.tool_global_id}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  addAnotherInstance("craving", g.tool_global_id, g.key);
                                 }}
-                                title="Upload a photo for this tool instance"
-                                onClick={(e) => e.stopPropagation()}
+                                title={
+                                  g.tool_global_id
+                                    ? "Add another craving instance"
+                                    : "Custom tools can't add instances yet"
+                                }
                               >
-                                📷 Upload photo
-                                <input
-                                  type="file"
-                                  accept="image/*"
-                                  disabled={busy}
-                                  style={{ display: "none" }}
-                                  onChange={(e) => {
-                                    e.stopPropagation();
-                                    const file = e.target.files?.[0];
-                                    e.target.value = "";
-                                    handleUpload(t.id, file);
-                                  }}
-                                />
-                              </label>
-
-                              {t.photo_path ? (
-                                <SmallButton
-                                  disabled={busy}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    ensureSignedPhotoUrl(t.id, t.photo_path);
-                                  }}
-                                  title="Refresh photo preview"
-                                >
-                                  Refresh photo
-                                </SmallButton>
+                                + Add another
+                              </SmallButton>
+                              {g.isCustom ? (
+                                <div style={{ fontSize: 12, opacity: 0.65 }}>
+                                  (Custom tool grouping is temporary)
+                                </div>
                               ) : null}
                             </div>
 
-                            <div style={{ display: "grid", gap: 6 }}>
-                              <div style={{ fontSize: 12, opacity: 0.7 }}>Label</div>
-                              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                                <input
-                                  value={labelValue}
-                                  placeholder='e.g. "Want to buy", "Wishlist"'
-                                  disabled={busy}
-                                  onClick={(e) => e.stopPropagation()}
-                                  onChange={(e) =>
-                                    setDraftLabel((prev) => ({ ...prev, [t.id]: e.target.value }))
-                                  }
-                                  style={{
-                                    flex: "1 1 220px",
-                                    height: 40,
-                                    borderRadius: 12,
-                                    border: "1px solid rgba(255,255,255,0.12)",
-                                    background: "rgba(255,255,255,0.04)",
-                                    color: "#f3f3f7",
-                                    padding: "0 12px",
-                                    outline: "none",
-                                  }}
-                                />
-                                <SmallButton
-                                  disabled={busy}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    saveLabel(t.id);
-                                  }}
-                                  title="Save label"
-                                >
-                                  Save
-                                </SmallButton>
-                              </div>
-                            </div>
-
-                            <div style={{ opacity: 0.65, fontSize: 12, lineHeight: 1.35 }}>
-                              Same instance model as Owned. Grouping + multi-instance UI comes next.
+                            <div style={{ display: "grid", gap: 10 }}>
+                              {g.items.map((tu) => (
+                                <InstanceRow key={tu.id} tu={tu} status="craving" />
+                              ))}
                             </div>
                           </div>
                         }
-                        menuItems={[
-                          {
-                            key: "move",
-                            label: "Move to Owned",
-                            onClick: () => moveCravingToOwned(t.id),
-                          },
-                          {
-                            key: "remove",
-                            label: "Remove",
-                            tone: "danger",
-                            onClick: () => removeFromDrawer(t.id, name),
-                          },
-                        ]}
+                        menuItems={null}
                       />
                     );
                   })}
