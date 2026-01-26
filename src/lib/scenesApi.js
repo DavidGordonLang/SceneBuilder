@@ -53,9 +53,7 @@ export async function fetchSceneById(sceneId) {
   // 2) Fetch blocks separately (avoids PostgREST schema-cache relationship issues)
   const { data: blocks, error: blocksErr } = await supabase
     .from("scene_blocks")
-    .select(
-      "id,scene_id,sort_order,title,body,duration_minutes,created_at,updated_at"
-    )
+    .select("id,scene_id,sort_order,title,body,duration_minutes,created_at,updated_at")
     .eq("scene_id", sceneId)
     .order("sort_order", { ascending: true });
 
@@ -213,4 +211,73 @@ export async function updateScenePlanningStage(sceneId, planningStage) {
 
   if (error) throw error;
   return true;
+}
+
+/* ---------------- Notes -> Blocks conversion ---------------- */
+
+function parseHashSections(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return [];
+
+  const lines = text.split(/\r?\n/);
+  const sections = [];
+  let current = { title: "Plan", bodyLines: [] };
+  let sawHeading = false;
+
+  for (const line of lines) {
+    const m = line.match(/^\s*#\s+(.*)\s*$/);
+    if (m) {
+      sawHeading = true;
+      if (current && (current.bodyLines.length || current.title)) {
+        sections.push({
+          title: current.title || "Section",
+          body: current.bodyLines.join("\n").trim(),
+        });
+      }
+      current = { title: m[1].trim() || "Section", bodyLines: [] };
+    } else {
+      current.bodyLines.push(line);
+    }
+  }
+
+  if (current) {
+    sections.push({
+      title: current.title || "Section",
+      body: current.bodyLines.join("\n").trim(),
+    });
+  }
+
+  if (!sawHeading) {
+    return [{ title: "Plan", body: text }];
+  }
+
+  return sections.filter((s) => (s.title && s.title.trim()) || (s.body && s.body.trim()));
+}
+
+/**
+ * Convert a scene's current emotional_notes into structured scene_blocks.
+ * Safe behavior:
+ * - Leaves emotional_notes untouched (so nothing is lost)
+ * - Replaces existing blocks for that scene (explicit overwrite behavior)
+ */
+export async function convertNotesToSceneBlocks(sceneId, notesText) {
+  const sections = parseHashSections(notesText);
+  if (!sections.length) return 0;
+
+  // Replace blocks (simple + predictable)
+  const { error: delErr } = await supabase.from("scene_blocks").delete().eq("scene_id", sceneId);
+  if (delErr) throw delErr;
+
+  const rows = sections.map((sec, i) => ({
+    scene_id: sceneId,
+    sort_order: (i + 1) * 10,
+    title: sec.title || `Section ${i + 1}`,
+    body: sec.body || "",
+    duration_minutes: null,
+  }));
+
+  const { error: insErr } = await supabase.from("scene_blocks").insert(rows);
+  if (insErr) throw insErr;
+
+  return rows.length;
 }
