@@ -96,6 +96,23 @@ function parseHashSections(raw) {
   );
 }
 
+function sectionsFromBlocks(blocks) {
+  const arr = Array.isArray(blocks) ? blocks : [];
+  if (!arr.length) return [];
+  return arr
+    .slice()
+    .sort((a, b) => (a?.sort_order ?? 0) - (b?.sort_order ?? 0))
+    .map((b) => ({
+      title: String(b?.title || "").trim() || "Stage",
+      body: String(b?.body || ""),
+      duration_minutes:
+        b?.duration_minutes === null || b?.duration_minutes === undefined
+          ? null
+          : Number(b.duration_minutes),
+    }))
+    .filter((s) => s.title && (s.body || "").trim().length > 0);
+}
+
 /* ---------------- component ---------------- */
 
 export default function ScenesHome() {
@@ -167,7 +184,9 @@ export default function ScenesHome() {
     try {
       await updateScenePlanningStage(scene.id, next);
       setScenes((prev) =>
-        prev.map((s) => (s.id === scene.id ? { ...s, planning_stage: next } : s))
+        prev.map((s) =>
+          s.id === scene.id ? { ...s, planning_stage: next } : s
+        )
       );
     } catch (err) {
       console.error(err);
@@ -187,6 +206,7 @@ export default function ScenesHome() {
 
       await supabase.from("scene_participants").delete().eq("scene_id", sceneId);
       await supabase.from("scene_tools").delete().eq("scene_id", sceneId);
+      await supabase.from("scene_blocks").delete().eq("scene_id", sceneId);
       await supabase.from("scenes").delete().eq("id", sceneId);
 
       setOpenScenes((prev) => {
@@ -261,7 +281,7 @@ export default function ScenesHome() {
             const det = details?.[s.id];
             const full = det?.status === "ready" ? det.data : null;
 
-            // ✅ IMPORTANT: fallback to list data so notes show even while full is loading
+            // Notes (kept separate now, but shown if present)
             const notesText =
               (full?.emotional_notes ?? s.emotional_notes ?? "").trim();
 
@@ -275,7 +295,10 @@ export default function ScenesHome() {
                 ?.map((st) => st?.tools_user)
                 .filter(Boolean) ?? [];
 
-            const sections = parseHashSections(notesText);
+            // Prefer stage blocks; fallback to old notes parsing for now
+            const blockSections = sectionsFromBlocks(full?.scene_blocks);
+            const fallbackSections = parseHashSections(notesText);
+            const sections = blockSections.length ? blockSections : fallbackSections;
 
             return (
               <Card
@@ -374,7 +397,7 @@ export default function ScenesHome() {
                         )}
                       </div>
 
-                      {/* sections (from notes) */}
+                      {/* stages (from blocks, or fallback notes parsing) */}
                       {sections.length ? (
                         <div style={{ display: "grid", gap: 10 }}>
                           {sections.map((sec, idx) => (
@@ -390,14 +413,24 @@ export default function ScenesHome() {
                                 {sec.title}
                               </div>
                               {sec.body ? (
-                                <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.4, opacity: 0.9 }}>
+                                <div
+                                  style={{
+                                    whiteSpace: "pre-wrap",
+                                    lineHeight: 1.4,
+                                    opacity: 0.9,
+                                  }}
+                                >
                                   {sec.body}
                                 </div>
                               ) : null}
                             </div>
                           ))}
                         </div>
-                      ) : null}
+                      ) : (
+                        <div style={{ fontSize: 13, opacity: 0.6 }}>
+                          No stages filled yet.
+                        </div>
+                      )}
 
                       {/* tools */}
                       {tools.length > 0 && (
@@ -415,6 +448,27 @@ export default function ScenesHome() {
                           </div>
                         </div>
                       )}
+
+                      {/* notes (separate from stages) */}
+                      {notesText ? (
+                        <div style={{ display: "grid", gap: 6 }}>
+                          <div style={{ fontSize: 12, opacity: 0.7 }}>
+                            Notes
+                          </div>
+                          <div
+                            style={{
+                              padding: 10,
+                              borderRadius: 14,
+                              background: "rgba(255,255,255,0.03)",
+                              whiteSpace: "pre-wrap",
+                              lineHeight: 1.4,
+                              opacity: 0.9,
+                            }}
+                          >
+                            {notesText}
+                          </div>
+                        </div>
+                      ) : null}
 
                       <div style={{ display: "flex", gap: 8 }}>
                         <SmallButton
