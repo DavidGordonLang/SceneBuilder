@@ -148,6 +148,17 @@ function ToolRow({ tool, menuItems, open, onToggle, expandedContent }) {
       role="button"
       tabIndex={0}
       onKeyDown={(e) => {
+        // Prevent toggling when typing in inputs inside expanded content (mobile spacebar triggers this).
+        const tag = e?.target?.tagName;
+        const isFormField =
+          tag === "INPUT" ||
+          tag === "TEXTAREA" ||
+          tag === "SELECT" ||
+          tag === "BUTTON" ||
+          e?.target?.isContentEditable;
+
+        if (isFormField) return;
+
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           onToggle();
@@ -695,6 +706,7 @@ export default function ToolsHome() {
               placeholder='e.g. "Black cuffs", "Travel kit"'
               disabled={busy}
               onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => e.stopPropagation()}
               onChange={(e) => setDraftLabel((prev) => ({ ...prev, [tu.id]: e.target.value }))}
               style={inputStyle(busy)}
             />
