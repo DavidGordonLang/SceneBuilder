@@ -22,21 +22,12 @@ export async function fetchScenes() {
 }
 
 export async function fetchSceneById(sceneId) {
-  const { data, error } = await supabase
+  // 1) Fetch the scene with relationships that are known-good
+  const { data: scene, error } = await supabase
     .from("scenes")
     .select(
       `
       *,
-      scene_blocks(
-        id,
-        scene_id,
-        sort_order,
-        title,
-        body,
-        duration_minutes,
-        created_at,
-        updated_at
-      ),
       scene_participants(
         participant_id,
         participants(*)
@@ -59,14 +50,24 @@ export async function fetchSceneById(sceneId) {
 
   if (error) throw error;
 
-  // Ensure stable ordering for blocks even if PostgREST returns unsorted arrays
-  if (data?.scene_blocks && Array.isArray(data.scene_blocks)) {
-    data.scene_blocks = [...data.scene_blocks].sort(
-      (a, b) => (a?.sort_order ?? 0) - (b?.sort_order ?? 0)
-    );
+  // 2) Fetch blocks separately (avoids PostgREST schema-cache relationship issues)
+  const { data: blocks, error: blocksErr } = await supabase
+    .from("scene_blocks")
+    .select(
+      "id,scene_id,sort_order,title,body,duration_minutes,created_at,updated_at"
+    )
+    .eq("scene_id", sceneId)
+    .order("sort_order", { ascending: true });
+
+  // If the table doesn’t exist yet or RLS blocks it, don’t crash the whole scene fetch.
+  // We just return scene_blocks as empty and keep the app usable.
+  if (blocksErr) {
+    scene.scene_blocks = [];
+  } else {
+    scene.scene_blocks = blocks ?? [];
   }
 
-  return data;
+  return scene;
 }
 
 export async function fetchParticipants() {
@@ -200,8 +201,6 @@ export async function updateScene(
 
 /**
  * Update planning_stage for a scene (prep/lifecycle progress pill).
- * Allowed values (by DB check constraint): intent, negotiation, planning, connection,
- * exchange, play, aftercare, integration
  */
 export async function updateScenePlanningStage(sceneId, planningStage) {
   const next = String(planningStage || "").trim();
