@@ -8,6 +8,106 @@ async function getUserId() {
   return uid;
 }
 
+/* ---------------- Scene block defaults ---------------- */
+
+export const DEFAULT_SCENE_BLOCKS = [
+  { key: "intent_desire", title: "Intent / Desire" },
+  { key: "negotiation", title: "Negotiation" },
+  { key: "planning_design", title: "Planning / Scene Design" },
+  { key: "pre_scene_connection", title: "Pre-Scene Connection" },
+  { key: "induction_exchange", title: "Induction / Power Exchange" },
+  { key: "scene_proper", title: "The Scene Proper" },
+  { key: "peak_climax", title: "Peak / Climax" },
+  { key: "de_escalation", title: "De-Escalation" },
+  { key: "aftercare", title: "Aftercare" },
+  { key: "drop_window", title: "After-Aftercare / Drop Window" },
+  { key: "integration_debrief", title: "Integration / Debrief" },
+];
+
+function normalizeBlocks(input) {
+  const arr = Array.isArray(input) ? input : [];
+  return arr
+    .map((b, idx) => ({
+      id: b?.id || null,
+      sort_order:
+        typeof b?.sort_order === "number" ? b.sort_order : (idx + 1) * 10,
+      title: String(b?.title || "").trim() || `Stage ${idx + 1}`,
+      body: String(b?.body || ""),
+      duration_minutes:
+        b?.duration_minutes === null || b?.duration_minutes === undefined
+          ? null
+          : Number(b.duration_minutes),
+    }))
+    .filter((b) => b.title || b.body);
+}
+
+export async function ensureDefaultSceneBlocks(sceneId, { seedText = "" } = {}) {
+  // If blocks already exist, do nothing.
+  const { data: existing, error: exErr } = await supabase
+    .from("scene_blocks")
+    .select("id")
+    .eq("scene_id", sceneId)
+    .limit(1);
+
+  // If table doesn’t exist or RLS blocks, surface the error (this is core now)
+  if (exErr) throw exErr;
+  if (existing && existing.length) return 0;
+
+  const rows = DEFAULT_SCENE_BLOCKS.map((d, idx) => ({
+    scene_id: sceneId,
+    sort_order: (idx + 1) * 10,
+    title: d.title,
+    body: "",
+    duration_minutes: null,
+  }));
+
+  // If we have seedText (old notes), put it into Planning/Design by default
+  if (seedText && typeof seedText === "string") {
+    const seed = seedText.trim();
+    if (seed) {
+      const targetIdx = DEFAULT_SCENE_BLOCKS.findIndex(
+        (x) => x.key === "planning_design"
+      );
+      const i = targetIdx >= 0 ? targetIdx : 2;
+      rows[i].body = seed;
+    }
+  }
+
+  const { error: insErr } = await supabase.from("scene_blocks").insert(rows);
+  if (insErr) throw insErr;
+
+  return rows.length;
+}
+
+export async function replaceSceneBlocks(sceneId, blocks) {
+  const normalized = normalizeBlocks(blocks);
+
+  // Replace strategy = simple + predictable (no drift).
+  // Delete then insert. (We can optimize later.)
+  const { error: delErr } = await supabase
+    .from("scene_blocks")
+    .delete()
+    .eq("scene_id", sceneId);
+  if (delErr) throw delErr;
+
+  if (!normalized.length) return 0;
+
+  const rows = normalized.map((b) => ({
+    scene_id: sceneId,
+    sort_order: b.sort_order,
+    title: b.title,
+    body: b.body,
+    duration_minutes: b.duration_minutes,
+  }));
+
+  const { error: insErr } = await supabase.from("scene_blocks").insert(rows);
+  if (insErr) throw insErr;
+
+  return rows.length;
+}
+
+/* ---------------- Core scene queries ---------------- */
+
 export async function fetchScenes() {
   const uid = await getUserId();
 
@@ -50,20 +150,17 @@ export async function fetchSceneById(sceneId) {
 
   if (error) throw error;
 
-  // 2) Fetch blocks separately (avoids PostgREST schema-cache relationship issues)
+  // 2) Fetch blocks separately (avoid schema-cache relationship issues)
   const { data: blocks, error: blocksErr } = await supabase
     .from("scene_blocks")
-    .select("id,scene_id,sort_order,title,body,duration_minutes,created_at,updated_at")
+    .select(
+      "id,scene_id,sort_order,title,body,duration_minutes,created_at,updated_at"
+    )
     .eq("scene_id", sceneId)
     .order("sort_order", { ascending: true });
 
-  // If the table doesn’t exist yet or RLS blocks it, don’t crash the whole scene fetch.
-  // We just return scene_blocks as empty and keep the app usable.
-  if (blocksErr) {
-    scene.scene_blocks = [];
-  } else {
-    scene.scene_blocks = blocks ?? [];
-  }
+  if (blocksErr) throw blocksErr;
+  scene.scene_blocks = blocks ?? [];
 
   return scene;
 }
@@ -100,13 +197,11 @@ export async function fetchOwnedToolsForPicker() {
 }
 
 /**
- * IMPORTANT: public.scenes schema (current):
- * - has: title, status, scheduled_for, emotional_state, emotional_notes, planning_stage, etc.
- *
- * We map:
+ * scenes mapping:
  * - form.intent -> emotional_state
- * - form.notes  -> emotional_notes
- * - scheduled_at -> scheduled_for (even if UI hidden for now)
+ * - form.notes  -> emotional_notes (kept as "extra notes" for now)
+ * - scheduled_at -> scheduled_for (UI hidden for now)
+ * - blocks -> scene_blocks (primary planning data)
  */
 export async function createScene({
   title,
@@ -115,6 +210,7 @@ export async function createScene({
   scheduled_at,
   participantIds,
   toolUserIds,
+  blocks,
 }) {
   const uid = await getUserId();
 
@@ -137,15 +233,29 @@ export async function createScene({
   const sceneId = scene.id;
 
   if (Array.isArray(participantIds) && participantIds.length) {
-    const rows = participantIds.map((pid) => ({ scene_id: sceneId, participant_id: pid }));
+    const rows = participantIds.map((pid) => ({
+      scene_id: sceneId,
+      participant_id: pid,
+    }));
     const { error } = await supabase.from("scene_participants").insert(rows);
     if (error) throw error;
   }
 
   if (Array.isArray(toolUserIds) && toolUserIds.length) {
-    const rows = toolUserIds.map((tid) => ({ scene_id: sceneId, tool_user_id: tid }));
+    const rows = toolUserIds.map((tid) => ({
+      scene_id: sceneId,
+      tool_user_id: tid,
+    }));
     const { error } = await supabase.from("scene_tools").insert(rows);
     if (error) throw error;
+  }
+
+  // Primary planning data:
+  // If UI passes blocks, save them; otherwise seed defaults (optionally seeded from notes).
+  if (Array.isArray(blocks) && blocks.length) {
+    await replaceSceneBlocks(sceneId, blocks);
+  } else {
+    await ensureDefaultSceneBlocks(sceneId, { seedText: notes || "" });
   }
 
   return scene;
@@ -153,7 +263,7 @@ export async function createScene({
 
 export async function updateScene(
   sceneId,
-  { title, intent, notes, scheduled_at, participantIds, toolUserIds }
+  { title, intent, notes, scheduled_at, participantIds, toolUserIds, blocks }
 ) {
   const { error: upErr } = await supabase
     .from("scenes")
@@ -176,7 +286,10 @@ export async function updateScene(
     if (delErr) throw delErr;
 
     if (Array.isArray(participantIds) && participantIds.length) {
-      const rows = participantIds.map((pid) => ({ scene_id: sceneId, participant_id: pid }));
+      const rows = participantIds.map((pid) => ({
+        scene_id: sceneId,
+        participant_id: pid,
+      }));
       const { error } = await supabase.from("scene_participants").insert(rows);
       if (error) throw error;
     }
@@ -184,14 +297,26 @@ export async function updateScene(
 
   // replace tools
   {
-    const { error: delErr } = await supabase.from("scene_tools").delete().eq("scene_id", sceneId);
+    const { error: delErr } = await supabase
+      .from("scene_tools")
+      .delete()
+      .eq("scene_id", sceneId);
     if (delErr) throw delErr;
 
     if (Array.isArray(toolUserIds) && toolUserIds.length) {
-      const rows = toolUserIds.map((tid) => ({ scene_id: sceneId, tool_user_id: tid }));
+      const rows = toolUserIds.map((tid) => ({
+        scene_id: sceneId,
+        tool_user_id: tid,
+      }));
       const { error } = await supabase.from("scene_tools").insert(rows);
       if (error) throw error;
     }
+  }
+
+  // replace blocks if provided (UI will provide them once we swap the editor)
+  if (Array.isArray(blocks)) {
+    // If the UI sends an empty array, that’s intentional (though we probably won’t allow it).
+    await replaceSceneBlocks(sceneId, blocks);
   }
 
   return true;
@@ -211,73 +336,4 @@ export async function updateScenePlanningStage(sceneId, planningStage) {
 
   if (error) throw error;
   return true;
-}
-
-/* ---------------- Notes -> Blocks conversion ---------------- */
-
-function parseHashSections(raw) {
-  const text = String(raw || "").trim();
-  if (!text) return [];
-
-  const lines = text.split(/\r?\n/);
-  const sections = [];
-  let current = { title: "Plan", bodyLines: [] };
-  let sawHeading = false;
-
-  for (const line of lines) {
-    const m = line.match(/^\s*#\s+(.*)\s*$/);
-    if (m) {
-      sawHeading = true;
-      if (current && (current.bodyLines.length || current.title)) {
-        sections.push({
-          title: current.title || "Section",
-          body: current.bodyLines.join("\n").trim(),
-        });
-      }
-      current = { title: m[1].trim() || "Section", bodyLines: [] };
-    } else {
-      current.bodyLines.push(line);
-    }
-  }
-
-  if (current) {
-    sections.push({
-      title: current.title || "Section",
-      body: current.bodyLines.join("\n").trim(),
-    });
-  }
-
-  if (!sawHeading) {
-    return [{ title: "Plan", body: text }];
-  }
-
-  return sections.filter((s) => (s.title && s.title.trim()) || (s.body && s.body.trim()));
-}
-
-/**
- * Convert a scene's current emotional_notes into structured scene_blocks.
- * Safe behavior:
- * - Leaves emotional_notes untouched (so nothing is lost)
- * - Replaces existing blocks for that scene (explicit overwrite behavior)
- */
-export async function convertNotesToSceneBlocks(sceneId, notesText) {
-  const sections = parseHashSections(notesText);
-  if (!sections.length) return 0;
-
-  // Replace blocks (simple + predictable)
-  const { error: delErr } = await supabase.from("scene_blocks").delete().eq("scene_id", sceneId);
-  if (delErr) throw delErr;
-
-  const rows = sections.map((sec, i) => ({
-    scene_id: sceneId,
-    sort_order: (i + 1) * 10,
-    title: sec.title || `Section ${i + 1}`,
-    body: sec.body || "",
-    duration_minutes: null,
-  }));
-
-  const { error: insErr } = await supabase.from("scene_blocks").insert(rows);
-  if (insErr) throw insErr;
-
-  return rows.length;
 }
