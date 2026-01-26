@@ -148,17 +148,6 @@ function ToolRow({ tool, menuItems, open, onToggle, expandedContent }) {
       role="button"
       tabIndex={0}
       onKeyDown={(e) => {
-        // Prevent expandable-row keyboard shortcuts from firing while typing inside inputs.
-        const tag = e?.target?.tagName;
-        const isFormField =
-          tag === "INPUT" ||
-          tag === "TEXTAREA" ||
-          tag === "SELECT" ||
-          tag === "BUTTON" ||
-          e?.target?.isContentEditable;
-
-        if (isFormField) return;
-
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           onToggle();
@@ -289,10 +278,10 @@ function Segmented({ value, onChange, options }) {
               color: "#f3f3f7",
               cursor: "pointer",
               fontSize: 12,
-              fontWeight: 800,
+              fontWeight: active ? 800 : 650,
               opacity: active ? 1 : 0.75,
+              whiteSpace: "nowrap",
             }}
-            type="button"
           >
             {opt.label}
           </button>
@@ -302,155 +291,166 @@ function Segmented({ value, onChange, options }) {
   );
 }
 
+function Section({ title, subtitle, children }) {
+  return (
+    <div style={{ display: "grid", gap: 10 }}>
+      <div style={{ display: "grid", gap: 4 }}>
+        <div style={{ fontWeight: 900, letterSpacing: 0.2 }}>{title}</div>
+        {subtitle ? (
+          <div style={{ opacity: 0.7, fontSize: 13, lineHeight: 1.35 }}>{subtitle}</div>
+        ) : null}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+// ---- multiple-open helpers ----
+function has(set, id) {
+  return set.has(id);
+}
+function toggleInSet(prevSet, id) {
+  const next = new Set(prevSet);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  return next;
+}
+
 function inputStyle(disabled) {
   return {
-    width: "100%",
-    maxWidth: 260,
+    flex: "1 1 220px",
+    height: 40,
     borderRadius: 12,
-    border: "1px solid rgba(255,255,255,0.14)",
-    background: "rgba(255,255,255,0.05)",
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "rgba(255,255,255,0.04)",
     color: "#f3f3f7",
-    padding: "10px 12px",
-    fontSize: 13,
+    padding: "0 12px",
     outline: "none",
-    opacity: disabled ? 0.6 : 1,
+    opacity: disabled ? 0.7 : 1,
   };
 }
 
 export default function ToolsHome() {
   const [tab, setTab] = useState("drawer"); // drawer | vault
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
-  // Drawer (owned + craving instances)
-  const [owned, setOwned] = useState([]);
-  const [craving, setCraving] = useState([]);
-
-  // Vault (global tools list)
   const [vault, setVault] = useState([]);
+  const [userTools, setUserTools] = useState([]);
 
-  // Which global tool rows are expanded (drawer/vault separate)
-  const [openDrawerIds, setOpenDrawerIds] = useState(() => new Set());
-  const [openVaultIds, setOpenVaultIds] = useState(() => new Set());
+  // Expand/collapse state — MULTIPLE open per section (GROUP KEYS)
+  const [openOwned, setOpenOwned] = useState(() => new Set());
+  const [openCraving, setOpenCraving] = useState(() => new Set());
+  const [openVault, setOpenVault] = useState(() => new Set());
 
   // Per-instance UI state
-  const [draftLabel, setDraftLabel] = useState({});
-  const [photoUrlById, setPhotoUrlById] = useState({});
-  const [photoPathById, setPhotoPathById] = useState({});
-
-  // Simple cache-bust for reload
-  const reloadNonce = useRef(0);
-
-  function toggleInSet(setter, id) {
-    setter((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
-  const drawerByGlobal = useMemo(() => {
-    const m = new Map();
-    function add(tu) {
-      const globalId = tu.tools_global_id || tu?.tools_global?.id || tu.custom_tool_id || "custom";
-      const key = String(globalId);
-      if (!m.has(key)) m.set(key, []);
-      m.get(key).push(tu);
-    }
-    owned.forEach(add);
-    craving.forEach(add);
-
-    // Stable ordering inside each group (by created_at then id)
-    for (const [k, list] of m.entries()) {
-      list.sort((a, b) => {
-        const at = String(a.created_at || "");
-        const bt = String(b.created_at || "");
-        if (at < bt) return -1;
-        if (at > bt) return 1;
-        return String(a.id).localeCompare(String(b.id));
-      });
-      m.set(k, list);
-    }
-
-    return m;
-  }, [owned, craving]);
-
-  const drawerGlobalRows = useMemo(() => {
-    // Build rows: one per global tool (or custom grouping key)
-    const rows = [];
-
-    // Create a set of all global ids in drawer
-    for (const [key, list] of drawerByGlobal.entries()) {
-      const first = list[0];
-      const isCustom = !first?.tools_global_id && !!first?.custom_tool_id;
-
-      const tool = isCustom
-        ? {
-            id: key,
-            name: first?.custom_name || "Custom tool",
-            icon: first?.custom_icon || "🛠️",
-            custom: true,
-            count: list.length,
-          }
-        : {
-            id: key,
-            name: first?.tools_global?.name || "Tool",
-            icon: first?.tools_global?.icon || "🧰",
-            custom: false,
-            count: list.length,
-          };
-
-      rows.push({ key, tool, instances: list });
-    }
-
-    // Sort by tool name
-    rows.sort((a, b) => String(a.tool.name).localeCompare(String(b.tool.name)));
-    return rows;
-  }, [drawerByGlobal]);
+  const [draftLabel, setDraftLabel] = useState({}); // { [tools_user_id]: string }
+  const [photoUrlById, setPhotoUrlById] = useState({}); // { [tools_user_id]: signedUrl }
+  const [photoPathById, setPhotoPathById] = useState({}); // { [tools_user_id]: photo_path we last loaded }
 
   async function reload() {
-    setErr("");
     setLoading(true);
+    setErr("");
     try {
-      const [drawer, v] = await Promise.all([fetchUserTools(), fetchToolVault()]);
-      const nextOwned = drawer?.owned || [];
-      const nextCraving = drawer?.craving || [];
-      setOwned(nextOwned);
-      setCraving(nextCraving);
-      setVault(v || []);
-
-      // Seed draft labels if missing
-      setDraftLabel((prev) => {
-        const next = { ...prev };
-        for (const tu of [...nextOwned, ...nextCraving]) {
-          if (next[tu.id] === undefined) next[tu.id] = tu.instance_label || "";
-        }
-        return next;
-      });
-
-      // Kick off signed URL loads for any instances that have photos
-      for (const tu of [...nextOwned, ...nextCraving]) {
-        if (tu.photo_path) ensureSignedPhotoUrl(tu.id, tu.photo_path);
-      }
+      const [v, ut] = await Promise.all([fetchToolVault(), fetchUserTools()]);
+      setVault(v);
+      setUserTools(ut);
     } catch (e) {
-      setErr(e?.message || "Could not load tools.");
+      setErr(e?.message || "Failed to load tools.");
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    reload();
+    let alive = true;
+    (async () => {
+      if (!alive) return;
+      await reload();
+    })();
+    return () => {
+      alive = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function moveToDrawer(globalToolId, status) {
+  const owned = useMemo(() => userTools.filter((t) => t.status === "owned"), [userTools]);
+  const craving = useMemo(() => userTools.filter((t) => t.status === "craving"), [userTools]);
+
+  const ownedGlobalIds = useMemo(() => {
+    const s = new Set();
+    for (const t of owned) if (t.tool_global_id) s.add(t.tool_global_id);
+    return s;
+  }, [owned]);
+
+  const cravingGlobalIds = useMemo(() => {
+    const s = new Set();
+    for (const t of craving) if (t.tool_global_id) s.add(t.tool_global_id);
+    return s;
+  }, [craving]);
+
+  function groupKeyForToolUser(tu) {
+    if (tu?.tool_global_id) return `g:${tu.tool_global_id}`;
+    // Custom / no global tool: group by visible name if present, otherwise isolate by id.
+    const base = String(tu?.custom_name || "").trim();
+    return base ? `c:${base.toLowerCase()}` : `u:${tu.id}`;
+  }
+
+  function groupLabelForToolUser(tu) {
+    const g = tu?.tools_global;
+    return g?.name || tu?.custom_name || "Untitled";
+  }
+
+  function groupIconForToolUser(tu) {
+    const g = tu?.tools_global;
+    return g?.icon || tu?.custom_icon || "🧰";
+  }
+
+  const ownedGroups = useMemo(() => {
+    const map = new Map();
+    for (const t of owned) {
+      const key = groupKeyForToolUser(t);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(t);
+    }
+    const arr = Array.from(map.entries()).map(([key, items]) => ({
+      key,
+      items,
+      name: groupLabelForToolUser(items[0]),
+      icon: groupIconForToolUser(items[0]),
+      tool_global_id: items[0]?.tool_global_id || null,
+      isCustom: !items[0]?.tool_global_id,
+    }));
+    // Stable ordering by display name
+    arr.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    return arr;
+  }, [owned]);
+
+  const cravingGroups = useMemo(() => {
+    const map = new Map();
+    for (const t of craving) {
+      const key = groupKeyForToolUser(t);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(t);
+    }
+    const arr = Array.from(map.entries()).map(([key, items]) => ({
+      key,
+      items,
+      name: groupLabelForToolUser(items[0]),
+      icon: groupIconForToolUser(items[0]),
+      tool_global_id: items[0]?.tool_global_id || null,
+      isCustom: !items[0]?.tool_global_id,
+    }));
+    arr.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    return arr;
+  }, [craving]);
+
+  async function addTo(status, toolGlobalId) {
     setErr("");
     setBusy(true);
     try {
-      await addGlobalToolToUser(globalToolId, status);
+      await addGlobalToolToUser(toolGlobalId, status);
       await reload();
     } catch (e) {
       setErr(e?.message || "Could not add tool.");
@@ -459,16 +459,29 @@ export default function ToolsHome() {
     }
   }
 
-  async function removeFromDrawer(toolUserId, displayName) {
-    const ok = window.confirm(`Remove “${displayName}” from your tools?`);
-    if (!ok) return;
+  async function addAnotherInstance(status, toolGlobalId, groupKeyToOpen) {
+    if (!toolGlobalId) return;
     setErr("");
     setBusy(true);
     try {
-      await deleteUserTool(toolUserId);
+      await addGlobalToolToUser(toolGlobalId, status);
       await reload();
+      // Keep that group open after add
+      if (status === "owned") {
+        setOpenOwned((prev) => {
+          const next = new Set(prev);
+          next.add(groupKeyToOpen);
+          return next;
+        });
+      } else {
+        setOpenCraving((prev) => {
+          const next = new Set(prev);
+          next.add(groupKeyToOpen);
+          return next;
+        });
+      }
     } catch (e) {
-      setErr(e?.message || "Could not remove tool.");
+      setErr(e?.message || "Could not add another instance.");
     } finally {
       setBusy(false);
     }
@@ -481,20 +494,23 @@ export default function ToolsHome() {
       await updateUserToolStatus(toolUserId, "owned");
       await reload();
     } catch (e) {
-      setErr(e?.message || "Could not move to owned.");
+      setErr(e?.message || "Could not move tool.");
     } finally {
       setBusy(false);
     }
   }
 
-  async function addAnotherInstance(globalToolId, status) {
+  async function removeFromDrawer(toolUserId, label) {
+    const ok = window.confirm(`Remove "${label}" from your drawer?`);
+    if (!ok) return;
+
     setErr("");
     setBusy(true);
     try {
-      await addGlobalToolToUser(globalToolId, status);
+      await deleteUserTool(toolUserId);
       await reload();
     } catch (e) {
-      setErr(e?.message || "Could not add another instance.");
+      setErr(e?.message || "Could not remove tool.");
     } finally {
       setBusy(false);
     }
@@ -593,7 +609,9 @@ export default function ToolsHome() {
       >
         <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
           <div style={{ display: "grid", gap: 4, minWidth: 0 }}>
-            <div style={{ fontSize: 12, opacity: 0.7, fontWeight: 800 }}>Instance</div>
+            <div style={{ fontSize: 12, opacity: 0.7, fontWeight: 800 }}>
+              Instance
+            </div>
             <div style={{ fontSize: 12, opacity: 0.65 }}>
               {tu.instance_label ? `“${tu.instance_label}”` : "No label"}
             </div>
@@ -677,10 +695,6 @@ export default function ToolsHome() {
               placeholder='e.g. "Black cuffs", "Travel kit"'
               disabled={busy}
               onClick={(e) => e.stopPropagation()}
-              onMouseDown={(e) => e.stopPropagation()}
-              onTouchStart={(e) => e.stopPropagation()}
-              onPointerDown={(e) => e.stopPropagation()}
-              onKeyDown={(e) => e.stopPropagation()}
               onChange={(e) => setDraftLabel((prev) => ({ ...prev, [tu.id]: e.target.value }))}
               style={inputStyle(busy)}
             />
@@ -744,165 +758,208 @@ export default function ToolsHome() {
             style={{
               padding: 12,
               borderRadius: 12,
-              border: "1px solid rgba(255,80,80,0.20)",
-              background: "rgba(255,80,80,0.08)",
-              color: "#ffd0d0",
+              border: "1px solid rgba(255,80,80,0.35)",
+              background: "rgba(255,80,80,0.10)",
               fontSize: 13,
-              fontWeight: 700,
+              lineHeight: 1.4,
             }}
           >
             {err}
           </div>
         ) : null}
 
-        {/* Drawer */}
         {tab === "drawer" ? (
-          <div style={{ display: "grid", gap: 10 }}>
-            {drawerGlobalRows.length === 0 ? (
-              <div style={{ opacity: 0.7, fontSize: 13 }}>No tools in your drawer yet.</div>
-            ) : null}
+          <div style={{ display: "grid", gap: 16 }}>
+            <Section
+              title="Owned tools"
+              subtitle={owned.length ? null : "No owned tools yet. Add some from the Vault."}
+            >
+              {owned.length ? (
+                <div style={{ display: "grid", gap: 10 }}>
+                  {ownedGroups.map((g) => {
+                    const open = has(openOwned, g.key);
 
-            {drawerGlobalRows.map(({ key, tool, instances }) => {
-              const isOpen = openDrawerIds.has(key);
-
-              const ownedInstances = instances.filter((tu) => tu.status === "owned");
-              const cravingInstances = instances.filter((tu) => tu.status === "craving");
-
-              const menuItems = tool.custom
-                ? []
-                : [
-                    {
-                      key: "addOwned",
-                      label: "Add owned instance",
-                      onClick: () => addAnotherInstance(tool.id, "owned"),
-                      title: "Create another owned instance of this tool",
-                    },
-                    {
-                      key: "addCraving",
-                      label: "Add craving instance",
-                      onClick: () => addAnotherInstance(tool.id, "craving"),
-                      title: "Create another craving instance of this tool",
-                    },
-                  ];
-
-              return (
-                <ToolRow
-                  key={key}
-                  tool={tool}
-                  menuItems={menuItems}
-                  open={isOpen}
-                  onToggle={() => toggleInSet(setOpenDrawerIds, key)}
-                  expandedContent={
-                    <div style={{ display: "grid", gap: 10 }}>
-                      {ownedInstances.length ? (
-                        <div style={{ display: "grid", gap: 10 }}>
-                          <div style={{ fontSize: 12, fontWeight: 900, opacity: 0.7 }}>Owned</div>
-                          {ownedInstances.map((tu) => (
-                            <InstanceRow key={tu.id} tu={tu} status="owned" />
-                          ))}
-                        </div>
-                      ) : (
-                        <div style={{ opacity: 0.7, fontSize: 13 }}>No owned instances yet.</div>
-                      )}
-
-                      {cravingInstances.length ? (
-                        <div style={{ display: "grid", gap: 10 }}>
-                          <div style={{ fontSize: 12, fontWeight: 900, opacity: 0.7 }}>Craving</div>
-                          {cravingInstances.map((tu) => (
-                            <InstanceRow key={tu.id} tu={tu} status="craving" />
-                          ))}
-                        </div>
-                      ) : (
-                        <div style={{ opacity: 0.7, fontSize: 13 }}>No craving instances.</div>
-                      )}
-
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        <SmallButton
-                          disabled={busy || tool.custom}
-                          onClick={() => addAnotherInstance(tool.id, "owned")}
-                          title={
-                            tool.custom
-                              ? "Custom tools can't add instances yet"
-                              : "Add another owned instance"
+                    return (
+                      <ToolRow
+                        key={g.key}
+                        tool={{ name: g.name, icon: g.icon, count: g.items.length }}
+                        open={open}
+                        onToggle={() => {
+                          setOpenOwned((prev) => toggleInSet(prev, g.key));
+                          if (!open) {
+                            // Load signed urls for any instances that have photos
+                            for (const tu of g.items) ensureSignedPhotoUrl(tu.id, tu.photo_path);
                           }
-                        >
-                          Add owned
-                        </SmallButton>
-                        <SmallButton
-                          disabled={busy || tool.custom}
-                          onClick={() => addAnotherInstance(tool.id, "craving")}
-                          title={
-                            tool.custom
-                              ? "Custom tools can't add instances yet"
-                              : "Add another craving instance"
+                        }}
+                        expandedContent={
+                          <div style={{ display: "grid", gap: 12 }}>
+                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                              <SmallButton
+                                disabled={busy || !g.tool_global_id}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  addAnotherInstance("owned", g.tool_global_id, g.key);
+                                }}
+                                title={
+                                  g.tool_global_id
+                                    ? "Add another owned instance"
+                                    : "Custom tools can't add instances yet"
+                                }
+                              >
+                                + Add another
+                              </SmallButton>
+                              {g.isCustom ? (
+                                <div style={{ fontSize: 12, opacity: 0.65 }}>
+                                  (Custom tool grouping is temporary)
+                                </div>
+                              ) : null}
+                            </div>
+
+                            <div style={{ display: "grid", gap: 10 }}>
+                              {g.items.map((tu) => (
+                                <InstanceRow key={tu.id} tu={tu} status="owned" />
+                              ))}
+                            </div>
+                          </div>
+                        }
+                        menuItems={null}
+                      />
+                    );
+                  })}
+                </div>
+              ) : null}
+            </Section>
+
+            <Section
+              title="Craving drawer"
+              subtitle={craving.length ? null : "Nothing in craving yet. Add items from the Vault."}
+            >
+              {craving.length ? (
+                <div style={{ display: "grid", gap: 10 }}>
+                  {cravingGroups.map((g) => {
+                    const open = has(openCraving, g.key);
+
+                    return (
+                      <ToolRow
+                        key={g.key}
+                        tool={{ name: g.name, icon: g.icon, count: g.items.length }}
+                        open={open}
+                        onToggle={() => {
+                          setOpenCraving((prev) => toggleInSet(prev, g.key));
+                          if (!open) {
+                            for (const tu of g.items) ensureSignedPhotoUrl(tu.id, tu.photo_path);
                           }
-                        >
-                          Add craving
-                        </SmallButton>
-                      </div>
-                    </div>
-                  }
-                />
-              );
-            })}
+                        }}
+                        expandedContent={
+                          <div style={{ display: "grid", gap: 12 }}>
+                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                              <SmallButton
+                                disabled={busy || !g.tool_global_id}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  addAnotherInstance("craving", g.tool_global_id, g.key);
+                                }}
+                                title={
+                                  g.tool_global_id
+                                    ? "Add another craving instance"
+                                    : "Custom tools can't add instances yet"
+                                }
+                              >
+                                + Add another
+                              </SmallButton>
+                              {g.isCustom ? (
+                                <div style={{ fontSize: 12, opacity: 0.65 }}>
+                                  (Custom tool grouping is temporary)
+                                </div>
+                              ) : null}
+                            </div>
+
+                            <div style={{ display: "grid", gap: 10 }}>
+                              {g.items.map((tu) => (
+                                <InstanceRow key={tu.id} tu={tu} status="craving" />
+                              ))}
+                            </div>
+                          </div>
+                        }
+                        menuItems={null}
+                      />
+                    );
+                  })}
+                </div>
+              ) : null}
+            </Section>
           </div>
-        ) : null}
+        ) : (
+          <div style={{ display: "grid", gap: 12 }}>
+            <div
+              style={{
+                opacity: 0.75,
+                fontSize: 13,
+                lineHeight: 1.4,
+                padding: 12,
+                borderRadius: 14,
+                border: "1px solid rgba(255,255,255,0.10)",
+                background: "rgba(255,255,255,0.03)",
+              }}
+            >
+              Tool Vault. Add items to Owned or Craving.
+            </div>
 
-        {/* Vault */}
-        {tab === "vault" ? (
-          <div style={{ display: "grid", gap: 10 }}>
-            {vault.length === 0 ? <div style={{ opacity: 0.7, fontSize: 13 }}>No vault items.</div> : null}
+            <div style={{ display: "grid", gap: 10 }}>
+              {vault.map((t) => {
+                const inOwned = ownedGlobalIds.has(t.id);
+                const inCraving = cravingGlobalIds.has(t.id);
+                const open = has(openVault, t.id);
 
-            {vault.map((t) => {
-              const key = String(t.id);
-              const isOpen = openVaultIds.has(key);
+                return (
+                  <ToolRow
+                    key={t.id}
+                    tool={{ name: t.name, icon: t.icon || "🧰" }}
+                    open={open}
+                    onToggle={() => setOpenVault((prev) => toggleInSet(prev, t.id))}
+                    expandedContent={
+                      <div style={{ display: "grid", gap: 10 }}>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <SmallButton
+                            disabled={busy || inCraving || inOwned}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              addTo("craving", t.id);
+                            }}
+                            title={
+                              inOwned
+                                ? "Already in Owned"
+                                : inCraving
+                                ? "Already in Craving"
+                                : "Add to Craving Drawer"
+                            }
+                          >
+                            + Craving
+                          </SmallButton>
+                          <SmallButton
+                            disabled={busy || inOwned}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              addTo("owned", t.id);
+                            }}
+                            title={inOwned ? "Already in Owned" : "Add to Owned Tools"}
+                          >
+                            + Owned
+                          </SmallButton>
+                        </div>
 
-              const inOwned = owned.some((u) => u.tools_global_id === t.id);
-              const inCraving = craving.some((u) => u.tools_global_id === t.id);
-
-              const menuItems = [
-                {
-                  key: "addOwned",
-                  label: inOwned ? "Add another owned instance" : "Add to Owned",
-                  onClick: () => moveToDrawer(t.id, "owned"),
-                },
-                {
-                  key: "addCraving",
-                  label: inCraving ? "Add another craving instance" : "Add to Craving",
-                  onClick: () => moveToDrawer(t.id, "craving"),
-                },
-              ];
-
-              return (
-                <ToolRow
-                  key={t.id}
-                  tool={{ ...t, count: undefined }}
-                  menuItems={menuItems}
-                  open={isOpen}
-                  onToggle={() => toggleInSet(setOpenVaultIds, key)}
-                  expandedContent={
-                    <div style={{ display: "grid", gap: 10 }}>
-                      <div style={{ opacity: 0.8 }}>
-                        Vault items will later show richer details and let you create your own owned instances (with photos).
+                        <div style={{ opacity: 0.75 }}>
+                          Vault items will later show richer details and let you create your own owned instances (with photos).
+                        </div>
                       </div>
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        <SmallButton disabled={busy} onClick={() => moveToDrawer(t.id, "owned")}>
-                          Add to Owned
-                        </SmallButton>
-                        <SmallButton disabled={busy} onClick={() => moveToDrawer(t.id, "craving")}>
-                          Add to Craving
-                        </SmallButton>
-                      </div>
-                    </div>
-                  }
-                />
-              );
-            })}
+                    }
+                    menuItems={null}
+                  />
+                );
+              })}
+            </div>
           </div>
-        ) : null}
-
-        {/* Tiny hidden reload nonce for debugging / forcing rerenders if needed */}
-        <div style={{ display: "none" }}>{reloadNonce.current}</div>
+        )}
       </Page>
     </div>
   );
