@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useNavigate, useParams } from "react-router-dom";
+import React, { useEffect, useRef, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { SmallButton } from "../../components/routesUi";
 import Page from "../../components/Page";
 import {
@@ -54,7 +54,6 @@ function stableStringify(obj) {
 export default function SceneEdit() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const location = useLocation();
 
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -71,12 +70,10 @@ export default function SceneEdit() {
   const baselineRef = useRef(null); // IMPORTANT: baseline is set from the form's first canonical payload
   const [isDirty, setIsDirty] = useState(false);
 
-  const openSceneId = useMemo(() => {
-    return location?.state?.openSceneId || id;
-  }, [location?.state?.openSceneId, id]);
-
   function goBackToScenesHome() {
-    navigate("/scenes", { state: { openSceneId } });
+    // Default behaviour: return to Scenes with cards closed.
+    // (We can add an explicit "reopen" flow later if we want it.)
+    navigate("/scenes");
   }
 
   async function loadAll() {
@@ -107,7 +104,7 @@ export default function SceneEdit() {
       setInitial(init);
       setPlanningStage(scene?.planning_stage || "intent");
 
-      // reset dirty tracking – baseline will be set from SceneForm's first onStateChange
+      // reset dirty tracking – baseline will be set from the form's first onStateChange
       baselineRef.current = null;
       latestPayloadRef.current = null;
       setIsDirty(false);
