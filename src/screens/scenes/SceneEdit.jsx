@@ -67,12 +67,11 @@ export default function SceneEdit() {
 
   // latest form payload snapshot + baseline for dirty checks
   const latestPayloadRef = useRef(null);
-  const baselineRef = useRef(null); // IMPORTANT: baseline is set from the form's first canonical payload
+  const baselineRef = useRef(null); // baseline is set from the form's first canonical payload
   const [isDirty, setIsDirty] = useState(false);
 
   function goBackToScenesHome() {
-    // Default behaviour: return to Scenes with cards closed.
-    // (We can add an explicit "reopen" flow later if we want it.)
+    // Return to scenes without forcing any card open
     navigate("/scenes");
   }
 
@@ -104,7 +103,7 @@ export default function SceneEdit() {
       setInitial(init);
       setPlanningStage(scene?.planning_stage || "intent");
 
-      // reset dirty tracking – baseline will be set from the form's first onStateChange
+      // reset dirty tracking – baseline will be set from SceneForm's first onStateChange
       baselineRef.current = null;
       latestPayloadRef.current = null;
       setIsDirty(false);
