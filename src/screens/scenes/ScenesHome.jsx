@@ -12,7 +12,7 @@ import {
   pickToolIcon,
   pickToolLabel,
 } from "../../lib/sceneHelpers";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
 /* ---------------- module cache to reduce jank ----------------
    - Keeps list + per-scene details across unmount/remount (tab switches)
@@ -65,47 +65,6 @@ function toggleInSet(prevSet, id) {
   return next;
 }
 
-function parseHashSections(raw) {
-  const text = String(raw || "").trim();
-  if (!text) return [];
-
-  const lines = text.split(/\r?\n/);
-  const sections = [];
-  let current = { title: "Plan", bodyLines: [] };
-  let sawHeading = false;
-
-  for (const line of lines) {
-    const m = line.match(/^\s*#\s+(.*)\s*$/);
-    if (m) {
-      sawHeading = true;
-      if (current && (current.bodyLines.length || current.title)) {
-        sections.push({
-          title: current.title || "Section",
-          body: current.bodyLines.join("\n").trim(),
-        });
-      }
-      current = { title: m[1].trim() || "Section", bodyLines: [] };
-    } else {
-      current.bodyLines.push(line);
-    }
-  }
-
-  if (current) {
-    sections.push({
-      title: current.title || "Section",
-      body: current.bodyLines.join("\n").trim(),
-    });
-  }
-
-  if (!sawHeading) {
-    return [{ title: "Plan", body: text }];
-  }
-
-  return sections.filter(
-    (s) => (s.title && s.title.trim()) || (s.body && s.body.trim())
-  );
-}
-
 function sectionsFromBlocks(blocks) {
   const arr = Array.isArray(blocks) ? blocks : [];
   if (!arr.length) return [];
@@ -127,6 +86,7 @@ function sectionsFromBlocks(blocks) {
 
 export default function ScenesHome() {
   const navigate = useNavigate();
+  const location = useLocation();
 
   const hasCache = Array.isArray(scenesHomeCache.scenes);
 
@@ -148,8 +108,6 @@ export default function ScenesHome() {
 
   async function reload(opts = {}) {
     const silent = !!opts.silent;
-
-    // If we already have something to show, don't flip the screen into a "Loading…" state.
     const hasExisting = Array.isArray(scenes) && scenes.length > 0;
 
     if (!silent || !hasExisting) setLoading(true);
@@ -180,11 +138,9 @@ export default function ScenesHome() {
   }, []);
 
   async function ensureDetails(sceneId) {
-    // Check local first…
     const existingLocal = details?.[sceneId];
     if (existingLocal?.status === "loading" || existingLocal?.status === "ready") return;
 
-    // …then check module cache in case we remounted.
     const existingCached = scenesHomeCache.details?.[sceneId];
     if (existingCached?.status === "ready") {
       setDetails((prev) => {
@@ -223,6 +179,21 @@ export default function ScenesHome() {
       });
     }
   }
+
+  // When returning from Edit, open the requested card and load details
+  useEffect(() => {
+    const openSceneId = location?.state?.openSceneId;
+    if (!openSceneId) return;
+
+    setOpenScenes((prev) => {
+      const next = new Set(prev);
+      next.add(openSceneId);
+      return next;
+    });
+
+    ensureDetails(openSceneId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location?.state?.openSceneId]);
 
   async function cyclePlanningStage(e, scene) {
     e.stopPropagation();
@@ -333,9 +304,6 @@ export default function ScenesHome() {
             const det = details?.[s.id];
             const full = det?.status === "ready" ? det.data : null;
 
-            const notesText =
-              (full?.emotional_notes ?? s.emotional_notes ?? "").trim();
-
             const participants =
               full?.scene_participants
                 ?.map((sp) => sp?.participants)
@@ -346,9 +314,7 @@ export default function ScenesHome() {
                 ?.map((st) => st?.tools_user)
                 .filter(Boolean) ?? [];
 
-            const blockSections = sectionsFromBlocks(full?.scene_blocks);
-            const fallbackSections = parseHashSections(notesText);
-            const sections = blockSections.length ? blockSections : fallbackSections;
+            const sections = sectionsFromBlocks(full?.scene_blocks);
 
             return (
               <Card
@@ -490,30 +456,13 @@ export default function ScenesHome() {
                         </div>
                       )}
 
-                      {/* Notes ONLY when open (and stays at bottom) */}
-                      {notesText ? (
-                        <div style={{ display: "grid", gap: 6 }}>
-                          <div style={{ fontSize: 12, opacity: 0.7 }}>Notes</div>
-                          <div
-                            style={{
-                              padding: 10,
-                              borderRadius: 14,
-                              background: "rgba(255,255,255,0.03)",
-                              whiteSpace: "pre-wrap",
-                              lineHeight: 1.4,
-                              opacity: 0.9,
-                            }}
-                          >
-                            {notesText}
-                          </div>
-                        </div>
-                      ) : null}
-
                       <div style={{ display: "flex", gap: 8 }}>
                         <SmallButton
                           onClick={(e) => {
                             e.stopPropagation();
-                            navigate(`/scenes/${s.id}/edit`);
+                            navigate(`/scenes/${s.id}/edit`, {
+                              state: { fromScenesHome: true, openSceneId: s.id },
+                            });
                           }}
                         >
                           Edit
