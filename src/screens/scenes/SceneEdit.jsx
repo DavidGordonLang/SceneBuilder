@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { SmallButton } from "../../components/routesUi";
 import Page from "../../components/Page";
 import {
@@ -54,6 +54,7 @@ function stableStringify(obj) {
 export default function SceneEdit() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -67,12 +68,15 @@ export default function SceneEdit() {
 
   // latest form payload snapshot + baseline for dirty checks
   const latestPayloadRef = useRef(null);
-  const baselineRef = useRef(null); // baseline is set from the form's first canonical payload
+  const baselineRef = useRef(null);
   const [isDirty, setIsDirty] = useState(false);
 
+  const openSceneId = useMemo(() => {
+    return location?.state?.openSceneId || id;
+  }, [location?.state?.openSceneId, id]);
+
   function goBackToScenesHome() {
-    // Return to scenes without forcing any card open
-    navigate("/scenes");
+    navigate("/scenes", { state: { openSceneId } });
   }
 
   async function loadAll() {
@@ -93,7 +97,7 @@ export default function SceneEdit() {
       const init = {
         title: scene?.title || scene?.name || "",
         intent: scene?.emotional_state || "",
-        notes: scene?.emotional_notes || "",
+        // NOTES REMOVED — we don’t load or edit emotional_notes anymore.
         scheduled_at: scene?.scheduled_for || null,
         participantIds,
         toolUserIds,
@@ -103,7 +107,6 @@ export default function SceneEdit() {
       setInitial(init);
       setPlanningStage(scene?.planning_stage || "intent");
 
-      // reset dirty tracking – baseline will be set from SceneForm's first onStateChange
       baselineRef.current = null;
       latestPayloadRef.current = null;
       setIsDirty(false);
@@ -138,7 +141,6 @@ export default function SceneEdit() {
     try {
       await updateScene(id, payload);
 
-      // After a successful save, reset baseline to the just-saved payload
       baselineRef.current = stableStringify(payload);
       setIsDirty(false);
 
@@ -152,7 +154,6 @@ export default function SceneEdit() {
   }
 
   async function handleBack() {
-    // If we haven't established baseline yet (rare), treat as not dirty
     if (!baselineRef.current || !isDirty) {
       goBackToScenesHome();
       return;
@@ -169,15 +170,12 @@ export default function SceneEdit() {
 
   async function cycleStage() {
     const next = nextStage(planningStage);
-
-    // optimistic UI
     setPlanningStage(next);
 
     try {
       await updateScenePlanningStage(id, next);
     } catch (e) {
       console.error(e);
-      // if it fails, we don’t know the previous stage reliably; reload is safest
       await loadAll();
     }
   }
@@ -238,7 +236,6 @@ export default function SceneEdit() {
 
               const current = stableStringify(payload);
 
-              // First canonical payload becomes baseline (so no false "dirty" from shape differences)
               if (!baselineRef.current) {
                 baselineRef.current = current;
                 setIsDirty(false);
@@ -248,7 +245,6 @@ export default function SceneEdit() {
               setIsDirty(current !== baselineRef.current);
             }}
             onSubmit={async (payload) => {
-              // not used in edit mode; kept for compatibility
               latestPayloadRef.current = payload;
               return { sceneId: id };
             }}
