@@ -1,7 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Card, SmallButton } from "../../components/routesUi";
 import { DEFAULT_SCENE_BLOCKS } from "../../lib/scenesApi";
-import { pickParticipantLabel, pickToolIcon, pickToolLabel } from "../../lib/sceneHelpers";
+import {
+  pickParticipantLabel,
+  pickToolIcon,
+  pickToolLabel,
+} from "../../lib/sceneHelpers";
 import { useNavigate } from "react-router-dom";
 
 /* ---------------- small UI helpers ---------------- */
@@ -72,8 +76,7 @@ function normalizeBlocksForForm(initialBlocks) {
       .sort((a, b) => (a?.sort_order ?? 0) - (b?.sort_order ?? 0))
       .map((b, idx) => ({
         id: b?.id || null,
-        sort_order:
-          typeof b?.sort_order === "number" ? b.sort_order : (idx + 1) * 10,
+        sort_order: typeof b?.sort_order === "number" ? b.sort_order : (idx + 1) * 10,
         title: String(b?.title || "").trim() || `Stage ${idx + 1}`,
         body: String(b?.body || ""),
         duration_minutes:
@@ -83,6 +86,7 @@ function normalizeBlocksForForm(initialBlocks) {
       }));
   }
 
+  // If no blocks were provided, seed defaults for the editor UI
   return DEFAULT_SCENE_BLOCKS.map((d, idx) => ({
     id: null,
     sort_order: (idx + 1) * 10,
@@ -92,7 +96,25 @@ function normalizeBlocksForForm(initialBlocks) {
   }));
 }
 
-/* ---------------- main component ---------------- */
+/* ---------------- tools grouping ---------------- */
+
+function getToolGroupKey(toolUserRow) {
+  // Current DB shape: tools_user.tools_global(tags: text[])
+  const tags = toolUserRow?.tools_global?.tags;
+  const first = Array.isArray(tags) ? String(tags[0] || "").trim() : "";
+  // Critical: NEVER return empty => otherwise tools “disappear”
+  return first || "Other";
+}
+
+function sortGroupKeys(keys) {
+  const arr = Array.isArray(keys) ? keys.slice() : [];
+  arr.sort((a, b) => {
+    if (a === "Other" && b !== "Other") return 1;
+    if (b === "Other" && a !== "Other") return -1;
+    return String(a).localeCompare(String(b));
+  });
+  return arr;
+}
 
 export default function SceneForm({
   initial,
@@ -122,15 +144,13 @@ export default function SceneForm({
     return new Set(ids.filter(Boolean));
   });
 
-  const [blocks, setBlocks] = useState(() =>
-    normalizeBlocksForForm(initial?.blocks)
-  );
+  const [blocks, setBlocks] = useState(() => normalizeBlocksForForm(initial?.blocks));
 
+  // group expansion state
   const [openToolGroups, setOpenToolGroups] = useState(() => new Set());
 
-  /* ---------------- rehydrate on initial change ---------------- */
-
   useEffect(() => {
+    // If initial changes (edit loads), rehydrate form state.
     setTitle(initial?.title || "");
     setIntent(initial?.intent || "");
     setScheduledAt(initial?.scheduled_at || null);
@@ -146,6 +166,9 @@ export default function SceneForm({
     });
 
     setBlocks(normalizeBlocksForForm(initial?.blocks));
+
+    // reset open groups (safe + predictable)
+    setOpenToolGroups(new Set());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     initial?.title,
@@ -156,52 +179,20 @@ export default function SceneForm({
     initial?.blocks,
   ]);
 
-  /* ---------------- grouping logic ---------------- */
-
-  const groupedTools = useMemo(() => {
-    const map = new Map();
-
-    for (const tu of ownedTools || []) {
-      const tool = tu?.tools;
-      if (!tool) continue;
-
-      if (!map.has(tool.id)) {
-        map.set(tool.id, {
-          toolId: tool.id,
-          label: tool.name,
-          icon: pickToolIcon(tu),
-          instances: [],
-        });
-      }
-
-      map.get(tool.id).instances.push(tu);
-    }
-
-    return Array.from(map.values());
-  }, [ownedTools]);
-
-  /* ---------------- handlers ---------------- */
-
   function toggleParticipant(id) {
     setSelectedParticipants((prev) => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   }
 
-  function toggleToolInstance(id) {
+  function toggleTool(id) {
     setSelectedTools((prev) => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
-  }
-
-  function toggleToolGroup(toolId) {
-    setOpenToolGroups((prev) => {
-      const next = new Set(prev);
-      next.has(toolId) ? next.delete(toolId) : next.add(toolId);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   }
@@ -216,10 +207,7 @@ export default function SceneForm({
     () => Array.from(selectedParticipants),
     [selectedParticipants]
   );
-  const toolUserIds = useMemo(
-    () => Array.from(selectedTools),
-    [selectedTools]
-  );
+  const toolUserIds = useMemo(() => Array.from(selectedTools), [selectedTools]);
 
   const payload = useMemo(() => {
     return {
@@ -243,7 +231,34 @@ export default function SceneForm({
     await onSubmit?.(payload);
   }
 
-  /* ---------------- render ---------------- */
+  const toolsGrouped = useMemo(() => {
+    const list = Array.isArray(ownedTools) ? ownedTools : [];
+    const map = new Map(); // key -> toolUser[]
+    for (const tu of list) {
+      const key = getToolGroupKey(tu);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(tu);
+    }
+
+    const keys = sortGroupKeys(Array.from(map.keys()));
+    return keys.map((k) => ({
+      key: k,
+      items: (map.get(k) || []).slice().sort((a, b) => {
+        const la = pickToolLabel(a);
+        const lb = pickToolLabel(b);
+        return String(la).localeCompare(String(lb));
+      }),
+    }));
+  }, [ownedTools]);
+
+  function toggleGroup(key) {
+    setOpenToolGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
 
   return (
     <div style={{ display: "grid", gap: 12 }}>
@@ -293,102 +308,181 @@ export default function SceneForm({
       <div style={{ display: "grid", gap: 10 }}>
         <div style={{ fontWeight: 900 }}>Stages</div>
 
-        {blocks
-          .slice()
-          .sort((a, b) => (a?.sort_order ?? 0) - (b?.sort_order ?? 0))
-          .map((b) => (
-            <Card key={b.sort_order}>
-              <div style={{ display: "grid", gap: 8 }}>
-                <div style={{ fontWeight: 850 }}>{b.title}</div>
-                <TextArea
-                  value={b.body || ""}
-                  onChange={(e) => setBlockBody(b.sort_order, e.target.value)}
-                  placeholder="Write the plan for this stage…"
-                  disabled={busy}
-                />
-              </div>
-            </Card>
-          ))}
+        <div style={{ display: "grid", gap: 10 }}>
+          {blocks
+            .slice()
+            .sort((a, b) => (a?.sort_order ?? 0) - (b?.sort_order ?? 0))
+            .map((b) => (
+              <Card key={b.sort_order}>
+                <div style={{ display: "grid", gap: 8 }}>
+                  <div style={{ fontWeight: 850, opacity: 0.9 }}>{b.title}</div>
+                  <TextArea
+                    value={b.body || ""}
+                    onChange={(v) => setBlockBody(b.sort_order, v)}
+                    placeholder="Write the plan for this stage…"
+                    disabled={busy}
+                  />
+                </div>
+              </Card>
+            ))}
+        </div>
       </div>
 
       {/* Participants */}
       <div style={{ display: "grid", gap: 10 }}>
         <div style={{ fontWeight: 900 }}>Participants</div>
-        {participants.map((p) => {
-          const checked = selectedParticipants.has(p.id);
-          return (
-            <Card key={p.id} onClick={() => toggleParticipant(p.id)}>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <div style={{ fontWeight: 800 }}>{pickParticipantLabel(p)}</div>
-                <div style={{ fontWeight: 800 }}>{checked ? "✓" : ""}</div>
-              </div>
-            </Card>
-          );
-        })}
+        {participants.length ? (
+          <div style={{ display: "grid", gap: 10 }}>
+            {participants.map((p) => {
+              const label = pickParticipantLabel(p);
+              const checked = selectedParticipants.has(p.id);
+              return (
+                <Card key={p.id} onClick={() => toggleParticipant(p.id)}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                    <div style={{ fontWeight: 800 }}>{label}</div>
+                    <div style={{ opacity: 0.8, fontWeight: 800 }}>
+                      {checked ? "✓" : ""}
+                    </div>
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
+        ) : (
+          <div style={{ opacity: 0.7, fontSize: 13 }}>No participants found yet.</div>
+        )}
       </div>
 
-      {/* Tools (Grouped) */}
+      {/* Tools */}
       <div style={{ display: "grid", gap: 10 }}>
         <div style={{ fontWeight: 900 }}>Tools (Owned)</div>
 
-        {groupedTools.map((group) => {
-          const open = openToolGroups.has(group.toolId);
+        {Array.isArray(ownedTools) && ownedTools.length ? (
+          <div style={{ display: "grid", gap: 10 }}>
+            {toolsGrouped.map((group) => {
+              const isOpen = openToolGroups.has(group.key);
+              const total = group.items.length;
+              const selectedCount = group.items.reduce(
+                (acc, tu) => acc + (selectedTools.has(tu.id) ? 1 : 0),
+                0
+              );
 
-          return (
-            <Card key={group.toolId}>
-              <div style={{ display: "grid", gap: 8 }}>
-                <div
-                  onClick={() => toggleToolGroup(group.toolId)}
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    cursor: "pointer",
-                    fontWeight: 850,
-                  }}
-                >
-                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <span>{group.icon}</span>
-                    <span>{group.label}</span>
-                  </div>
-                  <span style={{ opacity: 0.7 }}>
-                    {open ? "▾" : "▸"} {group.instances.length}
-                  </span>
-                </div>
-
-                {open && (
-                  <div style={{ display: "grid", gap: 8, paddingLeft: 18 }}>
-                    {group.instances.map((tu) => {
-                      const checked = selectedTools.has(tu.id);
-                      return (
-                        <div
-                          key={tu.id}
-                          onClick={() => toggleToolInstance(tu.id)}
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            cursor: "pointer",
-                          }}
-                        >
-                          <div>{pickToolLabel(tu)}</div>
-                          <div style={{ fontWeight: 800 }}>
-                            {checked ? "✓" : ""}
-                          </div>
+              return (
+                <div key={group.key} style={{ display: "grid", gap: 10 }}>
+                  {/* Group row (expand only) */}
+                  <Card onClick={() => toggleGroup(group.key)}>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        gap: 10,
+                        alignItems: "center",
+                      }}
+                    >
+                      <div style={{ display: "grid", gap: 2, minWidth: 0 }}>
+                        <div style={{ fontWeight: 900, letterSpacing: 0.2 }}>
+                          {group.key}
                         </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </Card>
-          );
-        })}
+                        <div style={{ fontSize: 12, opacity: 0.7 }}>
+                          {selectedCount}/{total} selected
+                        </div>
+                      </div>
+
+                      <div
+                        style={{
+                          opacity: 0.8,
+                          fontWeight: 900,
+                          fontSize: 14,
+                          flex: "0 0 auto",
+                        }}
+                      >
+                        {isOpen ? "▾" : "▸"}
+                      </div>
+                    </div>
+                  </Card>
+
+                  {/* Tools inside group (select here) */}
+                  {isOpen ? (
+                    <div style={{ display: "grid", gap: 10 }}>
+                      {group.items.map((tu) => {
+                        const name = pickToolLabel(tu);
+                        const icon = pickToolIcon(tu);
+                        const checked = selectedTools.has(tu.id);
+
+                        return (
+                          <Card key={tu.id} onClick={() => toggleTool(tu.id)}>
+                            <div
+                              style={{
+                                display: "flex",
+                                justifyContent: "space-between",
+                                gap: 10,
+                              }}
+                            >
+                              <div
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: 10,
+                                  minWidth: 0,
+                                }}
+                              >
+                                <div
+                                  style={{
+                                    width: 34,
+                                    height: 34,
+                                    borderRadius: 12,
+                                    display: "grid",
+                                    placeItems: "center",
+                                    background: "rgba(255,255,255,0.05)",
+                                    fontSize: 18,
+                                    flex: "0 0 auto",
+                                  }}
+                                >
+                                  {icon}
+                                </div>
+                                <div
+                                  style={{
+                                    fontWeight: 800,
+                                    overflow: "hidden",
+                                    textOverflow: "ellipsis",
+                                    whiteSpace: "nowrap",
+                                  }}
+                                >
+                                  {name}
+                                </div>
+                              </div>
+
+                              <div style={{ opacity: 0.85, fontWeight: 900, flex: "0 0 auto" }}>
+                                {checked ? "✓" : ""}
+                              </div>
+                            </div>
+                          </Card>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div style={{ opacity: 0.7, fontSize: 13 }}>
+            You don’t have any owned tools yet. Add some in Tools → Vault.
+          </div>
+        )}
       </div>
 
-      {/* Actions */}
+      {/* Actions (optional; Edit screen will hide these) */}
       {showActions ? (
         <div style={{ display: "flex", gap: 10 }}>
-          <SmallButton onClick={() => navigate(backTo)}>Cancel</SmallButton>
-          <SmallButton disabled={!canSubmit} onClick={handleSubmit}>
+          <SmallButton disabled={busy} onClick={() => navigate(backTo || "/scenes")} title="Cancel">
+            Cancel
+          </SmallButton>
+          <SmallButton
+            disabled={!canSubmit}
+            onClick={handleSubmit}
+            title={title.trim() ? submitLabel : "Title is required"}
+          >
             {busy ? "Saving…" : submitLabel}
           </SmallButton>
         </div>
