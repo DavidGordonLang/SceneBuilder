@@ -97,12 +97,8 @@ function parseHashSections(raw) {
     });
   }
 
-  // KEY CHANGE:
-  // If the notes don't contain headings, don't pretend it's a "Plan" stage.
-  // Notes should show ONLY in the Notes block at the bottom (when open).
-  if (!sawHeading) {
-    return [];
-  }
+  // Notes are "extra". Only treat Notes as stage sections if user explicitly uses # headings.
+  if (!sawHeading) return [];
 
   return sections.filter(
     (s) => (s.title && s.title.trim()) || (s.body && s.body.trim())
@@ -151,7 +147,7 @@ export default function ScenesHome() {
   }
 
   function invalidateDetails(sceneId) {
-    // Remove from BOTH local state + module cache so ensureDetails will refetch.
+    // Remove from BOTH local state + module cache so the next open fetches fresh.
     setDetails((prev) => {
       const next = { ...prev };
       delete next[sceneId];
@@ -249,22 +245,23 @@ export default function ScenesHome() {
     }
   }
 
-  // When returning from Edit, open the requested card and load details
+  // When returning from Edit:
+  // - You expect the card to be CLOSED.
+  // - But you still want the next open to show fresh data.
   useEffect(() => {
-    const openSceneId = location?.state?.openSceneId;
-    if (!openSceneId) return;
+    const updatedSceneId = location?.state?.openSceneId;
+    if (!updatedSceneId) return;
 
+    // Ensure it's closed on return
     setOpenScenes((prev) => {
       const next = new Set(prev);
-      next.add(openSceneId);
+      next.delete(updatedSceneId);
       return next;
     });
 
-    // Invalidate so we always reflect freshly saved blocks/participants/tools after edit.
-    invalidateDetails(openSceneId);
+    // Invalidate details so next expand fetches fresh blocks/tools/participants
+    invalidateDetails(updatedSceneId);
 
-    // Now re-fetch
-    ensureDetails(openSceneId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location?.state?.openSceneId]);
 
