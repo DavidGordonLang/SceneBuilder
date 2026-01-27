@@ -77,7 +77,8 @@ export default function SceneCreate() {
     if (busy) return;
     const newId = await saveNow();
     if (newId) {
-      navigate("/scenes", { state: { openSceneId: newId } });
+      // Return to scenes without forcing any card open
+      navigate("/scenes");
     }
   }
 
