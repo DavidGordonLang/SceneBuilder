@@ -1,8 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Card, SmallButton } from "../../components/routesUi";
-import {
-  DEFAULT_SCENE_BLOCKS,
-} from "../../lib/scenesApi";
+import { DEFAULT_SCENE_BLOCKS } from "../../lib/scenesApi";
 import { pickParticipantLabel, pickToolIcon, pickToolLabel } from "../../lib/sceneHelpers";
 import { useNavigate } from "react-router-dom";
 
@@ -85,7 +83,6 @@ function normalizeBlocksForForm(initialBlocks) {
       }));
   }
 
-  // If no blocks were provided, seed defaults for the editor UI
   return DEFAULT_SCENE_BLOCKS.map((d, idx) => ({
     id: null,
     sort_order: (idx + 1) * 10,
@@ -94,6 +91,8 @@ function normalizeBlocksForForm(initialBlocks) {
     duration_minutes: null,
   }));
 }
+
+/* ---------------- main component ---------------- */
 
 export default function SceneForm({
   initial,
@@ -123,10 +122,15 @@ export default function SceneForm({
     return new Set(ids.filter(Boolean));
   });
 
-  const [blocks, setBlocks] = useState(() => normalizeBlocksForForm(initial?.blocks));
+  const [blocks, setBlocks] = useState(() =>
+    normalizeBlocksForForm(initial?.blocks)
+  );
+
+  const [openToolGroups, setOpenToolGroups] = useState(() => new Set());
+
+  /* ---------------- rehydrate on initial change ---------------- */
 
   useEffect(() => {
-    // If initial changes (edit loads), rehydrate form state.
     setTitle(initial?.title || "");
     setIntent(initial?.intent || "");
     setScheduledAt(initial?.scheduled_at || null);
@@ -143,22 +147,61 @@ export default function SceneForm({
 
     setBlocks(normalizeBlocksForForm(initial?.blocks));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initial?.title, initial?.intent, initial?.scheduled_at, initial?.participantIds, initial?.toolUserIds, initial?.blocks]);
+  }, [
+    initial?.title,
+    initial?.intent,
+    initial?.scheduled_at,
+    initial?.participantIds,
+    initial?.toolUserIds,
+    initial?.blocks,
+  ]);
+
+  /* ---------------- grouping logic ---------------- */
+
+  const groupedTools = useMemo(() => {
+    const map = new Map();
+
+    for (const tu of ownedTools || []) {
+      const tool = tu?.tools;
+      if (!tool) continue;
+
+      if (!map.has(tool.id)) {
+        map.set(tool.id, {
+          toolId: tool.id,
+          label: tool.name,
+          icon: pickToolIcon(tu),
+          instances: [],
+        });
+      }
+
+      map.get(tool.id).instances.push(tu);
+    }
+
+    return Array.from(map.values());
+  }, [ownedTools]);
+
+  /* ---------------- handlers ---------------- */
 
   function toggleParticipant(id) {
     setSelectedParticipants((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
   }
 
-  function toggleTool(id) {
+  function toggleToolInstance(id) {
     setSelectedTools((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  function toggleToolGroup(toolId) {
+    setOpenToolGroups((prev) => {
+      const next = new Set(prev);
+      next.has(toolId) ? next.delete(toolId) : next.add(toolId);
       return next;
     });
   }
@@ -169,14 +212,19 @@ export default function SceneForm({
     );
   }
 
-  const participantIds = useMemo(() => Array.from(selectedParticipants), [selectedParticipants]);
-  const toolUserIds = useMemo(() => Array.from(selectedTools), [selectedTools]);
+  const participantIds = useMemo(
+    () => Array.from(selectedParticipants),
+    [selectedParticipants]
+  );
+  const toolUserIds = useMemo(
+    () => Array.from(selectedTools),
+    [selectedTools]
+  );
 
   const payload = useMemo(() => {
     return {
       title: title.trim(),
       intent,
-      // NOTES REMOVED — per-stage blocks are the only planning content now.
       scheduled_at: scheduledAt || null,
       participantIds,
       toolUserIds,
@@ -194,6 +242,8 @@ export default function SceneForm({
     if (!canSubmit) return;
     await onSubmit?.(payload);
   }
+
+  /* ---------------- render ---------------- */
 
   return (
     <div style={{ display: "grid", gap: 12 }}>
@@ -243,112 +293,102 @@ export default function SceneForm({
       <div style={{ display: "grid", gap: 10 }}>
         <div style={{ fontWeight: 900 }}>Stages</div>
 
-        <div style={{ display: "grid", gap: 10 }}>
-          {blocks
-            .slice()
-            .sort((a, b) => (a?.sort_order ?? 0) - (b?.sort_order ?? 0))
-            .map((b) => (
-              <Card key={b.sort_order}>
-                <div style={{ display: "grid", gap: 8 }}>
-                  <div style={{ fontWeight: 850, opacity: 0.9 }}>{b.title}</div>
-                  <TextArea
-                    value={b.body || ""}
-                    onChange={(v) => setBlockBody(b.sort_order, v)}
-                    placeholder="Write the plan for this stage…"
-                    disabled={busy}
-                  />
-                </div>
-              </Card>
-            ))}
-        </div>
+        {blocks
+          .slice()
+          .sort((a, b) => (a?.sort_order ?? 0) - (b?.sort_order ?? 0))
+          .map((b) => (
+            <Card key={b.sort_order}>
+              <div style={{ display: "grid", gap: 8 }}>
+                <div style={{ fontWeight: 850 }}>{b.title}</div>
+                <TextArea
+                  value={b.body || ""}
+                  onChange={(e) => setBlockBody(b.sort_order, e.target.value)}
+                  placeholder="Write the plan for this stage…"
+                  disabled={busy}
+                />
+              </div>
+            </Card>
+          ))}
       </div>
 
       {/* Participants */}
       <div style={{ display: "grid", gap: 10 }}>
         <div style={{ fontWeight: 900 }}>Participants</div>
-        {participants.length ? (
-          <div style={{ display: "grid", gap: 10 }}>
-            {participants.map((p) => {
-              const label = pickParticipantLabel(p);
-              const checked = selectedParticipants.has(p.id);
-              return (
-                <Card key={p.id} onClick={() => toggleParticipant(p.id)}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-                    <div style={{ fontWeight: 800 }}>{label}</div>
-                    <div style={{ opacity: 0.8, fontWeight: 800 }}>{checked ? "✓" : ""}</div>
-                  </div>
-                </Card>
-              );
-            })}
-          </div>
-        ) : (
-          <div style={{ opacity: 0.7, fontSize: 13 }}>No participants found yet.</div>
-        )}
+        {participants.map((p) => {
+          const checked = selectedParticipants.has(p.id);
+          return (
+            <Card key={p.id} onClick={() => toggleParticipant(p.id)}>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <div style={{ fontWeight: 800 }}>{pickParticipantLabel(p)}</div>
+                <div style={{ fontWeight: 800 }}>{checked ? "✓" : ""}</div>
+              </div>
+            </Card>
+          );
+        })}
       </div>
 
-      {/* Tools */}
+      {/* Tools (Grouped) */}
       <div style={{ display: "grid", gap: 10 }}>
         <div style={{ fontWeight: 900 }}>Tools (Owned)</div>
-        {ownedTools.length ? (
-          <div style={{ display: "grid", gap: 10 }}>
-            {ownedTools.map((tu) => {
-              const name = pickToolLabel(tu);
-              const icon = pickToolIcon(tu);
-              const checked = selectedTools.has(tu.id);
 
-              return (
-                <Card key={tu.id} onClick={() => toggleTool(tu.id)}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-                      <div
-                        style={{
-                          width: 34,
-                          height: 34,
-                          borderRadius: 12,
-                          display: "grid",
-                          placeItems: "center",
-                          background: "rgba(255,255,255,0.05)",
-                          fontSize: 18,
-                          flex: "0 0 auto",
-                        }}
-                      >
-                        {icon}
-                      </div>
-                      <div style={{ fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {name}
-                      </div>
-                    </div>
+        {groupedTools.map((group) => {
+          const open = openToolGroups.has(group.toolId);
 
-                    <div style={{ opacity: 0.8, fontWeight: 800, flex: "0 0 auto" }}>
-                      {checked ? "✓" : ""}
-                    </div>
+          return (
+            <Card key={group.toolId}>
+              <div style={{ display: "grid", gap: 8 }}>
+                <div
+                  onClick={() => toggleToolGroup(group.toolId)}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    cursor: "pointer",
+                    fontWeight: 850,
+                  }}
+                >
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <span>{group.icon}</span>
+                    <span>{group.label}</span>
                   </div>
-                </Card>
-              );
-            })}
-          </div>
-        ) : (
-          <div style={{ opacity: 0.7, fontSize: 13 }}>
-            You don’t have any owned tools yet. Add some in Tools → Vault.
-          </div>
-        )}
+                  <span style={{ opacity: 0.7 }}>
+                    {open ? "▾" : "▸"} {group.instances.length}
+                  </span>
+                </div>
+
+                {open && (
+                  <div style={{ display: "grid", gap: 8, paddingLeft: 18 }}>
+                    {group.instances.map((tu) => {
+                      const checked = selectedTools.has(tu.id);
+                      return (
+                        <div
+                          key={tu.id}
+                          onClick={() => toggleToolInstance(tu.id)}
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            cursor: "pointer",
+                          }}
+                        >
+                          <div>{pickToolLabel(tu)}</div>
+                          <div style={{ fontWeight: 800 }}>
+                            {checked ? "✓" : ""}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </Card>
+          );
+        })}
       </div>
 
-      {/* Actions (optional; Edit screen will hide these) */}
+      {/* Actions */}
       {showActions ? (
         <div style={{ display: "flex", gap: 10 }}>
-          <SmallButton
-            disabled={busy}
-            onClick={() => navigate(backTo || "/scenes")}
-            title="Cancel"
-          >
-            Cancel
-          </SmallButton>
-          <SmallButton
-            disabled={!canSubmit}
-            onClick={handleSubmit}
-            title={title.trim() ? submitLabel : "Title is required"}
-          >
+          <SmallButton onClick={() => navigate(backTo)}>Cancel</SmallButton>
+          <SmallButton disabled={!canSubmit} onClick={handleSubmit}>
             {busy ? "Saving…" : submitLabel}
           </SmallButton>
         </div>
