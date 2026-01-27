@@ -1,18 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { Card, Chip, SmallButton } from "../../components/routesUi";
 import Page from "../../components/Page";
-import {
-  fetchSceneById,
-  fetchScenes,
-  updateScenePlanningStage,
-} from "../../lib/scenesApi";
-import {
-  formatDate,
-  pickParticipantLabel,
-  pickToolIcon,
-  pickToolLabel,
-} from "../../lib/sceneHelpers";
-import { useLocation, useNavigate } from "react-router-dom";
+import { fetchSceneById, fetchScenes, updateScenePlanningStage } from "../../lib/scenesApi";
+import { formatDate, pickParticipantLabel, pickToolIcon, pickToolLabel } from "../../lib/sceneHelpers";
+import { useNavigate } from "react-router-dom";
 
 /* ---------------- module cache to reduce jank ----------------
    - Keeps list + per-scene details across unmount/remount (tab switches)
@@ -97,12 +88,11 @@ function parseHashSections(raw) {
     });
   }
 
-  // Notes are "extra". Only treat Notes as stage sections if user explicitly uses # headings.
-  if (!sawHeading) return [];
+  if (!sawHeading) {
+    return [{ title: "Plan", body: text }];
+  }
 
-  return sections.filter(
-    (s) => (s.title && s.title.trim()) || (s.body && s.body.trim())
-  );
+  return sections.filter((s) => (s.title && s.title.trim()) || (s.body && s.body.trim()));
 }
 
 function sectionsFromBlocks(blocks) {
@@ -115,9 +105,7 @@ function sectionsFromBlocks(blocks) {
       title: String(b?.title || "").trim() || "Stage",
       body: String(b?.body || ""),
       duration_minutes:
-        b?.duration_minutes === null || b?.duration_minutes === undefined
-          ? null
-          : Number(b.duration_minutes),
+        b?.duration_minutes === null || b?.duration_minutes === undefined ? null : Number(b.duration_minutes),
     }))
     .filter((s) => s.title && (s.body || "").trim().length > 0);
 }
@@ -126,7 +114,6 @@ function sectionsFromBlocks(blocks) {
 
 export default function ScenesHome() {
   const navigate = useNavigate();
-  const location = useLocation();
 
   const hasCache = Array.isArray(scenesHomeCache.scenes);
 
@@ -144,26 +131,6 @@ export default function ScenesHome() {
       details: nextDetails ? nextDetails : scenesHomeCache.details,
       ts: Date.now(),
     };
-  }
-
-  function invalidateDetails(sceneId) {
-    // Remove from BOTH local state + module cache so the next open fetches fresh.
-    setDetails((prev) => {
-      const next = { ...prev };
-      delete next[sceneId];
-      persistCache(scenes, next);
-      return next;
-    });
-
-    if (scenesHomeCache.details && scenesHomeCache.details[sceneId]) {
-      const nextCacheDetails = { ...scenesHomeCache.details };
-      delete nextCacheDetails[sceneId];
-      scenesHomeCache = {
-        ...scenesHomeCache,
-        details: nextCacheDetails,
-        ts: Date.now(),
-      };
-    }
   }
 
   async function reload(opts = {}) {
@@ -202,8 +169,7 @@ export default function ScenesHome() {
   async function ensureDetails(sceneId) {
     // Check local first…
     const existingLocal = details?.[sceneId];
-    if (existingLocal?.status === "loading" || existingLocal?.status === "ready")
-      return;
+    if (existingLocal?.status === "loading" || existingLocal?.status === "ready") return;
 
     // …then check module cache in case we remounted.
     const existingCached = scenesHomeCache.details?.[sceneId];
@@ -245,26 +211,6 @@ export default function ScenesHome() {
     }
   }
 
-  // When returning from Edit:
-  // - You expect the card to be CLOSED.
-  // - But you still want the next open to show fresh data.
-  useEffect(() => {
-    const updatedSceneId = location?.state?.openSceneId;
-    if (!updatedSceneId) return;
-
-    // Ensure it's closed on return
-    setOpenScenes((prev) => {
-      const next = new Set(prev);
-      next.delete(updatedSceneId);
-      return next;
-    });
-
-    // Invalidate details so next expand fetches fresh blocks/tools/participants
-    invalidateDetails(updatedSceneId);
-
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location?.state?.openSceneId]);
-
   async function cyclePlanningStage(e, scene) {
     e.stopPropagation();
     const current = scene.planning_stage || "intent";
@@ -273,9 +219,7 @@ export default function ScenesHome() {
     try {
       await updateScenePlanningStage(scene.id, next);
       setScenes((prev) => {
-        const nextScenes = prev.map((s) =>
-          s.id === scene.id ? { ...s, planning_stage: next } : s
-        );
+        const nextScenes = prev.map((s) => (s.id === scene.id ? { ...s, planning_stage: next } : s));
         persistCache(nextScenes, details);
         return nextScenes;
       });
@@ -291,9 +235,7 @@ export default function ScenesHome() {
     setBusy(true);
     setErr("");
     try {
-      const { supabase } = await import("../../lib/supabaseClient.js").then(
-        (m) => m
-      );
+      const { supabase } = await import("../../lib/supabaseClient.js").then((m) => m);
 
       await supabase.from("scene_participants").delete().eq("scene_id", sceneId);
       await supabase.from("scene_tools").delete().eq("scene_id", sceneId);
@@ -343,9 +285,7 @@ export default function ScenesHome() {
           </div>
 
           <div style={{ fontSize: 12, opacity: 0.7 }}>
-            {loading
-              ? "Loading scenes…"
-              : `${scenes.length} scene${scenes.length === 1 ? "" : "s"}`}
+            {loading ? "Loading scenes…" : `${scenes.length} scene${scenes.length === 1 ? "" : "s"}`}
           </div>
         </div>
 
@@ -372,23 +312,27 @@ export default function ScenesHome() {
             const when = whenValue ? formatDate(whenValue) : "";
 
             const det = details?.[s.id];
-            const full = det?.status === "ready" ? det.data : null;
+            const isReady = det?.status === "ready";
+            const full = isReady ? det.data : null;
 
-            const notesText = (full?.emotional_notes ?? s.emotional_notes ?? "").trim();
+            // Only use the list-row notes while closed; when open, show notes from full once ready.
+            const notesText = (isReady ? full?.emotional_notes : s.emotional_notes ?? "").trim();
 
-            const participants =
-              full?.scene_participants
-                ?.map((sp) => sp?.participants)
-                .filter(Boolean) ?? [];
+            const participants = isReady
+              ? full?.scene_participants?.map((sp) => sp?.participants).filter(Boolean) ?? []
+              : [];
 
-            const tools =
-              full?.scene_tools
-                ?.map((st) => st?.tools_user)
-                .filter(Boolean) ?? [];
+            const tools = isReady
+              ? full?.scene_tools?.map((st) => st?.tools_user).filter(Boolean) ?? []
+              : [];
 
-            const blockSections = sectionsFromBlocks(full?.scene_blocks);
-            const fallbackSections = parseHashSections(notesText);
-            const sections = blockSections.length ? blockSections : fallbackSections;
+            // IMPORTANT: do not fall back to "sections from notes" while details are still loading.
+            // That’s what created the confusing "Plan" block and made it look like fields weren’t saved.
+            let sections = [];
+            if (isReady) {
+              const blockSections = sectionsFromBlocks(full?.scene_blocks);
+              sections = blockSections.length ? blockSections : parseHashSections(notesText);
+            }
 
             return (
               <Card
@@ -399,21 +343,11 @@ export default function ScenesHome() {
                 }}
               >
                 <div style={{ display: "grid", gap: 10 }}>
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      gap: 12,
-                    }}
-                  >
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
                     <div>
                       <div style={{ fontWeight: 800 }}>{s.title}</div>
-                      {intent && (
-                        <div style={{ fontSize: 13, opacity: 0.85 }}>{intent}</div>
-                      )}
-                      {when && (
-                        <div style={{ fontSize: 12, opacity: 0.7 }}>{when}</div>
-                      )}
+                      {intent && <div style={{ fontSize: 13, opacity: 0.85 }}>{intent}</div>}
+                      {when && <div style={{ fontSize: 12, opacity: 0.7 }}>{when}</div>}
                     </div>
 
                     <button
@@ -436,14 +370,9 @@ export default function ScenesHome() {
                   </div>
 
                   {isOpen && (
-                    <div
-                      style={{ display: "grid", gap: 12 }}
-                      onClick={(e) => e.stopPropagation()}
-                    >
+                    <div style={{ display: "grid", gap: 12 }} onClick={(e) => e.stopPropagation()}>
                       {det?.status === "loading" ? (
-                        <div style={{ opacity: 0.75, fontSize: 13 }}>
-                          Loading details…
-                        </div>
+                        <div style={{ opacity: 0.75, fontSize: 13 }}>Loading details…</div>
                       ) : det?.status === "error" ? (
                         <div
                           style={{
@@ -459,89 +388,73 @@ export default function ScenesHome() {
                         </div>
                       ) : null}
 
-                      <div>
-                        <div style={{ fontSize: 12, opacity: 0.7 }}>
-                          Participants
-                        </div>
-                        {participants.length ? (
-                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                            {participants.map((p) => (
-                              <Chip key={p.id}>{pickParticipantLabel(p)}</Chip>
-                            ))}
-                          </div>
-                        ) : (
-                          <div style={{ fontSize: 13, opacity: 0.6 }}>
-                            None selected yet
-                          </div>
-                        )}
-                      </div>
-
-                      {sections.length ? (
-                        <div style={{ display: "grid", gap: 10 }}>
-                          {sections.map((sec, idx) => (
-                            <div
-                              key={`${sec.title}-${idx}`}
-                              style={{
-                                padding: 10,
-                                borderRadius: 14,
-                                background: "rgba(255,255,255,0.03)",
-                              }}
-                            >
-                              <div style={{ fontWeight: 850, fontSize: 13 }}>
-                                {sec.title}
+                      {isReady ? (
+                        <>
+                          <div>
+                            <div style={{ fontSize: 12, opacity: 0.7 }}>Participants</div>
+                            {participants.length ? (
+                              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                {participants.map((p) => (
+                                  <Chip key={p.id}>{pickParticipantLabel(p)}</Chip>
+                                ))}
                               </div>
-                              {sec.body ? (
+                            ) : (
+                              <div style={{ fontSize: 13, opacity: 0.6 }}>None selected yet</div>
+                            )}
+                          </div>
+
+                          {sections.length ? (
+                            <div style={{ display: "grid", gap: 10 }}>
+                              {sections.map((sec, idx) => (
                                 <div
-                                  style={{
-                                    whiteSpace: "pre-wrap",
-                                    lineHeight: 1.4,
-                                    opacity: 0.9,
-                                  }}
+                                  key={`${sec.title}-${idx}`}
+                                  style={{ padding: 10, borderRadius: 14, background: "rgba(255,255,255,0.03)" }}
                                 >
-                                  {sec.body}
+                                  <div style={{ fontWeight: 850, fontSize: 13 }}>{sec.title}</div>
+                                  {sec.body ? (
+                                    <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.4, opacity: 0.9 }}>
+                                      {sec.body}
+                                    </div>
+                                  ) : null}
                                 </div>
-                              ) : null}
+                              ))}
                             </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div style={{ fontSize: 13, opacity: 0.6 }}>
-                          No stages filled yet.
-                        </div>
-                      )}
+                          ) : (
+                            <div style={{ fontSize: 13, opacity: 0.6 }}>No stages filled yet.</div>
+                          )}
 
-                      {tools.length > 0 && (
-                        <div>
-                          <div style={{ fontSize: 12, opacity: 0.7 }}>Tools</div>
-                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                            {tools.map((tu) => (
-                              <Chip key={tu.id}>
-                                <span style={{ marginRight: 6 }}>
-                                  {pickToolIcon(tu)}
-                                </span>
-                                {pickToolLabel(tu)}
-                              </Chip>
-                            ))}
-                          </div>
-                        </div>
-                      )}
+                          {tools.length > 0 && (
+                            <div>
+                              <div style={{ fontSize: 12, opacity: 0.7 }}>Tools</div>
+                              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                {tools.map((tu) => (
+                                  <Chip key={tu.id}>
+                                    <span style={{ marginRight: 6 }}>{pickToolIcon(tu)}</span>
+                                    {pickToolLabel(tu)}
+                                  </Chip>
+                                ))}
+                              </div>
+                            </div>
+                          )}
 
-                      {notesText ? (
-                        <div style={{ display: "grid", gap: 6 }}>
-                          <div style={{ fontSize: 12, opacity: 0.7 }}>Notes</div>
-                          <div
-                            style={{
-                              padding: 10,
-                              borderRadius: 14,
-                              background: "rgba(255,255,255,0.03)",
-                              whiteSpace: "pre-wrap",
-                              lineHeight: 1.4,
-                              opacity: 0.9,
-                            }}
-                          >
-                            {notesText}
-                          </div>
-                        </div>
+                          {notesText ? (
+                            <div style={{ display: "grid", gap: 6 }}>
+                              <div style={{ fontSize: 12, opacity: 0.7 }}>Notes</div>
+                              <div
+                                style={{
+                                  padding: 10,
+                                  borderRadius: 14,
+                                  background: "rgba(255,255,255,0.03)",
+                                  whiteSpace: "pre-wrap",
+                                  lineHeight: 1.4,
+                                  opacity: 0.9,
+                                }}
+                              >
+                                {notesText}
+                              </div>
+                            </div>
+                          ) : null}
+                        </>
                       ) : null}
 
                       <div style={{ display: "flex", gap: 8 }}>
