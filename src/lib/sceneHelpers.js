@@ -44,12 +44,18 @@ export function pickParticipantLabel(p) {
 }
 
 export function pickToolLabel(tu) {
-  // Prefer per-instance naming (what the user set in Tools / Vault).
-  // This avoids ambiguous labels like "Blindfold #1/#2" when multiple instances exist.
+  // 1. Per-instance label (primary source of truth)
+  // This is what the user named the instance in Tools & Toys.
+  if (tu?.instance_label && String(tu.instance_label).trim()) {
+    return String(tu.instance_label).trim();
+  }
+
+  // 2. Legacy per-instance name (kept for backward compatibility)
   if (tu?.custom_name && String(tu.custom_name).trim()) {
     return String(tu.custom_name).trim();
   }
 
+  // 3. Global tool name fallback
   const g = tu?.tools_global;
   if (g?.name) return g.name;
 
