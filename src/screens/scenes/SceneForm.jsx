@@ -1,11 +1,9 @@
+// src/screens/scenes/SceneForm.jsx
+
 import React, { useEffect, useMemo, useState } from "react";
 import { Card, SmallButton } from "../../components/routesUi";
 import { DEFAULT_SCENE_BLOCKS } from "../../lib/scenesApi";
-import {
-  pickParticipantLabel,
-  pickToolIcon,
-  pickToolLabel,
-} from "../../lib/sceneHelpers";
+import { pickParticipantLabel, pickToolIcon } from "../../lib/sceneHelpers";
 import { useNavigate } from "react-router-dom";
 
 /* ---------------- small UI helpers ---------------- */
@@ -66,6 +64,17 @@ function TextArea({ value, onChange, placeholder, disabled }) {
   );
 }
 
+function Row({ left, right, onClick, title }) {
+  return (
+    <Card onClick={onClick} title={title}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+        <div style={{ minWidth: 0 }}>{left}</div>
+        <div style={{ flex: "0 0 auto" }}>{right}</div>
+      </div>
+    </Card>
+  );
+}
+
 /* ---------------- blocks helpers ---------------- */
 
 function normalizeBlocksForForm(initialBlocks) {
@@ -96,25 +105,45 @@ function normalizeBlocksForForm(initialBlocks) {
   }));
 }
 
-/* ---------------- tools grouping ---------------- */
+/* ---------------- tools grouping helpers ---------------- */
+
+function titleCase(s) {
+  const x = String(s || "").trim();
+  if (!x) return "";
+  return x.charAt(0).toUpperCase() + x.slice(1);
+}
 
 function getToolGroupKey(toolUserRow) {
-  // Current DB shape: tools_user.tools_global(tags: text[])
   const tags = toolUserRow?.tools_global?.tags;
-  const first = Array.isArray(tags) ? String(tags[0] || "").trim() : "";
-  // Critical: NEVER return empty => otherwise tools “disappear”
-  return first || "Other";
+  const primary = Array.isArray(tags) && tags.length ? String(tags[0] || "").trim() : "";
+  return primary || "other";
 }
 
-function sortGroupKeys(keys) {
-  const arr = Array.isArray(keys) ? keys.slice() : [];
-  arr.sort((a, b) => {
-    if (a === "Other" && b !== "Other") return 1;
-    if (b === "Other" && a !== "Other") return -1;
-    return String(a).localeCompare(String(b));
-  });
-  return arr;
+function getToolTypeKey(toolUserRow) {
+  // tools_user rows have tool_global_id, and also tools_global.id when joined.
+  return String(
+    toolUserRow?.tool_global_id ||
+      toolUserRow?.tools_global?.id ||
+      toolUserRow?.tools_global_id ||
+      ""
+  );
 }
+
+function getToolTypeLabel(toolUserRow) {
+  // For the type label, prefer the global name (not per-instance custom name).
+  const g = toolUserRow?.tools_global;
+  const globalName = String(g?.name || g?.label || "").trim();
+  return globalName || "Tool";
+}
+
+function buildInstanceLabel(typeLabel, instance, idx, count) {
+  const custom = String(instance?.custom_name || "").trim();
+  if (custom) return custom;
+  if (count > 1) return `${typeLabel} #${idx + 1}`;
+  return typeLabel;
+}
+
+/* ---------------- component ---------------- */
 
 export default function SceneForm({
   initial,
@@ -146,8 +175,9 @@ export default function SceneForm({
 
   const [blocks, setBlocks] = useState(() => normalizeBlocksForForm(initial?.blocks));
 
-  // group expansion state
-  const [openToolGroups, setOpenToolGroups] = useState(() => new Set());
+  // Tools UI state (expand parent group then expand type, then pick instances)
+  const [openToolGroup, setOpenToolGroup] = useState(null);
+  const [openToolType, setOpenToolType] = useState(null);
 
   useEffect(() => {
     // If initial changes (edit loads), rehydrate form state.
@@ -167,8 +197,9 @@ export default function SceneForm({
 
     setBlocks(normalizeBlocksForForm(initial?.blocks));
 
-    // reset open groups (safe + predictable)
-    setOpenToolGroups(new Set());
+    // Reset tool UI expansions on scene switch
+    setOpenToolGroup(null);
+    setOpenToolType(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     initial?.title,
@@ -188,11 +219,11 @@ export default function SceneForm({
     });
   }
 
-  function toggleTool(id) {
+  function toggleToolInstance(toolUserId) {
     setSelectedTools((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(toolUserId)) next.delete(toolUserId);
+      else next.add(toolUserId);
       return next;
     });
   }
@@ -203,10 +234,7 @@ export default function SceneForm({
     );
   }
 
-  const participantIds = useMemo(
-    () => Array.from(selectedParticipants),
-    [selectedParticipants]
-  );
+  const participantIds = useMemo(() => Array.from(selectedParticipants), [selectedParticipants]);
   const toolUserIds = useMemo(() => Array.from(selectedTools), [selectedTools]);
 
   const payload = useMemo(() => {
@@ -231,33 +259,66 @@ export default function SceneForm({
     await onSubmit?.(payload);
   }
 
+  // -------- Tools: group -> type -> instance --------
+
   const toolsGrouped = useMemo(() => {
     const list = Array.isArray(ownedTools) ? ownedTools : [];
-    const map = new Map(); // key -> toolUser[]
+    const byGroup = new Map();
+
     for (const tu of list) {
-      const key = getToolGroupKey(tu);
-      if (!map.has(key)) map.set(key, []);
-      map.get(key).push(tu);
+      const gKey = getToolGroupKey(tu);
+      if (!byGroup.has(gKey)) byGroup.set(gKey, []);
+      byGroup.get(gKey).push(tu);
     }
 
-    const keys = sortGroupKeys(Array.from(map.keys()));
-    return keys.map((k) => ({
-      key: k,
-      items: (map.get(k) || []).slice().sort((a, b) => {
-        const la = pickToolLabel(a);
-        const lb = pickToolLabel(b);
-        return String(la).localeCompare(String(lb));
-      }),
-    }));
-  }, [ownedTools]);
+    return Array.from(byGroup.entries())
+      .map(([groupKey, items]) => {
+        const byType = new Map();
+        for (const tu of items) {
+          const tKey = getToolTypeKey(tu) || "unknown";
+          if (!byType.has(tKey)) byType.set(tKey, []);
+          byType.get(tKey).push(tu);
+        }
 
-  function toggleGroup(key) {
-    setOpenToolGroups((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
+        const types = Array.from(byType.entries())
+          .map(([typeKey, instances]) => {
+            const typeLabel = getToolTypeLabel(instances[0]);
+            const icon = pickToolIcon(instances[0]);
+            const selectedCount = instances.filter((i) => selectedTools.has(i.id)).length;
+            return {
+              typeKey,
+              typeLabel,
+              icon,
+              instances,
+              totalCount: instances.length,
+              selectedCount,
+            };
+          })
+          .sort((a, b) => a.typeLabel.localeCompare(b.typeLabel));
+
+        const groupSelectedCount = items.filter((i) => selectedTools.has(i.id)).length;
+
+        return {
+          groupKey,
+          groupLabel: titleCase(groupKey),
+          types,
+          totalCount: items.length,
+          selectedCount: groupSelectedCount,
+        };
+      })
+      .sort((a, b) => a.groupLabel.localeCompare(b.groupLabel));
+  }, [ownedTools, selectedTools]);
+
+  function toggleToolGroup(groupKey) {
+    setOpenToolGroup((cur) => {
+      const next = cur === groupKey ? null : groupKey;
+      setOpenToolType(null);
       return next;
     });
+  }
+
+  function toggleToolType(typeKey) {
+    setOpenToolType((cur) => (cur === typeKey ? null : typeKey));
   }
 
   return (
@@ -284,12 +345,7 @@ export default function SceneForm({
         <div style={{ display: "grid", gap: 10 }}>
           <div>
             <FieldLabel>Title *</FieldLabel>
-            <Input
-              value={title}
-              onChange={setTitle}
-              placeholder="Give this scene a name"
-              disabled={busy}
-            />
+            <Input value={title} onChange={setTitle} placeholder="Give this scene a name" disabled={busy} />
           </div>
 
           <div>
@@ -340,9 +396,7 @@ export default function SceneForm({
                 <Card key={p.id} onClick={() => toggleParticipant(p.id)}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
                     <div style={{ fontWeight: 800 }}>{label}</div>
-                    <div style={{ opacity: 0.8, fontWeight: 800 }}>
-                      {checked ? "✓" : ""}
-                    </div>
+                    <div style={{ opacity: 0.8, fontWeight: 800 }}>{checked ? "✓" : ""}</div>
                   </div>
                 </Card>
               );
@@ -357,106 +411,100 @@ export default function SceneForm({
       <div style={{ display: "grid", gap: 10 }}>
         <div style={{ fontWeight: 900 }}>Tools (Owned)</div>
 
-        {Array.isArray(ownedTools) && ownedTools.length ? (
+        {!toolsGrouped.length ? (
+          <div style={{ opacity: 0.7, fontSize: 13 }}>
+            You don’t have any owned tools yet. Add some in Tools → Vault.
+          </div>
+        ) : (
           <div style={{ display: "grid", gap: 10 }}>
             {toolsGrouped.map((group) => {
-              const isOpen = openToolGroups.has(group.key);
-              const total = group.items.length;
-              const selectedCount = group.items.reduce(
-                (acc, tu) => acc + (selectedTools.has(tu.id) ? 1 : 0),
-                0
-              );
+              const isGroupOpen = openToolGroup === group.groupKey;
 
               return (
-                <div key={group.key} style={{ display: "grid", gap: 10 }}>
-                  {/* Group row (expand only) */}
-                  <Card onClick={() => toggleGroup(group.key)}>
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        gap: 10,
-                        alignItems: "center",
-                      }}
-                    >
-                      <div style={{ display: "grid", gap: 2, minWidth: 0 }}>
-                        <div style={{ fontWeight: 900, letterSpacing: 0.2 }}>
-                          {group.key}
-                        </div>
-                        <div style={{ fontSize: 12, opacity: 0.7 }}>
-                          {selectedCount}/{total} selected
+                <div key={group.groupKey} style={{ display: "grid", gap: 10 }}>
+                  <Row
+                    title="Expand tool category"
+                    onClick={() => toggleToolGroup(group.groupKey)}
+                    left={
+                      <div style={{ display: "grid", gap: 2 }}>
+                        <div style={{ fontWeight: 900 }}>{group.groupLabel}</div>
+                        <div style={{ fontSize: 12, opacity: 0.65 }}>
+                          {group.selectedCount}/{group.totalCount} selected
                         </div>
                       </div>
+                    }
+                    right={<div style={{ opacity: 0.75, fontWeight: 900 }}>{isGroupOpen ? "▾" : "▸"}</div>}
+                  />
 
-                      <div
-                        style={{
-                          opacity: 0.8,
-                          fontWeight: 900,
-                          fontSize: 14,
-                          flex: "0 0 auto",
-                        }}
-                      >
-                        {isOpen ? "▾" : "▸"}
-                      </div>
-                    </div>
-                  </Card>
-
-                  {/* Tools inside group (select here) */}
-                  {isOpen ? (
-                    <div style={{ display: "grid", gap: 10 }}>
-                      {group.items.map((tu) => {
-                        const name = pickToolLabel(tu);
-                        const icon = pickToolIcon(tu);
-                        const checked = selectedTools.has(tu.id);
+                  {isGroupOpen ? (
+                    <div style={{ display: "grid", gap: 10, paddingLeft: 10 }}>
+                      {group.types.map((type) => {
+                        const isTypeOpen = openToolType === type.typeKey;
 
                         return (
-                          <Card key={tu.id} onClick={() => toggleTool(tu.id)}>
-                            <div
-                              style={{
-                                display: "flex",
-                                justifyContent: "space-between",
-                                gap: 10,
-                              }}
-                            >
-                              <div
-                                style={{
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: 10,
-                                  minWidth: 0,
-                                }}
-                              >
-                                <div
-                                  style={{
-                                    width: 34,
-                                    height: 34,
-                                    borderRadius: 12,
-                                    display: "grid",
-                                    placeItems: "center",
-                                    background: "rgba(255,255,255,0.05)",
-                                    fontSize: 18,
-                                    flex: "0 0 auto",
-                                  }}
-                                >
-                                  {icon}
+                          <div key={type.typeKey} style={{ display: "grid", gap: 10 }}>
+                            <Row
+                              title="Expand tool type"
+                              onClick={() => toggleToolType(type.typeKey)}
+                              left={
+                                <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                                  <div
+                                    style={{
+                                      width: 34,
+                                      height: 34,
+                                      borderRadius: 12,
+                                      display: "grid",
+                                      placeItems: "center",
+                                      background: "rgba(255,255,255,0.05)",
+                                      fontSize: 18,
+                                      flex: "0 0 auto",
+                                    }}
+                                  >
+                                    {type.icon}
+                                  </div>
+                                  <div style={{ display: "grid", gap: 2, minWidth: 0 }}>
+                                    <div
+                                      style={{
+                                        fontWeight: 850,
+                                        overflow: "hidden",
+                                        textOverflow: "ellipsis",
+                                        whiteSpace: "nowrap",
+                                      }}
+                                    >
+                                      {type.typeLabel}
+                                    </div>
+                                    <div style={{ fontSize: 12, opacity: 0.65 }}>
+                                      {type.selectedCount}/{type.totalCount} selected
+                                    </div>
+                                  </div>
                                 </div>
-                                <div
-                                  style={{
-                                    fontWeight: 800,
-                                    overflow: "hidden",
-                                    textOverflow: "ellipsis",
-                                    whiteSpace: "nowrap",
-                                  }}
-                                >
-                                  {name}
-                                </div>
-                              </div>
+                              }
+                              right={<div style={{ opacity: 0.75, fontWeight: 900 }}>{isTypeOpen ? "▾" : "▸"}</div>}
+                            />
 
-                              <div style={{ opacity: 0.85, fontWeight: 900, flex: "0 0 auto" }}>
-                                {checked ? "✓" : ""}
+                            {isTypeOpen ? (
+                              <div style={{ display: "grid", gap: 10, paddingLeft: 10 }}>
+                                {type.instances.map((inst, idx) => {
+                                  const checked = selectedTools.has(inst.id);
+                                  const instLabel = buildInstanceLabel(
+                                    type.typeLabel,
+                                    inst,
+                                    idx,
+                                    type.instances.length
+                                  );
+
+                                  return (
+                                    <Card key={inst.id} onClick={() => toggleToolInstance(inst.id)} title="Select this tool instance">
+                                      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+                                        <div style={{ fontWeight: 800 }}>{instLabel}</div>
+                                        <div style={{ opacity: 0.8, fontWeight: 800 }}>{checked ? "✓" : ""}</div>
+                                      </div>
+                                    </Card>
+                                  );
+                                })}
                               </div>
-                            </div>
-                          </Card>
+                            ) : null}
+                          </div>
                         );
                       })}
                     </div>
@@ -464,10 +512,6 @@ export default function SceneForm({
                 </div>
               );
             })}
-          </div>
-        ) : (
-          <div style={{ opacity: 0.7, fontSize: 13 }}>
-            You don’t have any owned tools yet. Add some in Tools → Vault.
           </div>
         )}
       </div>
@@ -478,11 +522,7 @@ export default function SceneForm({
           <SmallButton disabled={busy} onClick={() => navigate(backTo || "/scenes")} title="Cancel">
             Cancel
           </SmallButton>
-          <SmallButton
-            disabled={!canSubmit}
-            onClick={handleSubmit}
-            title={title.trim() ? submitLabel : "Title is required"}
-          >
+          <SmallButton disabled={!canSubmit} onClick={handleSubmit} title={title.trim() ? submitLabel : "Title is required"}>
             {busy ? "Saving…" : submitLabel}
           </SmallButton>
         </div>
