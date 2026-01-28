@@ -1,3 +1,5 @@
+// src/lib/sceneHelpers.js
+
 export function parseDateTimeForInput(value) {
   if (!value) return "";
   try {
@@ -44,18 +46,17 @@ export function pickParticipantLabel(p) {
 }
 
 export function pickToolLabel(tu) {
-  // 1. Per-instance label (primary source of truth)
-  // This is what the user named the instance in Tools & Toys.
+  // Prefer the per-instance label the user gave it in Tools / Vault.
+  // In your DB this is tools_user.instance_label.
   if (tu?.instance_label && String(tu.instance_label).trim()) {
     return String(tu.instance_label).trim();
   }
 
-  // 2. Legacy per-instance name (kept for backward compatibility)
+  // Some older rows might still use custom_name.
   if (tu?.custom_name && String(tu.custom_name).trim()) {
     return String(tu.custom_name).trim();
   }
 
-  // 3. Global tool name fallback
   const g = tu?.tools_global;
   if (g?.name) return g.name;
 
