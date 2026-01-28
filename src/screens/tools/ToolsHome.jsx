@@ -1,346 +1,332 @@
-import React, { useMemo, useState } from "react";
-import { SmallButton } from "../../components/routesUi";
+import React, { useEffect, useMemo, useState } from "react";
 import Page from "../../components/Page";
+import { Card, SmallButton } from "../../components/routesUi";
+import { supabase } from "../../lib/supabaseClient";
+import { pickToolIcon, pickToolLabel } from "../../lib/sceneHelpers";
+import { useNavigate } from "react-router-dom";
 
-import { useToolsData } from "./hooks/useToolsData";
-import ToolRow from "./components/ToolRow";
-import Segmented from "./components/Segmented";
-import Section from "./components/Section";
-import ToolInstance from "./components/ToolInstance";
-
-function has(set, id) {
-  return set.has(id);
+function titleCase(s) {
+  const x = String(s || "").trim();
+  if (!x) return "";
+  return x.charAt(0).toUpperCase() + x.slice(1);
 }
-function toggleInSet(prevSet, id) {
-  const next = new Set(prevSet);
-  if (next.has(id)) next.delete(id);
-  else next.add(id);
-  return next;
+
+function getToolGroupKey(toolUserRow) {
+  const tags = toolUserRow?.tools_global?.tags;
+  const primary = Array.isArray(tags) && tags.length ? String(tags[0] || "").trim() : "";
+  return primary || "other";
+}
+
+function getToolTypeKey(toolUserRow) {
+  return String(
+    toolUserRow?.tool_global_id ||
+      toolUserRow?.tools_global?.id ||
+      toolUserRow?.tools_global_id ||
+      ""
+  );
+}
+
+function getToolTypeLabel(toolUserRow) {
+  const g = toolUserRow?.tools_global;
+  const globalName = String(g?.name || g?.label || "").trim();
+  return globalName || "Tool";
+}
+
+function buildInstanceLabel(typeLabel, instance, idx, count) {
+  const custom = String(instance?.custom_name || "").trim();
+  if (custom) return custom;
+  if (count > 1) return `${typeLabel} #${idx + 1}`;
+  return typeLabel;
+}
+
+function Row({ left, right, onClick, title }) {
+  return (
+    <Card onClick={onClick} title={title}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+        <div style={{ minWidth: 0 }}>{left}</div>
+        <div style={{ flex: "0 0 auto" }}>{right}</div>
+      </div>
+    </Card>
+  );
 }
 
 export default function ToolsHome() {
-  const {
-    tab,
-    setTab,
-    loading,
-    busy,
-    err,
-    vault,
-    owned,
-    craving,
-    ownedGroups,
-    cravingGroups,
-    ownedGlobalIds,
-    cravingGlobalIds,
-    draftLabel,
-    setDraftLabel,
-    photoUrlById,
-    reload,
-    addTo,
-    addAnotherInstance,
-    moveCravingToOwned,
-    removeFromDrawer,
-    ensureSignedPhotoUrl,
-    saveLabel,
-    handleUpload,
-  } = useToolsData();
+  const navigate = useNavigate();
 
-  // Group open state (multiple open per section)
-  const [openOwned, setOpenOwned] = useState(() => new Set());
-  const [openCraving, setOpenCraving] = useState(() => new Set());
-  const [openVault, setOpenVault] = useState(() => new Set());
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [ownedTools, setOwnedTools] = useState([]);
 
-  // Per-instance expand/collapse
-  const [openInstances, setOpenInstances] = useState(() => new Set());
+  // expand group then expand type
+  const [openToolGroup, setOpenToolGroup] = useState(null);
+  const [openToolType, setOpenToolType] = useState(null);
 
-  const infoText = useMemo(() => {
-    if (tab === "drawer") {
-      return loading ? "Loading drawer…" : `${owned.length} owned • ${craving.length} craving`;
+  async function load() {
+    setLoading(true);
+    setErr("");
+    try {
+      const { data, error } = await supabase
+        .from("tools_user")
+        .select(
+          `
+          id,
+          status,
+          tool_global_id,
+          custom_name,
+          custom_icon,
+          tags_override,
+          instance_label,
+          photo_path,
+          tools_global(id, name, icon, tags, safety_level)
+        `
+        )
+        .eq("status", "owned")
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+
+      setOwnedTools(data ?? []);
+    } catch (e) {
+      setErr(e?.message || "Failed to load tools.");
+    } finally {
+      setLoading(false);
     }
-    return loading ? "Loading vault…" : `${vault.length} in vault`;
-  }, [tab, loading, owned.length, craving.length, vault.length]);
-
-  function getDraftLabelValue(tu) {
-    return draftLabel?.[tu.id] !== undefined ? draftLabel[tu.id] : tu.instance_label || "";
   }
 
-  function onDraftLabelChange(toolUserId, value) {
-    setDraftLabel((prev) => ({ ...prev, [toolUserId]: value }));
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      if (!alive) return;
+      await load();
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const toolsGrouped = useMemo(() => {
+    const list = Array.isArray(ownedTools) ? ownedTools : [];
+    const byGroup = new Map();
+
+    for (const tu of list) {
+      const gKey = getToolGroupKey(tu);
+      if (!byGroup.has(gKey)) byGroup.set(gKey, []);
+      byGroup.get(gKey).push(tu);
+    }
+
+    return Array.from(byGroup.entries())
+      .map(([groupKey, items]) => {
+        const byType = new Map();
+        for (const tu of items) {
+          const tKey = getToolTypeKey(tu) || "unknown";
+          if (!byType.has(tKey)) byType.set(tKey, []);
+          byType.get(tKey).push(tu);
+        }
+
+        const types = Array.from(byType.entries())
+          .map(([typeKey, instances]) => {
+            const typeLabel = getToolTypeLabel(instances[0]);
+            const icon = pickToolIcon(instances[0]);
+            return {
+              typeKey,
+              typeLabel,
+              icon,
+              instances,
+              totalCount: instances.length,
+            };
+          })
+          .sort((a, b) => a.typeLabel.localeCompare(b.typeLabel));
+
+        return {
+          groupKey,
+          groupLabel: titleCase(groupKey),
+          types,
+          totalCount: items.length,
+        };
+      })
+      .sort((a, b) => a.groupLabel.localeCompare(b.groupLabel));
+  }, [ownedTools]);
+
+  function toggleToolGroup(groupKey) {
+    setOpenToolGroup((cur) => {
+      const next = cur === groupKey ? null : groupKey;
+      setOpenToolType(null);
+      return next;
+    });
+  }
+
+  function toggleToolType(typeKey) {
+    setOpenToolType((cur) => (cur === typeKey ? null : typeKey));
   }
 
   return (
     <div>
-      <Page style={{ display: "grid", gap: 14 }}>
-        {/* Actions row */}
-        <div
-          style={{
-            display: "flex",
-            gap: 10,
-            justifyContent: "space-between",
-            alignItems: "center",
-            flexWrap: "wrap",
-          }}
-        >
-          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-            <Segmented
-              value={tab}
-              onChange={(next) => setTab(next)}
-              options={[
-                { value: "drawer", label: "Drawer" },
-                { value: "vault", label: "Vault" },
-              ]}
-            />
-            <SmallButton onClick={reload} disabled={loading || busy} title="Refresh tools">
+      <Page style={{ display: "grid", gap: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <SmallButton asLink to="/tools/new">
+              + Add tool
+            </SmallButton>
+            <SmallButton onClick={() => load()} disabled={busy || loading}>
               {loading ? "Loading…" : "Refresh"}
             </SmallButton>
           </div>
 
-          <div style={{ fontSize: 12, opacity: 0.7 }}>{infoText}</div>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>
+            {loading ? "Loading…" : `${ownedTools.length} owned`}
+          </div>
         </div>
 
         {err ? (
-          <div
-            style={{
-              padding: 12,
-              borderRadius: 12,
-              border: "1px solid rgba(255,80,80,0.35)",
-              background: "rgba(255,80,80,0.10)",
-              fontSize: 13,
-              lineHeight: 1.4,
-            }}
-          >
-            {err}
-          </div>
-        ) : null}
-
-        {tab === "drawer" ? (
-          <div style={{ display: "grid", gap: 16 }}>
-            <Section
-              title="Owned tools"
-              subtitle={owned.length ? null : "No owned tools yet. Add some from the Vault."}
-            >
-              {owned.length ? (
-                <div style={{ display: "grid", gap: 10 }}>
-                  {ownedGroups.map((g) => {
-                    const open = has(openOwned, g.key);
-
-                    return (
-                      <ToolRow
-                        key={g.key}
-                        tool={{ name: g.name, icon: g.icon, count: g.items.length }}
-                        open={open}
-                        onToggle={() => {
-                          setOpenOwned((prev) => toggleInSet(prev, g.key));
-                          if (!open) {
-                            for (const tu of g.items) ensureSignedPhotoUrl(tu.id, tu.photo_path);
-                          }
-                        }}
-                        expandedContent={
-                          <div style={{ display: "grid", gap: 12 }}>
-                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                              <SmallButton
-                                disabled={busy || !g.tool_global_id}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  addAnotherInstance("owned", g.tool_global_id);
-                                  setOpenOwned((prev) => {
-                                    const next = new Set(prev);
-                                    next.add(g.key);
-                                    return next;
-                                  });
-                                }}
-                                title={
-                                  g.tool_global_id
-                                    ? "Add another owned instance"
-                                    : "Custom tools can't add instances yet"
-                                }
-                              >
-                                + Add another
-                              </SmallButton>
-
-                              {g.isCustom ? (
-                                <div style={{ fontSize: 12, opacity: 0.65 }}>(Custom tool grouping is temporary)</div>
-                              ) : null}
-                            </div>
-
-                            <div style={{ display: "grid", gap: 10 }}>
-                              {g.items.map((tu) => (
-                                <ToolInstance
-                                  key={tu.id}
-                                  tu={tu}
-                                  status="owned"
-                                  busy={busy}
-                                  isOpen={openInstances.has(tu.id)}
-                                  onToggleOpen={() => setOpenInstances((prev) => toggleInSet(prev, tu.id))}
-                                  draftLabelValue={getDraftLabelValue(tu)}
-                                  onDraftLabelChange={onDraftLabelChange}
-                                  onSaveLabel={saveLabel}
-                                  onEnsurePhoto={ensureSignedPhotoUrl}
-                                  photoUrl={photoUrlById?.[tu.id] || null}
-                                  onUploadFile={handleUpload}
-                                  onRemoveFromDrawer={removeFromDrawer}
-                                  onMoveCravingToOwned={moveCravingToOwned}
-                                />
-                              ))}
-                            </div>
-                          </div>
-                        }
-                        menuItems={null}
-                      />
-                    );
-                  })}
-                </div>
-              ) : null}
-            </Section>
-
-            <Section
-              title="Craving drawer"
-              subtitle={craving.length ? null : "Nothing in craving yet. Add items from the Vault."}
-            >
-              {craving.length ? (
-                <div style={{ display: "grid", gap: 10 }}>
-                  {cravingGroups.map((g) => {
-                    const open = has(openCraving, g.key);
-
-                    return (
-                      <ToolRow
-                        key={g.key}
-                        tool={{ name: g.name, icon: g.icon, count: g.items.length }}
-                        open={open}
-                        onToggle={() => {
-                          setOpenCraving((prev) => toggleInSet(prev, g.key));
-                          if (!open) {
-                            for (const tu of g.items) ensureSignedPhotoUrl(tu.id, tu.photo_path);
-                          }
-                        }}
-                        expandedContent={
-                          <div style={{ display: "grid", gap: 12 }}>
-                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                              <SmallButton
-                                disabled={busy || !g.tool_global_id}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  addAnotherInstance("craving", g.tool_global_id);
-                                  setOpenCraving((prev) => {
-                                    const next = new Set(prev);
-                                    next.add(g.key);
-                                    return next;
-                                  });
-                                }}
-                                title={
-                                  g.tool_global_id
-                                    ? "Add another craving instance"
-                                    : "Custom tools can't add instances yet"
-                                }
-                              >
-                                + Add another
-                              </SmallButton>
-
-                              {g.isCustom ? (
-                                <div style={{ fontSize: 12, opacity: 0.65 }}>(Custom tool grouping is temporary)</div>
-                              ) : null}
-                            </div>
-
-                            <div style={{ display: "grid", gap: 10 }}>
-                              {g.items.map((tu) => (
-                                <ToolInstance
-                                  key={tu.id}
-                                  tu={tu}
-                                  status="craving"
-                                  busy={busy}
-                                  isOpen={openInstances.has(tu.id)}
-                                  onToggleOpen={() => setOpenInstances((prev) => toggleInSet(prev, tu.id))}
-                                  draftLabelValue={getDraftLabelValue(tu)}
-                                  onDraftLabelChange={onDraftLabelChange}
-                                  onSaveLabel={saveLabel}
-                                  onEnsurePhoto={ensureSignedPhotoUrl}
-                                  photoUrl={photoUrlById?.[tu.id] || null}
-                                  onUploadFile={handleUpload}
-                                  onRemoveFromDrawer={removeFromDrawer}
-                                  onMoveCravingToOwned={moveCravingToOwned}
-                                />
-                              ))}
-                            </div>
-                          </div>
-                        }
-                        menuItems={null}
-                      />
-                    );
-                  })}
-                </div>
-              ) : null}
-            </Section>
-          </div>
-        ) : (
-          <div style={{ display: "grid", gap: 12 }}>
+          <Card>
             <div
               style={{
-                opacity: 0.75,
-                fontSize: 13,
-                lineHeight: 1.4,
                 padding: 12,
-                borderRadius: 14,
-                border: "1px solid rgba(255,255,255,0.10)",
-                background: "rgba(255,255,255,0.03)",
+                borderRadius: 12,
+                border: "1px solid rgba(255,80,80,0.30)",
+                background: "rgba(255,80,80,0.08)",
+                lineHeight: 1.4,
+                fontSize: 13,
               }}
             >
-              Tool Vault. Add items to Owned or Craving.
+              {err}
             </div>
+          </Card>
+        ) : null}
 
-            <div style={{ display: "grid", gap: 10 }}>
-              {vault.map((t) => {
-                const inOwned = ownedGlobalIds.has(t.id);
-                const inCraving = cravingGlobalIds.has(t.id);
-                const open = has(openVault, t.id);
+        <div style={{ fontWeight: 900 }}>Owned Tools & Toys</div>
 
-                return (
-                  <ToolRow
-                    key={t.id}
-                    tool={{ name: t.name, icon: t.icon || "🧰" }}
-                    open={open}
-                    onToggle={() => setOpenVault((prev) => toggleInSet(prev, t.id))}
-                    expandedContent={
-                      <div style={{ display: "grid", gap: 10 }}>
-                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                          <SmallButton
-                            disabled={busy || inCraving || inOwned}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              addTo("craving", t.id);
-                            }}
-                            title={
-                              inOwned
-                                ? "Already in Owned"
-                                : inCraving
-                                ? "Already in Craving"
-                                : "Add to Craving Drawer"
-                            }
-                          >
-                            + Craving
-                          </SmallButton>
+        {loading ? (
+          <div style={{ opacity: 0.7 }}>Loading…</div>
+        ) : toolsGrouped.length ? (
+          <div style={{ display: "grid", gap: 10 }}>
+            {toolsGrouped.map((group) => {
+              const isGroupOpen = openToolGroup === group.groupKey;
 
-                          <SmallButton
-                            disabled={busy || inOwned}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              addTo("owned", t.id);
-                            }}
-                            title={inOwned ? "Already in Owned" : "Add to Owned Tools"}
-                          >
-                            + Owned
-                          </SmallButton>
-                        </div>
-
-                        <div style={{ opacity: 0.75 }}>
-                          Vault items will later show richer details and let you create your own owned instances (with photos).
-                        </div>
+              return (
+                <div key={group.groupKey} style={{ display: "grid", gap: 10 }}>
+                  <Row
+                    title="Expand tool category"
+                    onClick={() => toggleToolGroup(group.groupKey)}
+                    left={
+                      <div style={{ display: "grid", gap: 2 }}>
+                        <div style={{ fontWeight: 900 }}>{group.groupLabel}</div>
+                        <div style={{ fontSize: 12, opacity: 0.65 }}>{group.totalCount} total</div>
                       </div>
                     }
-                    menuItems={null}
+                    right={<div style={{ opacity: 0.75, fontWeight: 900 }}>{isGroupOpen ? "▾" : "▸"}</div>}
                   />
-                );
-              })}
-            </div>
+
+                  {isGroupOpen ? (
+                    <div style={{ display: "grid", gap: 10, paddingLeft: 10 }}>
+                      {group.types.map((type) => {
+                        const isTypeOpen = openToolType === type.typeKey;
+
+                        return (
+                          <div key={type.typeKey} style={{ display: "grid", gap: 10 }}>
+                            <Row
+                              title="Expand tool type"
+                              onClick={() => toggleToolType(type.typeKey)}
+                              left={
+                                <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                                  <div
+                                    style={{
+                                      width: 34,
+                                      height: 34,
+                                      borderRadius: 12,
+                                      display: "grid",
+                                      placeItems: "center",
+                                      background: "rgba(255,255,255,0.05)",
+                                      fontSize: 18,
+                                      flex: "0 0 auto",
+                                    }}
+                                  >
+                                    {type.icon}
+                                  </div>
+                                  <div style={{ display: "grid", gap: 2, minWidth: 0 }}>
+                                    <div
+                                      style={{
+                                        fontWeight: 850,
+                                        overflow: "hidden",
+                                        textOverflow: "ellipsis",
+                                        whiteSpace: "nowrap",
+                                      }}
+                                    >
+                                      {type.typeLabel}
+                                    </div>
+                                    <div style={{ fontSize: 12, opacity: 0.65 }}>{type.totalCount} owned</div>
+                                  </div>
+                                </div>
+                              }
+                              right={<div style={{ opacity: 0.75, fontWeight: 900 }}>{isTypeOpen ? "▾" : "▸"}</div>}
+                            />
+
+                            {isTypeOpen ? (
+                              <div style={{ display: "grid", gap: 10, paddingLeft: 10 }}>
+                                {type.instances.map((inst, idx) => {
+                                  const instLabel = buildInstanceLabel(
+                                    type.typeLabel,
+                                    inst,
+                                    idx,
+                                    type.instances.length
+                                  );
+                                  const icon = pickToolIcon(inst);
+                                  const label = pickToolLabel(inst);
+
+                                  return (
+                                    <Card
+                                      key={inst.id}
+                                      onClick={() => navigate(`/tools/${inst.id}/edit`)}
+                                      title="Edit this tool"
+                                    >
+                                      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+                                        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                                          <div
+                                            style={{
+                                              width: 34,
+                                              height: 34,
+                                              borderRadius: 12,
+                                              display: "grid",
+                                              placeItems: "center",
+                                              background: "rgba(255,255,255,0.05)",
+                                              fontSize: 18,
+                                              flex: "0 0 auto",
+                                            }}
+                                          >
+                                            {icon}
+                                          </div>
+                                          <div style={{ display: "grid", gap: 2, minWidth: 0 }}>
+                                            <div style={{ fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis" }}>
+                                              {instLabel}
+                                            </div>
+                                            {label && label !== instLabel ? (
+                                              <div style={{ fontSize: 12, opacity: 0.65, overflow: "hidden", textOverflow: "ellipsis" }}>
+                                                {label}
+                                              </div>
+                                            ) : null}
+                                          </div>
+                                        </div>
+
+                                        <div style={{ opacity: 0.75, fontWeight: 900 }}>›</div>
+                                      </div>
+                                    </Card>
+                                  );
+                                })}
+                              </div>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div style={{ opacity: 0.7, fontSize: 13 }}>
+            You don’t have any owned tools yet. Add some with “+ Add tool”.
           </div>
         )}
       </Page>
