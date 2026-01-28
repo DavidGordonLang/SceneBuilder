@@ -2,24 +2,9 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { Card, SmallButton } from "../../components/routesUi";
+import { DEFAULT_SCENE_BLOCKS } from "../../lib/scenesApi";
 import { pickParticipantLabel, pickToolIcon } from "../../lib/sceneHelpers";
 import { useNavigate } from "react-router-dom";
-
-/* ---------------- defaults ---------------- */
-
-const DEFAULT_SCENE_BLOCKS = [
-  { key: "intent_desire", title: "Intent / Desire" },
-  { key: "negotiation", title: "Negotiation" },
-  { key: "planning_design", title: "Planning / Scene Design" },
-  { key: "pre_scene_connection", title: "Pre-Scene Connection" },
-  { key: "induction_exchange", title: "Induction / Power Exchange" },
-  { key: "scene_proper", title: "The Scene Proper" },
-  { key: "peak_climax", title: "Peak / Climax" },
-  { key: "de_escalation", title: "De-Escalation" },
-  { key: "aftercare", title: "Aftercare" },
-  { key: "drop_window", title: "After-Aftercare / Drop Window" },
-  { key: "integration_debrief", title: "Integration / Debrief" },
-];
 
 /* ---------------- small UI helpers ---------------- */
 
@@ -110,6 +95,7 @@ function normalizeBlocksForForm(initialBlocks) {
       }));
   }
 
+  // If no blocks were provided, seed defaults for the editor UI
   return DEFAULT_SCENE_BLOCKS.map((d, idx) => ({
     id: null,
     sort_order: (idx + 1) * 10,
@@ -128,32 +114,31 @@ function titleCase(s) {
 }
 
 function getToolGroupKey(toolUserRow) {
-  const override = toolUserRow?.tags_override;
-  const base = toolUserRow?.tools_global?.tags;
-
-  const tags = Array.isArray(override) && override.length ? override : base;
+  const tags = toolUserRow?.tools_global?.tags;
   const primary = Array.isArray(tags) && tags.length ? String(tags[0] || "").trim() : "";
-
   return primary || "other";
 }
 
 function getToolTypeKey(toolUserRow) {
-  return String(toolUserRow?.tool_global_id || toolUserRow?.tools_global?.id || "unknown");
+  // tools_user rows have tool_global_id, and also tools_global.id when joined.
+  return String(
+    toolUserRow?.tool_global_id ||
+      toolUserRow?.tools_global?.id ||
+      toolUserRow?.tools_global_id ||
+      ""
+  );
 }
 
 function getToolTypeLabel(toolUserRow) {
+  // For the type label, prefer the global name (not per-instance custom name).
   const g = toolUserRow?.tools_global;
   const globalName = String(g?.name || g?.label || "").trim();
   return globalName || "Tool";
 }
 
 function buildInstanceLabel(typeLabel, instance, idx, count) {
-  const instLabel = String(instance?.instance_label || "").trim();
-  if (instLabel) return instLabel;
-
   const custom = String(instance?.custom_name || "").trim();
   if (custom) return custom;
-
   if (count > 1) return `${typeLabel} #${idx + 1}`;
   return typeLabel;
 }
@@ -190,11 +175,12 @@ export default function SceneForm({
 
   const [blocks, setBlocks] = useState(() => normalizeBlocksForForm(initial?.blocks));
 
-  // Expand group, then expand type, then pick instances.
+  // Tools UI state (expand parent group then expand type, then pick instances)
   const [openToolGroup, setOpenToolGroup] = useState(null);
   const [openToolType, setOpenToolType] = useState(null);
 
   useEffect(() => {
+    // If initial changes (edit loads), rehydrate form state.
     setTitle(initial?.title || "");
     setIntent(initial?.intent || "");
     setScheduledAt(initial?.scheduled_at || null);
@@ -211,6 +197,7 @@ export default function SceneForm({
 
     setBlocks(normalizeBlocksForForm(initial?.blocks));
 
+    // Reset tool UI expansions on scene switch
     setOpenToolGroup(null);
     setOpenToolType(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -242,7 +229,9 @@ export default function SceneForm({
   }
 
   function setBlockBody(sort_order, nextBody) {
-    setBlocks((prev) => prev.map((b) => (b.sort_order === sort_order ? { ...b, body: nextBody } : b)));
+    setBlocks((prev) =>
+      prev.map((b) => (b.sort_order === sort_order ? { ...b, body: nextBody } : b))
+    );
   }
 
   const participantIds = useMemo(() => Array.from(selectedParticipants), [selectedParticipants]);
@@ -270,6 +259,8 @@ export default function SceneForm({
     await onSubmit?.(payload);
   }
 
+  // -------- Tools: group -> type -> instance --------
+
   const toolsGrouped = useMemo(() => {
     const list = Array.isArray(ownedTools) ? ownedTools : [];
     const byGroup = new Map();
@@ -294,7 +285,6 @@ export default function SceneForm({
             const typeLabel = getToolTypeLabel(instances[0]);
             const icon = pickToolIcon(instances[0]);
             const selectedCount = instances.filter((i) => selectedTools.has(i.id)).length;
-
             return {
               typeKey,
               typeLabel,
@@ -350,6 +340,7 @@ export default function SceneForm({
         </Card>
       ) : null}
 
+      {/* Title + intent */}
       <Card>
         <div style={{ display: "grid", gap: 10 }}>
           <div>
@@ -359,13 +350,20 @@ export default function SceneForm({
 
           <div>
             <FieldLabel>Intent</FieldLabel>
-            <Input value={intent} onChange={setIntent} placeholder="e.g. Release, Connection, Experiment…" disabled={busy} />
+            <Input
+              value={intent}
+              onChange={setIntent}
+              placeholder="e.g. Release, Connection, Experiment…"
+              disabled={busy}
+            />
           </div>
         </div>
       </Card>
 
+      {/* Stages */}
       <div style={{ display: "grid", gap: 10 }}>
         <div style={{ fontWeight: 900 }}>Stages</div>
+
         <div style={{ display: "grid", gap: 10 }}>
           {blocks
             .slice()
@@ -386,6 +384,7 @@ export default function SceneForm({
         </div>
       </div>
 
+      {/* Participants */}
       <div style={{ display: "grid", gap: 10 }}>
         <div style={{ fontWeight: 900 }}>Participants</div>
         {participants.length ? (
@@ -408,11 +407,14 @@ export default function SceneForm({
         )}
       </div>
 
+      {/* Tools */}
       <div style={{ display: "grid", gap: 10 }}>
-        <div style={{ fontWeight: 900 }}>Tools (Owned)</div>
+        <div style={{ fontWeight: 900 }}>Tools & Toys (Owned)</div>
 
         {!toolsGrouped.length ? (
-          <div style={{ opacity: 0.7, fontSize: 13 }}>You don’t have any owned tools yet.</div>
+          <div style={{ opacity: 0.7, fontSize: 13 }}>
+            You don’t have any owned tools yet. Add some in Tools → Vault.
+          </div>
         ) : (
           <div style={{ display: "grid", gap: 10 }}>
             {toolsGrouped.map((group) => {
@@ -460,7 +462,6 @@ export default function SceneForm({
                                   >
                                     {type.icon}
                                   </div>
-
                                   <div style={{ display: "grid", gap: 2, minWidth: 0 }}>
                                     <div
                                       style={{
@@ -485,7 +486,12 @@ export default function SceneForm({
                               <div style={{ display: "grid", gap: 10, paddingLeft: 10 }}>
                                 {type.instances.map((inst, idx) => {
                                   const checked = selectedTools.has(inst.id);
-                                  const instLabel = buildInstanceLabel(type.typeLabel, inst, idx, type.instances.length);
+                                  const instLabel = buildInstanceLabel(
+                                    type.typeLabel,
+                                    inst,
+                                    idx,
+                                    type.instances.length
+                                  );
 
                                   return (
                                     <Card key={inst.id} onClick={() => toggleToolInstance(inst.id)} title="Select this tool instance">
@@ -510,6 +516,7 @@ export default function SceneForm({
         )}
       </div>
 
+      {/* Actions (optional; Edit screen will hide these) */}
       {showActions ? (
         <div style={{ display: "flex", gap: 10 }}>
           <SmallButton disabled={busy} onClick={() => navigate(backTo || "/scenes")} title="Cancel">
