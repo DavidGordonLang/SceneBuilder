@@ -252,7 +252,7 @@ function AuthedShell({ session }) {
               }}
             >
               <PillLink to="/scenes" label="Scenes" end />
-              <PillLink to="/tools" label="Tools" end />
+              <PillLink to="/tools" label="Tools & Toys" end />
               <PillLink to="/journal" label="Journal" end />
             </div>
           </div>
