@@ -1,11 +1,6 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect } from "react";
 import { Card, Chip, SmallButton } from "../../components/routesUi";
 import Page from "../../components/Page";
-import {
-  fetchSceneById,
-  fetchScenes,
-  updateScenePlanningStage,
-} from "../../lib/scenesApi";
 import {
   formatDate,
   pickParticipantLabel,
@@ -13,30 +8,9 @@ import {
   pickToolLabel,
 } from "../../lib/sceneHelpers";
 import { useLocation, useNavigate } from "react-router-dom";
+import useScenesHome from "../../hooks/useScenesHome";
 
-/* ---------------- module cache to reduce jank ----------------
-   - Keeps list + per-scene details across unmount/remount (tab switches)
-   - Enables silent refresh without flipping the whole screen into Loading…
-*/
-let scenesHomeCache = {
-  scenes: null, // array
-  details: null, // map { [sceneId]: { status, data, error } }
-  ts: 0,
-};
-
-/* ---------------- planning stage config ---------------- */
-
-const PLANNING_STAGES = [
-  "intent",
-  "negotiation",
-  "planning",
-  "connection",
-  "exchange",
-  "play",
-  "aftercare",
-  "integration",
-  "complete",
-];
+/* ---------------- planning stage labels ---------------- */
 
 const STAGE_LABELS = {
   intent: "Intent",
@@ -50,20 +24,7 @@ const STAGE_LABELS = {
   complete: "Complete",
 };
 
-function nextStage(current) {
-  const idx = PLANNING_STAGES.indexOf(current);
-  if (idx === -1) return PLANNING_STAGES[0];
-  return PLANNING_STAGES[(idx + 1) % PLANNING_STAGES.length];
-}
-
-/* ---------------- helpers ---------------- */
-
-function toggleInSet(prevSet, id) {
-  const next = new Set(prevSet);
-  if (next.has(id)) next.delete(id);
-  else next.add(id);
-  return next;
-}
+/* ---------------- blocks helpers ---------------- */
 
 function sectionsFromBlocks(blocks) {
   const arr = Array.isArray(blocks) ? blocks : [];
@@ -88,168 +49,32 @@ export default function ScenesHome() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const hasCache = Array.isArray(scenesHomeCache.scenes);
-
-  const [loading, setLoading] = useState(() => !hasCache);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-  const [scenes, setScenes] = useState(() => scenesHomeCache.scenes || []);
-
-  const [openScenes, setOpenScenes] = useState(() => new Set());
-  const [details, setDetails] = useState(() => scenesHomeCache.details || {});
-
-  function persistCache(nextScenes, nextDetails) {
-    scenesHomeCache = {
-      scenes: Array.isArray(nextScenes) ? nextScenes : scenesHomeCache.scenes,
-      details: nextDetails ? nextDetails : scenesHomeCache.details,
-      ts: Date.now(),
-    };
-  }
-
-  async function reload(opts = {}) {
-    const silent = !!opts.silent;
-    const hasExisting = Array.isArray(scenes) && scenes.length > 0;
-
-    if (!silent || !hasExisting) setLoading(true);
-
-    setErr("");
-    try {
-      const data = await fetchScenes();
-      const nextScenes = data || [];
-      setScenes(nextScenes);
-      persistCache(nextScenes, details);
-    } catch (e) {
-      setErr(e?.message || "Failed to load scenes.");
-    } finally {
-      if (!silent || !hasExisting) setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      if (!alive) return;
-      await reload({ silent: hasCache });
-    })();
-    return () => {
-      alive = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  async function ensureDetails(sceneId) {
-    const existingLocal = details?.[sceneId];
-    if (existingLocal?.status === "loading" || existingLocal?.status === "ready") return;
-
-    const existingCached = scenesHomeCache.details?.[sceneId];
-    if (existingCached?.status === "ready") {
-      setDetails((prev) => {
-        const next = { ...prev, [sceneId]: existingCached };
-        persistCache(scenes, next);
-        return next;
-      });
-      return;
-    }
-    if (existingCached?.status === "loading") return;
-
-    setDetails((prev) => {
-      const next = { ...prev, [sceneId]: { status: "loading" } };
-      persistCache(scenes, next);
-      return next;
-    });
-
-    try {
-      const full = await fetchSceneById(sceneId);
-      setDetails((prev) => {
-        const next = { ...prev, [sceneId]: { status: "ready", data: full } };
-        persistCache(scenes, next);
-        return next;
-      });
-    } catch (e) {
-      setDetails((prev) => {
-        const next = {
-          ...prev,
-          [sceneId]: {
-            status: "error",
-            error: e?.message || "Failed to load scene details.",
-          },
-        };
-        persistCache(scenes, next);
-        return next;
-      });
-    }
-  }
+  const {
+    loading,
+    busy,
+    err,
+    scenes,
+    details,
+    openScenes,
+    countLabel,
+    reload,
+    ensureDetails,
+    toggleSceneOpen,
+    openScene,
+    cyclePlanningStage,
+    deleteScene,
+  } = useScenesHome();
 
   // When returning from Edit, open the requested card and load details
   useEffect(() => {
     const openSceneId = location?.state?.openSceneId;
     if (!openSceneId) return;
 
-    setOpenScenes((prev) => {
-      const next = new Set(prev);
-      next.add(openSceneId);
-      return next;
-    });
-
+    openScene(openSceneId);
     ensureDetails(openSceneId);
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location?.state?.openSceneId]);
-
-  async function cyclePlanningStage(e, scene) {
-    e.stopPropagation();
-    const current = scene.planning_stage || "intent";
-    const next = nextStage(current);
-
-    try {
-      await updateScenePlanningStage(scene.id, next);
-      setScenes((prev) => {
-        const nextScenes = prev.map((s) =>
-          s.id === scene.id ? { ...s, planning_stage: next } : s
-        );
-        persistCache(nextScenes, details);
-        return nextScenes;
-      });
-    } catch (err) {
-      console.error(err);
-    }
-  }
-
-  async function deleteScene(sceneId, title) {
-    const ok = window.confirm(`Delete "${title}"? This cannot be undone.`);
-    if (!ok) return;
-
-    setBusy(true);
-    setErr("");
-    try {
-      const { supabase } = await import("../../lib/supabaseClient.js").then(
-        (m) => m
-      );
-
-      await supabase.from("scene_participants").delete().eq("scene_id", sceneId);
-      await supabase.from("scene_tools").delete().eq("scene_id", sceneId);
-      await supabase.from("scene_blocks").delete().eq("scene_id", sceneId);
-      await supabase.from("scenes").delete().eq("id", sceneId);
-
-      setOpenScenes((prev) => {
-        const next = new Set(prev);
-        next.delete(sceneId);
-        return next;
-      });
-
-      setDetails((prev) => {
-        const next = { ...prev };
-        delete next[sceneId];
-        persistCache(scenes, next);
-        return next;
-      });
-
-      await reload({ silent: true });
-    } catch (e) {
-      setErr(e?.message || "Could not delete scene.");
-    } finally {
-      setBusy(false);
-    }
-  }
 
   return (
     <div>
@@ -272,11 +97,7 @@ export default function ScenesHome() {
             </SmallButton>
           </div>
 
-          <div style={{ fontSize: 12, opacity: 0.7 }}>
-            {loading
-              ? "Loading scenes…"
-              : `${scenes.length} scene${scenes.length === 1 ? "" : "s"}`}
-          </div>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>{countLabel}</div>
         </div>
 
         {err && (
@@ -305,14 +126,9 @@ export default function ScenesHome() {
             const full = det?.status === "ready" ? det.data : null;
 
             const participants =
-              full?.scene_participants
-                ?.map((sp) => sp?.participants)
-                .filter(Boolean) ?? [];
+              full?.scene_participants?.map((sp) => sp?.participants).filter(Boolean) ?? [];
 
-            const tools =
-              full?.scene_tools
-                ?.map((st) => st?.tools_user)
-                .filter(Boolean) ?? [];
+            const tools = full?.scene_tools?.map((st) => st?.tools_user).filter(Boolean) ?? [];
 
             const sections = sectionsFromBlocks(full?.scene_blocks);
 
@@ -320,34 +136,23 @@ export default function ScenesHome() {
               <Card
                 key={s.id}
                 onClick={() => {
-                  setOpenScenes((prev) => toggleInSet(prev, s.id));
+                  toggleSceneOpen(s.id);
                   if (!isOpen) ensureDetails(s.id);
                 }}
               >
                 <div style={{ display: "grid", gap: 10 }}>
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      gap: 12,
-                    }}
-                  >
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
                     <div>
                       <div style={{ fontWeight: 800 }}>{s.title}</div>
-                      {intent && (
-                        <div style={{ fontSize: 13, opacity: 0.85 }}>
-                          {intent}
-                        </div>
-                      )}
-                      {when && (
-                        <div style={{ fontSize: 12, opacity: 0.7 }}>
-                          {when}
-                        </div>
-                      )}
+                      {intent && <div style={{ fontSize: 13, opacity: 0.85 }}>{intent}</div>}
+                      {when && <div style={{ fontSize: 12, opacity: 0.7 }}>{when}</div>}
                     </div>
 
                     <button
-                      onClick={(e) => cyclePlanningStage(e, s)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        cyclePlanningStage(s);
+                      }}
                       title="Tap to change planning stage"
                       style={{
                         padding: "4px 10px",
@@ -366,14 +171,9 @@ export default function ScenesHome() {
                   </div>
 
                   {isOpen && (
-                    <div
-                      style={{ display: "grid", gap: 12 }}
-                      onClick={(e) => e.stopPropagation()}
-                    >
+                    <div style={{ display: "grid", gap: 12 }} onClick={(e) => e.stopPropagation()}>
                       {det?.status === "loading" ? (
-                        <div style={{ opacity: 0.75, fontSize: 13 }}>
-                          Loading details…
-                        </div>
+                        <div style={{ opacity: 0.75, fontSize: 13 }}>Loading details…</div>
                       ) : det?.status === "error" ? (
                         <div
                           style={{
@@ -390,9 +190,7 @@ export default function ScenesHome() {
                       ) : null}
 
                       <div>
-                        <div style={{ fontSize: 12, opacity: 0.7 }}>
-                          Participants
-                        </div>
+                        <div style={{ fontSize: 12, opacity: 0.7 }}>Participants</div>
                         {participants.length ? (
                           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                             {participants.map((p) => (
@@ -400,9 +198,7 @@ export default function ScenesHome() {
                             ))}
                           </div>
                         ) : (
-                          <div style={{ fontSize: 13, opacity: 0.6 }}>
-                            None selected yet
-                          </div>
+                          <div style={{ fontSize: 13, opacity: 0.6 }}>None selected yet</div>
                         )}
                       </div>
 
@@ -417,17 +213,9 @@ export default function ScenesHome() {
                                 background: "rgba(255,255,255,0.03)",
                               }}
                             >
-                              <div style={{ fontWeight: 850, fontSize: 13 }}>
-                                {sec.title}
-                              </div>
+                              <div style={{ fontWeight: 850, fontSize: 13 }}>{sec.title}</div>
                               {sec.body ? (
-                                <div
-                                  style={{
-                                    whiteSpace: "pre-wrap",
-                                    lineHeight: 1.4,
-                                    opacity: 0.9,
-                                  }}
-                                >
+                                <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.4, opacity: 0.9 }}>
                                   {sec.body}
                                 </div>
                               ) : null}
@@ -435,16 +223,12 @@ export default function ScenesHome() {
                           ))}
                         </div>
                       ) : (
-                        <div style={{ fontSize: 13, opacity: 0.6 }}>
-                          No stages filled yet.
-                        </div>
+                        <div style={{ fontSize: 13, opacity: 0.6 }}>No stages filled yet.</div>
                       )}
 
                       {tools.length > 0 && (
                         <div>
-                          <div style={{ fontSize: 12, opacity: 0.7 }}>
-                            Tools
-                          </div>
+                          <div style={{ fontSize: 12, opacity: 0.7 }}>Tools</div>
                           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                             {tools.map((tu) => (
                               <Chip key={tu.id}>
