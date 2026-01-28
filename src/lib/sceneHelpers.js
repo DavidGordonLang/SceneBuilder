@@ -1,9 +1,25 @@
-// src/lib/sceneHelpers.js
-
-export function formatDate(isoLike) {
+export function parseDateTimeForInput(value) {
+  if (!value) return "";
   try {
-    if (!isoLike) return "";
-    const d = new Date(isoLike);
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return "";
+    const pad = (n) => String(n).padStart(2, "0");
+    const yyyy = d.getFullYear();
+    const mm = pad(d.getMonth() + 1);
+    const dd = pad(d.getDate());
+    const hh = pad(d.getHours());
+    const mi = pad(d.getMinutes());
+    return `${yyyy}-${mm}-${dd}T${hh}:${mi}`;
+  } catch {
+    return "";
+  }
+}
+
+export function formatDate(value) {
+  if (!value) return "";
+  try {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return "";
     return d.toLocaleString(undefined, {
       year: "numeric",
       month: "short",
@@ -17,33 +33,35 @@ export function formatDate(isoLike) {
 }
 
 export function pickParticipantLabel(p) {
-  if (!p) return "Participant";
-  const name = String(p.name || p.display_name || p.email || "").trim();
-  return name || "Participant";
+  return (
+    p?.name ||
+    p?.display_name ||
+    p?.nickname ||
+    p?.full_name ||
+    p?.label ||
+    `Participant ${String(p?.id ?? "").slice(0, 6)}`
+  );
 }
 
-export function pickToolLabel(toolUserOrTool) {
-  const t = toolUserOrTool || {};
-  // Prefer user overrides first, otherwise fall back to the global tool name.
-  const custom = String(t.custom_name || "").trim();
-  if (custom) return custom;
+export function pickToolLabel(tu) {
+  // Prefer per-instance naming (what the user set in Tools / Vault).
+  // This avoids ambiguous labels like "Blindfold #1/#2" when multiple instances exist.
+  if (tu?.custom_name && String(tu.custom_name).trim()) {
+    return String(tu.custom_name).trim();
+  }
 
-  const g = t.tools_global;
-  const globalName = String(g?.name || g?.label || "").trim();
-  if (globalName) return globalName;
+  const g = tu?.tools_global;
+  if (g?.name) return g.name;
 
   return "Untitled tool";
 }
 
-export function pickToolIcon(toolUserOrTool) {
-  const t = toolUserOrTool || {};
-  // Prefer user overrides first, otherwise fall back to the global icon.
-  const custom = String(t.custom_icon || "").trim();
-  if (custom) return custom;
+export function pickToolIcon(tu) {
+  // Prefer per-instance icon selection if present.
+  if (tu?.custom_icon && String(tu.custom_icon).trim()) {
+    return String(tu.custom_icon).trim();
+  }
 
-  const g = t.tools_global;
-  const globalIcon = String(g?.icon || "").trim();
-  if (globalIcon) return globalIcon;
-
-  return "🧰";
+  const g = tu?.tools_global;
+  return g?.icon || "🧰";
 }
