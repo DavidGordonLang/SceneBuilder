@@ -1,25 +1,9 @@
-export function parseDateTimeForInput(value) {
-  if (!value) return "";
-  try {
-    const d = new Date(value);
-    if (Number.isNaN(d.getTime())) return "";
-    const pad = (n) => String(n).padStart(2, "0");
-    const yyyy = d.getFullYear();
-    const mm = pad(d.getMonth() + 1);
-    const dd = pad(d.getDate());
-    const hh = pad(d.getHours());
-    const mi = pad(d.getMinutes());
-    return `${yyyy}-${mm}-${dd}T${hh}:${mi}`;
-  } catch {
-    return "";
-  }
-}
+// src/lib/sceneHelpers.js
 
-export function formatDate(value) {
-  if (!value) return "";
+export function formatDate(isoLike) {
   try {
-    const d = new Date(value);
-    if (Number.isNaN(d.getTime())) return "";
+    if (!isoLike) return "";
+    const d = new Date(isoLike);
     return d.toLocaleString(undefined, {
       year: "numeric",
       month: "short",
@@ -33,22 +17,33 @@ export function formatDate(value) {
 }
 
 export function pickParticipantLabel(p) {
-  return (
-    p?.name ||
-    p?.display_name ||
-    p?.nickname ||
-    p?.full_name ||
-    p?.label ||
-    `Participant ${String(p?.id ?? "").slice(0, 6)}`
-  );
+  if (!p) return "Participant";
+  const name = String(p.name || p.display_name || p.email || "").trim();
+  return name || "Participant";
 }
 
-export function pickToolLabel(tu) {
-  const g = tu?.tools_global;
-  return g?.name || tu?.custom_name || "Untitled tool";
+export function pickToolLabel(toolUserOrTool) {
+  const t = toolUserOrTool || {};
+  // Prefer user overrides first, otherwise fall back to the global tool name.
+  const custom = String(t.custom_name || "").trim();
+  if (custom) return custom;
+
+  const g = t.tools_global;
+  const globalName = String(g?.name || g?.label || "").trim();
+  if (globalName) return globalName;
+
+  return "Untitled tool";
 }
 
-export function pickToolIcon(tu) {
-  const g = tu?.tools_global;
-  return g?.icon || tu?.custom_icon || "🧰";
+export function pickToolIcon(toolUserOrTool) {
+  const t = toolUserOrTool || {};
+  // Prefer user overrides first, otherwise fall back to the global icon.
+  const custom = String(t.custom_icon || "").trim();
+  if (custom) return custom;
+
+  const g = t.tools_global;
+  const globalIcon = String(g?.icon || "").trim();
+  if (globalIcon) return globalIcon;
+
+  return "🧰";
 }
