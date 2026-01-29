@@ -1,229 +1,133 @@
-import React from "react";
-import { SmallButton } from "../../../components/routesUi";
-import KebabMenu from "./KebabMenu";
-
-function ExpandChevron({ open }) {
-  return (
-    <span
-      aria-hidden="true"
-      style={{
-        display: "inline-block",
-        fontSize: 16,
-        lineHeight: 1,
-        opacity: 0.8,
-        transform: open ? "rotate(90deg)" : "rotate(0deg)",
-        transition: "transform 160ms ease",
-        userSelect: "none",
-        flex: "0 0 auto",
-      }}
-    >
-      ▸
-    </span>
-  );
-}
-
-function inputStyle(disabled) {
-  return {
-    flex: "1 1 220px",
-    height: 40,
-    borderRadius: 12,
-    border: "1px solid rgba(255,255,255,0.12)",
-    background: "rgba(255,255,255,0.04)",
-    color: "#f3f3f7",
-    padding: "0 12px",
-    outline: "none",
-    opacity: disabled ? 0.7 : 1,
-  };
-}
+import React, { useMemo, useState } from "react";
+import { Card, SmallButton } from "../../../components/routesUi";
+import { pickToolIcon } from "../../../lib/sceneHelpers";
 
 export default function ToolInstance({
-  tu,
-  status,
+  toolUser,
   busy,
-  isOpen,
-  onToggleOpen,
-  draftLabelValue,
-  onDraftLabelChange,
-  onSaveLabel,
-  onEnsurePhoto,
-  photoUrl,
-  onUploadFile,
-  onRemoveFromDrawer,
-  onMoveCravingToOwned,
+  onEdit,
+  onDelete,
+  showActions = true,
 }) {
-  const displayName = tu?.tools_global?.name || tu?.custom_name || "Tool";
+  const [confirming, setConfirming] = useState(false);
 
-  const menuItems =
-    status === "owned"
-      ? [
-          {
-            key: "remove",
-            label: "Remove",
-            tone: "danger",
-            onClick: () => onRemoveFromDrawer(tu.id, displayName),
-          },
-        ]
-      : [
-          {
-            key: "move",
-            label: "Move to Owned",
-            onClick: () => onMoveCravingToOwned(tu.id),
-          },
-          {
-            key: "remove",
-            label: "Remove",
-            tone: "danger",
-            onClick: () => onRemoveFromDrawer(tu.id, displayName),
-          },
-        ];
+  const icon = useMemo(() => pickToolIcon(toolUser), [toolUser]);
+
+  // Primary label should be the per-instance name the user actually cares about.
+  // instance_label is the current “given name” field.
+  const displayName =
+    String(toolUser?.instance_label || "").trim() ||
+    String(toolUser?.custom_name || "").trim() ||
+    String(toolUser?.tools_global?.name || "").trim() ||
+    "Tool";
+
+  const safety = toolUser?.tools_global?.safety_level || "";
+  const safetyBadge =
+    safety && String(safety).trim()
+      ? String(safety).trim().toLowerCase()
+      : "";
 
   return (
-    <div
-      style={{
-        padding: 12,
-        borderRadius: 14,
-        border: "1px solid rgba(255,255,255,0.10)",
-        background: "rgba(255,255,255,0.02)",
-        display: "grid",
-        gap: 10,
-      }}
-      onClick={(e) => e.stopPropagation()}
-    >
-      {/* Instance header */}
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={(e) => {
-          e.stopPropagation();
-          onToggleOpen();
-          if (!isOpen) onEnsurePhoto?.(tu.id, tu.photo_path);
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            e.stopPropagation();
-            onToggleOpen();
-            if (!isOpen) onEnsurePhoto?.(tu.id, tu.photo_path);
-          }
-        }}
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          gap: 10,
-          alignItems: "flex-start",
-          cursor: "pointer",
-          userSelect: "none",
-        }}
-        title="Tap to expand / collapse instance"
-      >
-        <div style={{ display: "grid", gap: 4, minWidth: 0 }}>
-          <div style={{ fontSize: 12, opacity: 0.7, fontWeight: 800 }}>Instance</div>
-          <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 900 }}>
-            {tu.instance_label ? `“${tu.instance_label}”` : "No label"}
-          </div>
+    <Card>
+      <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+        <div
+          style={{
+            width: 42,
+            height: 42,
+            borderRadius: 14,
+            display: "grid",
+            placeItems: "center",
+            background: "rgba(255,255,255,0.05)",
+            fontSize: 20,
+            flex: "0 0 auto",
+          }}
+        >
+          {icon}
         </div>
 
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <KebabMenu items={menuItems} disabled={busy} />
-          <ExpandChevron open={isOpen} />
-        </div>
-      </div>
-
-      {isOpen ? (
-        <div style={{ display: "grid", gap: 10 }} onClick={(e) => e.stopPropagation()}>
-          {/* Photo */}
-          {photoUrl ? (
+        <div style={{ minWidth: 0, flex: "1 1 auto" }}>
+          <div
+            style={{
+              display: "flex",
+              gap: 10,
+              alignItems: "center",
+              justifyContent: "space-between",
+            }}
+          >
             <div
               style={{
-                width: "100%",
-                maxWidth: 320,
-                borderRadius: 14,
-                border: "1px solid rgba(255,255,255,0.10)",
+                fontWeight: 900,
+                fontSize: 15,
                 overflow: "hidden",
-                background: "rgba(255,255,255,0.03)",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                minWidth: 0,
               }}
+              title={displayName}
             >
-              <img src={photoUrl} alt="" style={{ display: "block", width: "100%", height: "auto" }} />
+              {displayName}
             </div>
-          ) : (
-            <div style={{ opacity: 0.7, fontSize: 13 }}>No photo yet.</div>
-          )}
 
-          {/* Upload + refresh */}
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-            <label
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 8,
-                padding: "10px 12px",
-                borderRadius: 12,
-                border: "1px solid rgba(255,255,255,0.18)",
-                background: "rgba(255,255,255,0.06)",
-                cursor: busy ? "not-allowed" : "pointer",
-                fontWeight: 800,
-                fontSize: 12,
-                opacity: busy ? 0.6 : 1,
-              }}
-              title="Upload a photo for this tool instance"
-              onClick={(e) => e.stopPropagation()}
-            >
-              📷 Upload photo
-              <input
-                type="file"
-                accept="image/*"
-                disabled={busy}
-                style={{ display: "none" }}
-                onChange={(e) => {
-                  e.stopPropagation();
-                  const file = e.target.files?.[0];
-                  e.target.value = "";
-                  onUploadFile?.(tu.id, file);
+            {safetyBadge ? (
+              <div
+                style={{
+                  flex: "0 0 auto",
+                  fontSize: 11,
+                  fontWeight: 900,
+                  padding: "4px 8px",
+                  borderRadius: 999,
+                  border: "1px solid rgba(255,255,255,0.10)",
+                  background: "rgba(255,255,255,0.04)",
+                  opacity: 0.85,
+                  textTransform: "capitalize",
                 }}
-              />
-            </label>
-
-            {tu.photo_path ? (
-              <SmallButton
-                disabled={busy}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onEnsurePhoto?.(tu.id, tu.photo_path);
-                }}
-                title="Refresh photo preview"
+                title="Safety level"
               >
-                Refresh photo
-              </SmallButton>
+                {safetyBadge}
+              </div>
             ) : null}
           </div>
 
-          {/* Label edit */}
-          <div style={{ display: "grid", gap: 6 }}>
-            <div style={{ fontSize: 12, opacity: 0.7 }}>Label</div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-              <input
-                value={draftLabelValue}
-                placeholder='e.g. "Black cuffs", "Travel kit"'
-                disabled={busy}
-                onClick={(e) => e.stopPropagation()}
-                onKeyDown={(e) => e.stopPropagation()}
-                onChange={(e) => onDraftLabelChange?.(tu.id, e.target.value)}
-                style={inputStyle(busy)}
-              />
+          {toolUser?.tools_global?.name ? (
+            <div style={{ opacity: 0.65, fontSize: 12 }}>
+              {toolUser.tools_global.name}
+            </div>
+          ) : null}
+        </div>
+
+        {showActions ? (
+          <div style={{ display: "flex", gap: 8, flex: "0 0 auto" }}>
+            <SmallButton
+              disabled={busy}
+              onClick={() => onEdit?.(toolUser)}
+              title="Edit this tool instance"
+            >
+              Edit
+            </SmallButton>
+
+            {!confirming ? (
               <SmallButton
                 disabled={busy}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onSaveLabel?.(tu.id);
-                }}
-                title="Save label"
+                onClick={() => setConfirming(true)}
+                title="Delete this tool instance"
               >
-                Save
+                Delete
               </SmallButton>
-            </div>
+            ) : (
+              <SmallButton
+                disabled={busy}
+                onClick={() => {
+                  setConfirming(false);
+                  onDelete?.(toolUser);
+                }}
+                title="Confirm delete"
+              >
+                Confirm
+              </SmallButton>
+            )}
           </div>
-        </div>
-      ) : null}
-    </div>
+        ) : null}
+      </div>
+    </Card>
   );
 }
