@@ -44,11 +44,12 @@ export function pickParticipantLabel(p) {
 }
 
 export function pickToolLabel(tu) {
-  // Prefer the per-instance name the user gave this tool/toy.
-  // In your DB this is currently stored in `instance_label` (custom_name may be null).
-  const inst = String(tu?.instance_label || "").trim();
-  if (inst) return inst;
+  // Prefer per-instance naming (what the user set in Tools & Toys).
+  // In our current data model, instance_label is the primary "given name" for that specific item.
+  const instance = String(tu?.instance_label || "").trim();
+  if (instance) return instance;
 
+  // Support older rows that used custom_name.
   const custom = String(tu?.custom_name || "").trim();
   if (custom) return custom;
 
@@ -61,8 +62,9 @@ export function pickToolLabel(tu) {
 
 export function pickToolIcon(tu) {
   // Prefer per-instance icon selection if present.
-  const custom = String(tu?.custom_icon || "").trim();
-  if (custom) return custom;
+  if (tu?.custom_icon && String(tu.custom_icon).trim()) {
+    return String(tu.custom_icon).trim();
+  }
 
   const g = tu?.tools_global;
   return g?.icon || "🧰";
