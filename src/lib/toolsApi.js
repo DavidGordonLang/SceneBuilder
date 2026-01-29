@@ -2,6 +2,21 @@ import { supabase } from "./supabaseClient";
 
 const TOOL_PHOTOS_BUCKET = "tool-photos";
 
+async function getAuthedUserId() {
+  const { data, error } = await supabase.auth.getUser();
+  if (error) throw error;
+  const uid = data?.user?.id;
+  if (!uid) throw new Error("Not signed in.");
+  return uid;
+}
+
+function makeSafeFilename(originalName = "photo") {
+  const base = String(originalName || "photo").replace(/[^\w.\-]+/g, "_");
+  const stamp = Date.now();
+  const rand = Math.random().toString(16).slice(2, 10);
+  return `${stamp}-${rand}-${base}`.slice(0, 120);
+}
+
 /**
  * Fetch Tool Vault (global tools).
  */
@@ -17,8 +32,14 @@ export async function fetchToolVault() {
 }
 
 /**
- * Fetch user's tools (owned + craving + custom).
- * NOTE: includes instance_label + photo_path (per owned instance).
+ * Back-compat: ToolsHome.jsx expects fetchGlobalTools().
+ */
+export async function fetchGlobalTools() {
+  return fetchToolVault();
+}
+
+/**
+ * Fetch user's tools (all statuses).
  */
 export async function fetchUserTools() {
   const { data, error } = await supabase
@@ -48,7 +69,6 @@ export async function fetchUserTools() {
 
 /**
  * Back-compat: some screens expect fetchOwnedTools().
- * Returns ONLY owned tools_user rows.
  */
 export async function fetchOwnedTools() {
   const { data, error } = await supabase
@@ -78,7 +98,7 @@ export async function fetchOwnedTools() {
 }
 
 /**
- * Back-compat: fetch a single tools_user row.
+ * Fetch one tools_user row.
  */
 export async function fetchToolUserById(toolUserId) {
   const { data, error } = await supabase
@@ -121,6 +141,13 @@ export async function addGlobalToolToUser(toolGlobalId, status) {
 }
 
 /**
+ * Back-compat: ToolsHome.jsx expects createToolUser(tool_global_id, status).
+ */
+export async function createToolUser(toolGlobalId, status = "owned") {
+  return addGlobalToolToUser(toolGlobalId, status);
+}
+
+/**
  * Update tool status (e.g. craving → owned).
  */
 export async function updateUserToolStatus(toolUserId, status) {
@@ -132,7 +159,7 @@ export async function updateUserToolStatus(toolUserId, status) {
 }
 
 /**
- * Remove a tool from user's drawer (owned or craving).
+ * Remove a tool from user's drawer.
  */
 export async function deleteUserTool(toolUserId) {
   const { error } = await supabase.from("tools_user").delete().eq("id", toolUserId);
@@ -140,8 +167,14 @@ export async function deleteUserTool(toolUserId) {
 }
 
 /**
+ * Back-compat: ToolsHome.jsx expects deleteToolUser().
+ */
+export async function deleteToolUser(toolUserId) {
+  return deleteUserTool(toolUserId);
+}
+
+/**
  * Update per-instance details on tools_user (instance_label + photo_path etc.)
- * Expanded to support any fields we legitimately store on tools_user.
  */
 export async function updateUserToolInstanceDetails(toolUserId, patch) {
   const safePatch = {};
@@ -173,7 +206,6 @@ export async function updateUserToolInstanceDetails(toolUserId, patch) {
 
 /**
  * Back-compat: ToolsHome.jsx expects updateToolUser().
- * Keep it as an alias to updateUserToolInstanceDetails().
  */
 export async function updateToolUser(toolUserId, patch) {
   return updateUserToolInstanceDetails(toolUserId, patch);
@@ -181,7 +213,6 @@ export async function updateToolUser(toolUserId, patch) {
 
 /**
  * Get a signed URL for a private tool photo.
- * Returns null if photo_path is falsy.
  */
 export async function getToolPhotoSignedUrl(photo_path, expiresInSeconds = 60 * 60) {
   const path = String(photo_path || "").trim();
@@ -195,28 +226,9 @@ export async function getToolPhotoSignedUrl(photo_path, expiresInSeconds = 60 * 
   return data?.signedUrl || null;
 }
 
-async function getAuthedUserId() {
-  const { data, error } = await supabase.auth.getUser();
-  if (error) throw error;
-  const uid = data?.user?.id;
-  if (!uid) throw new Error("Not signed in.");
-  return uid;
-}
-
-function makeSafeFilename(originalName = "photo") {
-  const base = String(originalName || "photo").replace(/[^\w.\-]+/g, "_");
-  const stamp = Date.now();
-  const rand = Math.random().toString(16).slice(2, 10);
-  // keep extension if present
-  return `${stamp}-${rand}-${base}`.slice(0, 120);
-}
-
 /**
  * Upload a tool photo for a specific tools_user row.
  * Storage path format: <user_id>/<tools_user_id>/<filename>
- *
- * Returns: { photo_path, signedUrl }
- * (Does NOT update the tools_user row automatically — call updateUserToolInstanceDetails afterwards.)
  */
 export async function uploadToolPhoto(toolUserId, file) {
   if (!toolUserId) throw new Error("Missing toolUserId.");
