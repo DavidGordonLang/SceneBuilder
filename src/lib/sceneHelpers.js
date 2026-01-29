@@ -1,5 +1,3 @@
-// src/lib/sceneHelpers.js
-
 export function parseDateTimeForInput(value) {
   if (!value) return "";
   try {
@@ -46,28 +44,25 @@ export function pickParticipantLabel(p) {
 }
 
 export function pickToolLabel(tu) {
-  // Prefer the per-instance label the user gave it in Tools / Vault.
-  // In your DB this is tools_user.instance_label.
-  if (tu?.instance_label && String(tu.instance_label).trim()) {
-    return String(tu.instance_label).trim();
-  }
+  // Prefer the per-instance name the user gave this tool/toy.
+  // In your DB this is currently stored in `instance_label` (custom_name may be null).
+  const inst = String(tu?.instance_label || "").trim();
+  if (inst) return inst;
 
-  // Some older rows might still use custom_name.
-  if (tu?.custom_name && String(tu.custom_name).trim()) {
-    return String(tu.custom_name).trim();
-  }
+  const custom = String(tu?.custom_name || "").trim();
+  if (custom) return custom;
 
   const g = tu?.tools_global;
-  if (g?.name) return g.name;
+  const globalName = String(g?.name || "").trim();
+  if (globalName) return globalName;
 
   return "Untitled tool";
 }
 
 export function pickToolIcon(tu) {
   // Prefer per-instance icon selection if present.
-  if (tu?.custom_icon && String(tu.custom_icon).trim()) {
-    return String(tu.custom_icon).trim();
-  }
+  const custom = String(tu?.custom_icon || "").trim();
+  if (custom) return custom;
 
   const g = tu?.tools_global;
   return g?.icon || "🧰";
