@@ -67,7 +67,14 @@ function TextArea({ value, onChange, placeholder, disabled }) {
 function Row({ left, right, onClick, title }) {
   return (
     <Card onClick={onClick} title={title}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 10,
+          alignItems: "center",
+        }}
+      >
         <div style={{ minWidth: 0 }}>{left}</div>
         <div style={{ flex: "0 0 auto" }}>{right}</div>
       </div>
@@ -130,15 +137,22 @@ function getToolTypeKey(toolUserRow) {
 }
 
 function getToolTypeLabel(toolUserRow) {
-  // For the type label, prefer the global name (not per-instance custom name).
+  // For the type label, prefer the global name (not per-instance instance_label).
   const g = toolUserRow?.tools_global;
   const globalName = String(g?.name || g?.label || "").trim();
   return globalName || "Tool";
 }
 
 function buildInstanceLabel(typeLabel, instance, idx, count) {
-  const custom = String(instance?.custom_name || "").trim();
-  if (custom) return custom;
+  // IMPORTANT:
+  // In this app, the per-instance name is stored on tools_user.instance_label.
+  // custom_name exists but is not what we use right now.
+  const instanceLabel = String(instance?.instance_label || "").trim();
+  if (instanceLabel) return instanceLabel;
+
+  const legacyCustom = String(instance?.custom_name || "").trim();
+  if (legacyCustom) return legacyCustom;
+
   if (count > 1) return `${typeLabel} #${idx + 1}`;
   return typeLabel;
 }
@@ -345,7 +359,12 @@ export default function SceneForm({
         <div style={{ display: "grid", gap: 10 }}>
           <div>
             <FieldLabel>Title *</FieldLabel>
-            <Input value={title} onChange={setTitle} placeholder="Give this scene a name" disabled={busy} />
+            <Input
+              value={title}
+              onChange={setTitle}
+              placeholder="Give this scene a name"
+              disabled={busy}
+            />
           </div>
 
           <div>
@@ -409,7 +428,7 @@ export default function SceneForm({
 
       {/* Tools */}
       <div style={{ display: "grid", gap: 10 }}>
-        <div style={{ fontWeight: 900 }}>Tools & Toys (Owned)</div>
+        <div style={{ fontWeight: 900 }}>Tools (Owned)</div>
 
         {!toolsGrouped.length ? (
           <div style={{ opacity: 0.7, fontSize: 13 }}>
@@ -433,7 +452,11 @@ export default function SceneForm({
                         </div>
                       </div>
                     }
-                    right={<div style={{ opacity: 0.75, fontWeight: 900 }}>{isGroupOpen ? "▾" : "▸"}</div>}
+                    right={
+                      <div style={{ opacity: 0.75, fontWeight: 900 }}>
+                        {isGroupOpen ? "▾" : "▸"}
+                      </div>
+                    }
                   />
 
                   {isGroupOpen ? (
@@ -447,7 +470,14 @@ export default function SceneForm({
                               title="Expand tool type"
                               onClick={() => toggleToolType(type.typeKey)}
                               left={
-                                <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 10,
+                                    minWidth: 0,
+                                  }}
+                                >
                                   <div
                                     style={{
                                       width: 34,
@@ -479,7 +509,11 @@ export default function SceneForm({
                                   </div>
                                 </div>
                               }
-                              right={<div style={{ opacity: 0.75, fontWeight: 900 }}>{isTypeOpen ? "▾" : "▸"}</div>}
+                              right={
+                                <div style={{ opacity: 0.75, fontWeight: 900 }}>
+                                  {isTypeOpen ? "▾" : "▸"}
+                                </div>
+                              }
                             />
 
                             {isTypeOpen ? (
@@ -494,10 +528,23 @@ export default function SceneForm({
                                   );
 
                                   return (
-                                    <Card key={inst.id} onClick={() => toggleToolInstance(inst.id)} title="Select this tool instance">
-                                      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+                                    <Card
+                                      key={inst.id}
+                                      onClick={() => toggleToolInstance(inst.id)}
+                                      title="Select this tool instance"
+                                    >
+                                      <div
+                                        style={{
+                                          display: "flex",
+                                          justifyContent: "space-between",
+                                          gap: 10,
+                                          alignItems: "center",
+                                        }}
+                                      >
                                         <div style={{ fontWeight: 800 }}>{instLabel}</div>
-                                        <div style={{ opacity: 0.8, fontWeight: 800 }}>{checked ? "✓" : ""}</div>
+                                        <div style={{ opacity: 0.8, fontWeight: 800 }}>
+                                          {checked ? "✓" : ""}
+                                        </div>
                                       </div>
                                     </Card>
                                   );
@@ -519,10 +566,18 @@ export default function SceneForm({
       {/* Actions (optional; Edit screen will hide these) */}
       {showActions ? (
         <div style={{ display: "flex", gap: 10 }}>
-          <SmallButton disabled={busy} onClick={() => navigate(backTo || "/scenes")} title="Cancel">
+          <SmallButton
+            disabled={busy}
+            onClick={() => navigate(backTo || "/scenes")}
+            title="Cancel"
+          >
             Cancel
           </SmallButton>
-          <SmallButton disabled={!canSubmit} onClick={handleSubmit} title={title.trim() ? submitLabel : "Title is required"}>
+          <SmallButton
+            disabled={!canSubmit}
+            onClick={handleSubmit}
+            title={title.trim() ? submitLabel : "Title is required"}
+          >
             {busy ? "Saving…" : submitLabel}
           </SmallButton>
         </div>
