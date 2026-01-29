@@ -18,7 +18,7 @@ export async function fetchToolVault() {
 
 /**
  * Fetch user's tools (owned + craving + custom).
- * NOTE: now includes instance_label + photo_path (per owned instance).
+ * NOTE: includes instance_label + photo_path (per owned instance).
  */
 export async function fetchUserTools() {
   const { data, error } = await supabase
@@ -26,6 +26,7 @@ export async function fetchUserTools() {
     .select(
       [
         "id",
+        "user_id",
         "status",
         "notes",
         "tool_global_id",
@@ -34,6 +35,8 @@ export async function fetchUserTools() {
         "tags_override",
         "instance_label",
         "photo_path",
+        "created_at",
+        "updated_at",
         "tools_global(id, name, icon, tags, safety_level)",
       ].join(", ")
     )
@@ -41,6 +44,67 @@ export async function fetchUserTools() {
 
   if (error) throw error;
   return data ?? [];
+}
+
+/**
+ * Back-compat: some screens expect fetchOwnedTools().
+ * Returns ONLY owned tools_user rows.
+ */
+export async function fetchOwnedTools() {
+  const { data, error } = await supabase
+    .from("tools_user")
+    .select(
+      [
+        "id",
+        "user_id",
+        "status",
+        "notes",
+        "tool_global_id",
+        "custom_name",
+        "custom_icon",
+        "tags_override",
+        "instance_label",
+        "photo_path",
+        "created_at",
+        "updated_at",
+        "tools_global(id, name, icon, tags, safety_level)",
+      ].join(", ")
+    )
+    .eq("status", "owned")
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+  return data ?? [];
+}
+
+/**
+ * Back-compat: fetch a single tools_user row.
+ */
+export async function fetchToolUserById(toolUserId) {
+  const { data, error } = await supabase
+    .from("tools_user")
+    .select(
+      [
+        "id",
+        "user_id",
+        "status",
+        "notes",
+        "tool_global_id",
+        "custom_name",
+        "custom_icon",
+        "tags_override",
+        "instance_label",
+        "photo_path",
+        "created_at",
+        "updated_at",
+        "tools_global(id, name, icon, tags, safety_level)",
+      ].join(", ")
+    )
+    .eq("id", toolUserId)
+    .single();
+
+  if (error) throw error;
+  return data;
 }
 
 /**
@@ -60,7 +124,10 @@ export async function addGlobalToolToUser(toolGlobalId, status) {
  * Update tool status (e.g. craving → owned).
  */
 export async function updateUserToolStatus(toolUserId, status) {
-  const { error } = await supabase.from("tools_user").update({ status }).eq("id", toolUserId);
+  const { error } = await supabase
+    .from("tools_user")
+    .update({ status })
+    .eq("id", toolUserId);
   if (error) throw error;
 }
 
@@ -73,16 +140,43 @@ export async function deleteUserTool(toolUserId) {
 }
 
 /**
- * Update per-instance details on tools_user (label + photo_path, etc.)
+ * Update per-instance details on tools_user (instance_label + photo_path etc.)
+ * Expanded to support any fields we legitimately store on tools_user.
  */
 export async function updateUserToolInstanceDetails(toolUserId, patch) {
   const safePatch = {};
-  if (Object.prototype.hasOwnProperty.call(patch, "instance_label")) safePatch.instance_label = patch.instance_label;
-  if (Object.prototype.hasOwnProperty.call(patch, "photo_path")) safePatch.photo_path = patch.photo_path;
-  if (Object.prototype.hasOwnProperty.call(patch, "notes")) safePatch.notes = patch.notes;
+
+  if (Object.prototype.hasOwnProperty.call(patch, "instance_label"))
+    safePatch.instance_label = patch.instance_label;
+
+  if (Object.prototype.hasOwnProperty.call(patch, "photo_path"))
+    safePatch.photo_path = patch.photo_path;
+
+  if (Object.prototype.hasOwnProperty.call(patch, "notes"))
+    safePatch.notes = patch.notes;
+
+  if (Object.prototype.hasOwnProperty.call(patch, "custom_name"))
+    safePatch.custom_name = patch.custom_name;
+
+  if (Object.prototype.hasOwnProperty.call(patch, "custom_icon"))
+    safePatch.custom_icon = patch.custom_icon;
+
+  if (Object.prototype.hasOwnProperty.call(patch, "tags_override"))
+    safePatch.tags_override = patch.tags_override;
+
+  if (Object.prototype.hasOwnProperty.call(patch, "status"))
+    safePatch.status = patch.status;
 
   const { error } = await supabase.from("tools_user").update(safePatch).eq("id", toolUserId);
   if (error) throw error;
+}
+
+/**
+ * Back-compat: ToolsHome.jsx expects updateToolUser().
+ * Keep it as an alias to updateUserToolInstanceDetails().
+ */
+export async function updateToolUser(toolUserId, patch) {
+  return updateUserToolInstanceDetails(toolUserId, patch);
 }
 
 /**
