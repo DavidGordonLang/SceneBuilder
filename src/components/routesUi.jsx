@@ -14,11 +14,10 @@ function iconButtonStyle() {
     borderRadius: 12,
     border: "1px solid rgba(255,255,255,0.18)",
     background: "rgba(255,255,255,0.06)",
-    color: "inherit",
-    fontSize: 16,
-    lineHeight: 1,
-    padding: 0,
+    color: "#f3f3f7",
     textDecoration: "none",
+    fontSize: 16,
+    flexShrink: 0,
   };
 }
 
@@ -30,6 +29,7 @@ function IconLink({ to, label, title, children }) {
   );
 }
 
+// ✅ ONLY CHANGE: export this so ScenesHome can import it
 export function IconButton({ onClick, label, title, children }) {
   return (
     <button
@@ -62,49 +62,91 @@ export function TopBar({ title, onSignOut, rightSlot, showBack = false, backTo }
       style={{
         padding: 16,
         paddingTop: 18,
-        paddingBottom: 14,
-        borderBottom: "1px solid rgba(255,255,255,0.10)",
-        background: "rgba(0,0,0,0.15)",
+        borderBottom: "1px solid rgba(255,255,255,0.08)",
+        display: "grid",
+        gap: 10,
       }}
     >
-      <div
-        style={{
-          fontWeight: 950,
-          fontSize: 18,
-          letterSpacing: 0.2,
-          marginBottom: 10,
-        }}
-      >
-        {title}
+      {/* Row 1: Title */}
+      <div style={{ minWidth: 0 }}>
+        <h1
+          style={{
+            margin: 0,
+            fontSize: 22,
+            lineHeight: 1.15,
+            whiteSpace: "normal",
+            overflowWrap: "anywhere",
+          }}
+        >
+          {title}
+        </h1>
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      {/* Row 2: controls */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+        }}
+      >
+        {/* Left: Back + rightSlot (can scroll if crowded) */}
+        <div
+          style={{
+            flex: 1,
+            minWidth: 0,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            overflowX: showBack || rightSlot ? "auto" : "hidden",
+            paddingBottom: showBack || rightSlot ? 2 : 0,
+          }}
+        >
           {showBack ? (
             <IconButton onClick={handleBack} label="Back" title="Back">
               ←
             </IconButton>
           ) : null}
 
-          {rightSlot ? <div>{rightSlot}</div> : null}
+          {rightSlot ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>{rightSlot}</div>
+          ) : null}
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <IconLink to="/scenes" label="Scenes" title="Scenes">
-            🎬
+        {/* Right: Nav cluster (never shrink) */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+          <IconLink to="/home" label="Home" title="Home">
+            ⌂
           </IconLink>
-          <IconLink to="/tools" label="Tools" title="Tools">
-            🧰
+
+          <IconLink to="/settings" label="Settings" title="Settings">
+            ⚙️
           </IconLink>
-          <IconLink to="/journal" label="Journal" title="Journal">
-            📓
-          </IconLink>
+
           <IconLink to="/profile" label="Profile" title="Profile">
             👤
           </IconLink>
-          <IconButton onClick={onSignOut} label="Sign out" title="Sign out">
-            ⎋
-          </IconButton>
+
+          <button
+            onClick={onSignOut}
+            style={{
+              padding: "10px 12px",
+              height: TOPBAR_ICON_SIZE,
+              borderRadius: 12,
+              border: "1px solid rgba(255,255,255,0.18)",
+              background: "rgba(255,255,255,0.06)",
+              color: "#f3f3f7",
+              cursor: "pointer",
+              fontSize: 12,
+              fontWeight: 650,
+              lineHeight: 1,
+              whiteSpace: "nowrap",
+              flexShrink: 0,
+            }}
+          >
+            Sign out
+          </button>
         </div>
       </div>
     </div>
@@ -116,15 +158,13 @@ export function Chip({ children }) {
     <span
       style={{
         display: "inline-flex",
-        alignItems: "center",
-        gap: 6,
-        padding: "6px 10px",
+        padding: "4px 8px",
         borderRadius: 999,
         border: "1px solid rgba(255,255,255,0.12)",
-        background: "rgba(255,255,255,0.06)",
+        background: "rgba(255,255,255,0.04)",
         fontSize: 12,
-        fontWeight: 800,
         opacity: 0.9,
+        whiteSpace: "nowrap",
       }}
     >
       {children}
@@ -132,44 +172,93 @@ export function Chip({ children }) {
   );
 }
 
-export function SmallButton({ children, onClick, disabled, title }) {
+export function SmallButton({
+  children,
+  onClick,
+  disabled,
+  title,
+  tone = "neutral",
+  asLink = false,
+  to,
+}) {
+  const toneStyle =
+    tone === "danger"
+      ? {
+          border: "1px solid rgba(255,80,80,0.25)",
+          background: disabled ? "rgba(255,80,80,0.06)" : "rgba(255,80,80,0.10)",
+        }
+      : {
+          border: "1px solid rgba(255,255,255,0.14)",
+          background: disabled ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.08)",
+        };
+
+  const baseStyle = {
+    padding: "8px 10px",
+    borderRadius: 10,
+    color: "#f3f3f7",
+    cursor: disabled ? "not-allowed" : "pointer",
+    fontSize: 12,
+    fontWeight: 700,
+    opacity: disabled ? 0.55 : 1,
+    textDecoration: "none",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    ...toneStyle,
+  };
+
+  if (asLink) {
+    return (
+      <Link
+        to={to}
+        title={title}
+        style={baseStyle}
+        aria-disabled={disabled ? "true" : "false"}
+        onClick={(e) => {
+          if (disabled) e.preventDefault();
+        }}
+      >
+        {children}
+      </Link>
+    );
+  }
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      style={{
-        padding: "10px 12px",
-        borderRadius: 12,
-        border: "1px solid rgba(255,255,255,0.18)",
-        background: disabled ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.08)",
-        color: "inherit",
-        fontWeight: 900,
-        cursor: disabled ? "not-allowed" : "pointer",
-      }}
-    >
+    <button onClick={onClick} disabled={disabled} title={title} style={baseStyle}>
       {children}
     </button>
   );
 }
 
-export function Card({ children, onClick, title }) {
+export function Card({ children, onClick, asLink, to }) {
+  const base = {
+    padding: 12,
+    borderRadius: 14,
+    border: "1px solid rgba(255,255,255,0.10)",
+    background: "rgba(255,255,255,0.03)",
+  };
+
+  if (asLink) {
+    return (
+      <Link
+        to={to}
+        style={{
+          ...base,
+          display: "block",
+          color: "inherit",
+          textDecoration: "none",
+        }}
+      >
+        {children}
+      </Link>
+    );
+  }
+
   return (
     <div
-      role={onClick ? "button" : undefined}
-      tabIndex={onClick ? 0 : undefined}
-      title={title}
       onClick={onClick}
-      onKeyDown={(e) => {
-        if (!onClick) return;
-        if (e.key === "Enter" || e.key === " ") onClick();
-      }}
       style={{
-        borderRadius: 16,
-        border: "1px solid rgba(255,255,255,0.10)",
-        background: "rgba(255,255,255,0.04)",
-        padding: 12,
+        ...base,
         cursor: onClick ? "pointer" : "default",
       }}
     >
@@ -179,46 +268,42 @@ export function Card({ children, onClick, title }) {
 }
 
 export function FieldLabel({ children }) {
-  return (
-    <div style={{ fontSize: 12, fontWeight: 900, opacity: 0.75, marginBottom: 6 }}>{children}</div>
-  );
+  return <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>{children}</div>;
 }
 
-export function TextInput({ value, onChange, placeholder, disabled }) {
+export function TextInput({ value, onChange, placeholder }) {
   return (
     <input
       value={value}
-      onChange={onChange}
       placeholder={placeholder}
-      disabled={disabled}
+      onChange={(e) => onChange(e.target.value)}
       style={{
         width: "100%",
-        padding: "10px 12px",
+        padding: "11px 12px",
         borderRadius: 12,
-        border: "1px solid rgba(255,255,255,0.12)",
-        background: "rgba(0,0,0,0.20)",
-        color: "inherit",
+        border: "1px solid rgba(255,255,255,0.14)",
+        background: "rgba(255,255,255,0.04)",
+        color: "#f3f3f7",
         outline: "none",
       }}
     />
   );
 }
 
-export function TextArea({ value, onChange, placeholder, disabled, rows = 5 }) {
+export function TextArea({ value, onChange, placeholder, rows = 4 }) {
   return (
     <textarea
       value={value}
-      onChange={onChange}
       placeholder={placeholder}
-      disabled={disabled}
+      onChange={(e) => onChange(e.target.value)}
       rows={rows}
       style={{
         width: "100%",
-        padding: "10px 12px",
+        padding: "11px 12px",
         borderRadius: 12,
-        border: "1px solid rgba(255,255,255,0.12)",
-        background: "rgba(0,0,0,0.20)",
-        color: "inherit",
+        border: "1px solid rgba(255,255,255,0.14)",
+        background: "rgba(255,255,255,0.04)",
+        color: "#f3f3f7",
         outline: "none",
         resize: "vertical",
       }}
