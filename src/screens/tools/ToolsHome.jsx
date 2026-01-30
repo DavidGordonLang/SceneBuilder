@@ -40,6 +40,7 @@ export default function ToolsHome() {
     busy,
     err,
     ownedTools,
+    vault,
     refresh,
     createNew,
     updateExisting,
@@ -146,13 +147,12 @@ export default function ToolsHome() {
         </Card>
       ) : null}
 
-      {loading ? (
-        <div style={{ opacity: 0.7 }}>Loading…</div>
-      ) : null}
+      {loading ? <div style={{ opacity: 0.7 }}>Loading…</div> : null}
 
       {editing ? (
         <ToolUserEditor
           toolUser={editing?.__mode === "NEW" ? null : editing}
+          vault={vault}
           busy={busy}
           onCancel={() => setEditing(null)}
           onSave={async (payload) => {
@@ -167,9 +167,7 @@ export default function ToolsHome() {
       ) : null}
 
       {!loading && !grouped.length ? (
-        <div style={{ opacity: 0.7, fontSize: 13 }}>
-          No owned tools yet. Tap “Add” to create one.
-        </div>
+        <div style={{ opacity: 0.7, fontSize: 13 }}>No owned tools yet. Tap “Add” to create one.</div>
       ) : null}
 
       {!loading && grouped.length ? (
