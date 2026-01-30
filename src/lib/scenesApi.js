@@ -29,8 +29,7 @@ function normalizeBlocks(input) {
   return arr
     .map((b, idx) => ({
       id: b?.id || null,
-      sort_order:
-        typeof b?.sort_order === "number" ? b.sort_order : (idx + 1) * 10,
+      sort_order: typeof b?.sort_order === "number" ? b.sort_order : (idx + 1) * 10,
       title: String(b?.title || "").trim() || `Stage ${idx + 1}`,
       body: String(b?.body || ""),
       duration_minutes:
@@ -65,9 +64,7 @@ export async function ensureDefaultSceneBlocks(sceneId, { seedText = "" } = {}) 
   if (seedText && typeof seedText === "string") {
     const seed = seedText.trim();
     if (seed) {
-      const targetIdx = DEFAULT_SCENE_BLOCKS.findIndex(
-        (x) => x.key === "planning_design"
-      );
+      const targetIdx = DEFAULT_SCENE_BLOCKS.findIndex((x) => x.key === "planning_design");
       const i = targetIdx >= 0 ? targetIdx : 2;
       rows[i].body = seed;
     }
@@ -84,10 +81,7 @@ export async function replaceSceneBlocks(sceneId, blocks) {
 
   // Replace strategy = simple + predictable (no drift).
   // Delete then insert. (We can optimize later.)
-  const { error: delErr } = await supabase
-    .from("scene_blocks")
-    .delete()
-    .eq("scene_id", sceneId);
+  const { error: delErr } = await supabase.from("scene_blocks").delete().eq("scene_id", sceneId);
   if (delErr) throw delErr;
 
   if (!normalized.length) return 0;
@@ -154,9 +148,7 @@ export async function fetchSceneById(sceneId) {
   // 2) Fetch blocks separately (avoid schema-cache relationship issues)
   const { data: blocks, error: blocksErr } = await supabase
     .from("scene_blocks")
-    .select(
-      "id,scene_id,sort_order,title,body,duration_minutes,created_at,updated_at"
-    )
+    .select("id,scene_id,sort_order,title,body,duration_minutes,created_at,updated_at")
     .eq("scene_id", sceneId)
     .order("sort_order", { ascending: true });
 
@@ -167,10 +159,9 @@ export async function fetchSceneById(sceneId) {
 }
 
 export async function fetchParticipants() {
-  const { data, error } = await supabase
-    .from("participants")
-    .select("*")
-    .order("created_at", { ascending: false });
+  const { data, error } = await supabase.from("participants").select("*").order("created_at", {
+    ascending: false,
+  });
 
   if (error) throw error;
   return data ?? [];
@@ -281,10 +272,7 @@ export async function updateScene(
 
   // replace participants
   {
-    const { error: delErr } = await supabase
-      .from("scene_participants")
-      .delete()
-      .eq("scene_id", sceneId);
+    const { error: delErr } = await supabase.from("scene_participants").delete().eq("scene_id", sceneId);
     if (delErr) throw delErr;
 
     if (Array.isArray(participantIds) && participantIds.length) {
@@ -299,10 +287,7 @@ export async function updateScene(
 
   // replace tools
   {
-    const { error: delErr } = await supabase
-      .from("scene_tools")
-      .delete()
-      .eq("scene_id", sceneId);
+    const { error: delErr } = await supabase.from("scene_tools").delete().eq("scene_id", sceneId);
     if (delErr) throw delErr;
 
     if (Array.isArray(toolUserIds) && toolUserIds.length) {
@@ -317,7 +302,6 @@ export async function updateScene(
 
   // replace blocks if provided (UI will provide them once we swap the editor)
   if (Array.isArray(blocks)) {
-    // If the UI sends an empty array, that’s intentional (though we probably won’t allow it).
     await replaceSceneBlocks(sceneId, blocks);
   }
 
@@ -331,11 +315,28 @@ export async function updateScenePlanningStage(sceneId, planningStage) {
   const next = String(planningStage || "").trim();
   if (!next) throw new Error("planning_stage is required.");
 
-  const { error } = await supabase
-    .from("scenes")
-    .update({ planning_stage: next })
-    .eq("id", sceneId);
+  const { error } = await supabase.from("scenes").update({ planning_stage: next }).eq("id", sceneId);
 
   if (error) throw error;
+  return true;
+}
+
+/**
+ * ✅ Minimal add: ScenesHome expects this export.
+ * Deletes child rows defensively (in case FK isn't ON DELETE CASCADE), then deletes the scene.
+ */
+export async function deleteScene(sceneId) {
+  const id = String(sceneId || "").trim();
+  if (!id) throw new Error("Missing scene id.");
+
+  const childTables = ["scene_tools", "scene_participants", "scene_blocks"];
+  for (const t of childTables) {
+    const { error } = await supabase.from(t).delete().eq("scene_id", id);
+    if (error) throw error;
+  }
+
+  const { error: sceneErr } = await supabase.from("scenes").delete().eq("id", id);
+  if (sceneErr) throw sceneErr;
+
   return true;
 }

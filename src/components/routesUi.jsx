@@ -29,7 +29,8 @@ function IconLink({ to, label, title, children }) {
   );
 }
 
-function IconButton({ onClick, label, title, children }) {
+// ✅ ONLY CHANGE: export this so ScenesHome can import it
+export function IconButton({ onClick, label, title, children }) {
   return (
     <button
       type="button"

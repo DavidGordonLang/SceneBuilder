@@ -1,8 +1,8 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
-import { SmallButton, Chip, Card } from "../../components/routesUi";
+import React, { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import Page from "../../components/Page";
-import { useToast } from "../../ui/ToastContext.jsx";
+import { Card, SmallButton, IconButton } from "../../components/routesUi";
+import { formatDate } from "../../lib/sceneHelpers";
 import {
   createJournalEntry,
   deleteJournalEntry,
@@ -10,661 +10,440 @@ import {
   updateJournalEntry,
 } from "../../lib/journalApi";
 
-/* ---------------- module cache to reduce jank ----------------
-   Keeps the last loaded entries across unmount/remount (tab switches).
-   Enables silent refresh without flipping the screen into Loading…
-*/
-let journalHomeCache = {
-  entriesByUserId: {}, // { [userId]: entries[] }
-  tsByUserId: {}, // { [userId]: number }
-};
+/* ---------------- helpers ---------------- */
 
-const ENTRY_TYPES = [
-  { value: "reflection", label: "Reflection" },
-  { value: "planning", label: "Planning" },
-  { value: "aftercare", label: "Aftercare" },
-  { value: "note", label: "Note" },
-];
-
-function formatDate(ts) {
-  try {
-    const d = new Date(ts);
-    return d.toLocaleString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return "";
+function groupByDay(entries) {
+  const map = new Map();
+  for (const e of entries) {
+    const d = e?.created_at ? new Date(e.created_at) : null;
+    const key = d && !Number.isNaN(d.getTime()) ? d.toDateString() : "Unknown date";
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(e);
   }
+  return Array.from(map.entries()).map(([dayKey, list]) => ({
+    dayKey,
+    list: list.slice().sort((a, b) => new Date(b.created_at) - new Date(a.created_at)),
+  }));
 }
 
-function startOfDay(d) {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x;
+function safePreview(text, max = 160) {
+  const s = String(text || "").trim();
+  if (!s) return "";
+  if (s.length <= max) return s;
+  return `${s.slice(0, max).trim()}…`;
 }
 
-function dayKeyFromTs(ts) {
-  const d = new Date(ts);
-  const sod = startOfDay(d);
-  return String(sod.getTime());
-}
+/* ---------------- editor ---------------- */
 
-function dayHeadingLabel(ts) {
-  try {
-    const d = new Date(ts);
-    const sod = startOfDay(d);
-    const now = new Date();
-    const today = startOfDay(now);
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
-
-    if (sod.getTime() === today.getTime()) return "Today";
-    if (sod.getTime() === yesterday.getTime()) return "Yesterday";
-
-    return sod.toLocaleDateString(undefined, {
-      weekday: "short",
-      year: "numeric",
-      month: "short",
-      day: "2-digit",
-    });
-  } catch {
-    return "";
-  }
-}
-
-function Input(props) {
-  return (
-    <input
-      {...props}
-      style={{
-        width: "100%",
-        padding: "10px 12px",
-        borderRadius: 12,
-        border: "1px solid rgba(255,255,255,0.12)",
-        background: "rgba(255,255,255,0.04)",
-        color: "#f3f3f7",
-        outline: "none",
-        fontSize: 14,
-      }}
-    />
-  );
-}
-
-function Select(props) {
-  return (
-    <select
-      {...props}
-      style={{
-        padding: "10px 12px",
-        borderRadius: 12,
-        border: "1px solid rgba(255,255,255,0.12)",
-        background: "rgba(255,255,255,0.04)",
-        color: "#f3f3f7",
-        outline: "none",
-        fontSize: 14,
-        appearance: "none",
-      }}
-    />
-  );
-}
-
-function TextArea(props) {
-  return (
-    <textarea
-      {...props}
-      style={{
-        width: "100%",
-        padding: "12px 12px",
-        borderRadius: 12,
-        border: "1px solid rgba(255,255,255,0.12)",
-        background: "rgba(255,255,255,0.04)",
-        color: "#f3f3f7",
-        outline: "none",
-        fontSize: 14,
-        lineHeight: 1.5,
-        resize: "vertical",
-        minHeight: 170,
-      }}
-    />
-  );
-}
-
-function Divider() {
-  return <div style={{ height: 1, background: "rgba(255,255,255,0.08)", margin: "10px 0" }} />;
-}
-
-function EntryEditor({ initial, onCancel, onSave, saving }) {
-  const [entryType, setEntryType] = useState(initial?.entry_type || "reflection");
+function EntryEditor({ mode, initial, busy, onCancel, onSave }) {
   const [title, setTitle] = useState(initial?.title || "");
+  const [kind, setKind] = useState(initial?.kind || "reflection");
   const [body, setBody] = useState(initial?.body || "");
-  const [sceneId, setSceneId] = useState(initial?.scene_id || "");
 
-  const canSave = !!body.trim();
+  useEffect(() => {
+    setTitle(initial?.title || "");
+    setKind(initial?.kind || "reflection");
+    setBody(initial?.body || "");
+  }, [initial?.title, initial?.kind, initial?.body]);
+
+  const canSave = !!title.trim() && !!body.trim() && !busy;
 
   return (
     <Card>
-      <div style={{ display: "grid", gap: 12 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            <div style={{ fontWeight: 900, letterSpacing: 0.2 }}>
-              {initial?.id ? "Edit entry" : "New entry"}
-            </div>
-            <Chip>{ENTRY_TYPES.find((t) => t.value === entryType)?.label || entryType}</Chip>
-          </div>
+      <div style={{ display: "grid", gap: 10 }}>
+        <div style={{ fontWeight: 900 }}>{mode === "edit" ? "Edit entry" : "New entry"}</div>
 
-          <div style={{ display: "flex", gap: 8 }}>
-            <SmallButton disabled={saving} onClick={onCancel}>
-              Close
-            </SmallButton>
-            <SmallButton
-              disabled={saving || !canSave}
-              onClick={() =>
-                onSave({
-                  entry_type: entryType,
-                  title,
-                  body,
-                  scene_id: sceneId.trim() ? sceneId.trim() : null,
-                })
-              }
-            >
-              {saving ? "Saving…" : "Save"}
-            </SmallButton>
-          </div>
-        </div>
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="Title"
+          disabled={busy}
+          style={{
+            width: "100%",
+            height: 44,
+            borderRadius: 12,
+            border: "1px solid rgba(255,255,255,0.12)",
+            background: "rgba(255,255,255,0.04)",
+            color: "#f3f3f7",
+            padding: "0 12px",
+            outline: "none",
+            opacity: busy ? 0.7 : 1,
+            fontSize: 14,
+          }}
+        />
 
-        <Divider />
+        <select
+          value={kind}
+          onChange={(e) => setKind(e.target.value)}
+          disabled={busy}
+          style={{
+            width: "100%",
+            height: 44,
+            borderRadius: 12,
+            border: "1px solid rgba(255,255,255,0.12)",
+            background: "rgba(255,255,255,0.04)",
+            color: "#f3f3f7",
+            padding: "0 12px",
+            outline: "none",
+            opacity: busy ? 0.7 : 1,
+            fontSize: 14,
+          }}
+        >
+          <option value="reflection">Reflection</option>
+          <option value="planning">Planning</option>
+          <option value="note">Note</option>
+        </select>
 
-        <div style={{ display: "grid", gap: 10 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "160px 1fr", gap: 10 }}>
-            <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 800 }}>Entry type</div>
-            <Select value={entryType} onChange={(e) => setEntryType(e.target.value)}>
-              {ENTRY_TYPES.map((t) => (
-                <option key={t.value} value={t.value}>
-                  {t.label}
-                </option>
-              ))}
-            </Select>
+        <textarea
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          placeholder="Write your entry…"
+          disabled={busy}
+          style={{
+            width: "100%",
+            minHeight: 160,
+            borderRadius: 12,
+            border: "1px solid rgba(255,255,255,0.12)",
+            background: "rgba(255,255,255,0.04)",
+            color: "#f3f3f7",
+            padding: "10px 12px",
+            outline: "none",
+            opacity: busy ? 0.7 : 1,
+            fontSize: 14,
+            lineHeight: 1.5,
+            resize: "vertical",
+          }}
+        />
 
-            <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 800 }}>Title</div>
-            <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Optional title" />
-
-            <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 800 }}>Linked scene</div>
-            <Input
-              value={sceneId}
-              onChange={(e) => setSceneId(e.target.value)}
-              placeholder="Scene ID (optional for now)"
-            />
-          </div>
-
-          <TextArea placeholder="Write your entry…" value={body} onChange={(e) => setBody(e.target.value)} />
+        <div style={{ display: "flex", gap: 10 }}>
+          <SmallButton disabled={busy} onClick={onCancel}>
+            Cancel
+          </SmallButton>
+          <SmallButton
+            disabled={!canSave}
+            onClick={() => onSave({ title: title.trim(), kind, body: body.trim() })}
+            title={!title.trim() ? "Title is required" : !body.trim() ? "Body is required" : "Save"}
+          >
+            {busy ? "Saving…" : "Save"}
+          </SmallButton>
         </div>
       </div>
     </Card>
   );
 }
 
-function KebabButton({ onClick, title = "More actions" }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={title}
-      aria-label={title}
-      style={{
-        border: "none",
-        background: "transparent",
-        color: "rgba(243,243,247,0.85)",
-        cursor: "pointer",
-        padding: 6,
-        margin: -6, // keeps alignment tight without expanding layout
-        lineHeight: 1,
-        fontSize: 20,
-        fontWeight: 900,
-      }}
-    >
-      ⋯
-    </button>
-  );
-}
+/* ---------------- main ---------------- */
 
-function KebabMenu({ onEdit, onDelete }) {
-  return (
-    <div
-      role="menu"
-      style={{
-        position: "absolute",
-        top: 40,
-        right: 10,
-        zIndex: 50,
-        minWidth: 160,
-        borderRadius: 12,
-        border: "1px solid rgba(255,255,255,0.12)",
-        background: "rgba(10,10,12,0.96)",
-        boxShadow: "0 10px 30px rgba(0,0,0,0.45)",
-        overflow: "hidden",
-      }}
-      onClick={(e) => e.stopPropagation()}
-    >
-      <button
-        type="button"
-        role="menuitem"
-        onClick={onEdit}
-        style={{
-          width: "100%",
-          textAlign: "left",
-          padding: "10px 12px",
-          border: "none",
-          background: "transparent",
-          color: "#f3f3f7",
-          cursor: "pointer",
-          fontSize: 13,
-          fontWeight: 750,
-        }}
-      >
-        Edit
-      </button>
-
-      <div style={{ height: 1, background: "rgba(255,255,255,0.08)" }} />
-
-      <button
-        type="button"
-        role="menuitem"
-        onClick={onDelete}
-        style={{
-          width: "100%",
-          textAlign: "left",
-          padding: "10px 12px",
-          border: "none",
-          background: "transparent",
-          color: "#ffb4b4",
-          cursor: "pointer",
-          fontSize: 13,
-          fontWeight: 850,
-        }}
-      >
-        Delete
-      </button>
-    </div>
-  );
-}
-
-export default function JournalHome({ supabase, session }) {
-  const { showToast } = useToast();
+export default function JournalHome() {
   const navigate = useNavigate();
-  const location = useLocation();
-  const userId = session?.user?.id;
 
-  const cachedForUser = userId ? journalHomeCache.entriesByUserId?.[userId] : null;
-
-  const [loading, setLoading] = useState(() => !(userId && Array.isArray(cachedForUser)));
-  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [entries, setEntries] = useState(() => (Array.isArray(cachedForUser) ? cachedForUser : []));
+
+  const [entries, setEntries] = useState([]);
   const [search, setSearch] = useState("");
-  const [editing, setEditing] = useState(null);
-  const handledEditStateRef = useRef(false);
 
-  // Kebab state
+  const [editing, setEditing] = useState(null); // { mode: "new"|"edit", entry? }
   const [menuOpenForId, setMenuOpenForId] = useState(null);
-  const menuRootRef = useRef(null);
+  const [openEntryId, setOpenEntryId] = useState(null);
 
-  function persistCache(nextEntries) {
-    if (!userId) return;
-    journalHomeCache.entriesByUserId[userId] = Array.isArray(nextEntries) ? nextEntries : [];
-    journalHomeCache.tsByUserId[userId] = Date.now();
-  }
-
-  async function load(opts = {}) {
-    if (!userId) return;
-    const silent = !!opts.silent;
-
-    const hasExisting = Array.isArray(entries) && entries.length > 0;
-    if (!silent || !hasExisting) setLoading(true);
-
+  async function load() {
+    setLoading(true);
     setErr("");
     try {
-      const data = await fetchJournalEntries({ supabase, userId, limit: 80 });
-      const next = Array.isArray(data) ? data : [];
-      setEntries(next);
-      persistCache(next);
+      const list = await fetchJournalEntries();
+      setEntries(list || []);
     } catch (e) {
-      setErr(e?.message || "Failed to load journal entries.");
-      setEntries([]);
-      persistCache([]);
+      setErr(e?.message || "Failed to load journal.");
     } finally {
-      if (!silent || !hasExisting) setLoading(false);
+      setLoading(false);
     }
   }
 
   useEffect(() => {
-    if (!userId) return;
-
-    // Seed from cache on user change, then refresh silently.
-    const cached = journalHomeCache.entriesByUserId?.[userId];
-    if (Array.isArray(cached)) {
-      setEntries(cached);
-      setLoading(false);
-      load({ silent: true });
-    } else {
-      load();
-    }
+    load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId]);
+  }, []);
 
-  // Handle "return from entry view -> open editor" flow.
-  useEffect(() => {
-    const editId = location?.state?.editId;
-    if (!editId || handledEditStateRef.current) return;
-
-    handledEditStateRef.current = true;
-
-    (async () => {
-      // Ensure we have the latest list for lookup.
-      let list = entries;
-      if (!list || list.length === 0) {
-        await load();
-        list = entries;
-      }
-
-      // Fallback: direct fetch if we still didn't find it.
-      let found = (list || []).find((e) => e.id === editId);
-
-      if (!found) {
-        try {
-          const fresh = await fetchJournalEntries({ supabase, userId, limit: 200 });
-          found = (fresh || []).find((e) => e.id === editId) || null;
-          if (Array.isArray(fresh) && fresh.length) {
-            setEntries(fresh);
-            persistCache(fresh);
-          }
-        } catch {
-          // ignore; we'll open new editor as fallback below
-        }
-      }
-
-      setEditing(found || { mode: "new" });
-      navigate("/journal", { replace: true, state: {} });
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location?.state]);
-
-  // Close kebab on outside click / escape
-  useEffect(() => {
-    if (!menuOpenForId) return;
-
-    function onDocDown(e) {
-      if (menuRootRef.current && menuRootRef.current.contains(e.target)) return;
-      setMenuOpenForId(null);
-    }
-
-    function onKey(e) {
-      if (e.key === "Escape") setMenuOpenForId(null);
-    }
-
-    document.addEventListener("mousedown", onDocDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDocDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [menuOpenForId]);
-
-  const sorted = useMemo(() => {
-    const list = Array.isArray(entries) ? entries : [];
-    return [...list].sort((a, b) => {
-      const ta = new Date(a?.created_at || 0).getTime();
-      const tb = new Date(b?.created_at || 0).getTime();
-      return tb - ta;
-    });
-  }, [entries]);
+  function toggleEntry(id) {
+    setOpenEntryId((cur) => (cur === id ? null : id));
+  }
 
   const filtered = useMemo(() => {
-    const q = (search || "").trim().toLowerCase();
-    if (!q) return sorted;
-
-    return sorted.filter((e) => {
-      const t = (e.title || "").toLowerCase();
-      const b = (e.body || "").toLowerCase();
-      const ty = (e.entry_type || "").toLowerCase();
-      return t.includes(q) || b.includes(q) || ty.includes(q);
+    const q = String(search || "").trim().toLowerCase();
+    if (!q) return entries;
+    return (entries || []).filter((e) => {
+      const t = `${e?.title || ""} ${e?.body || ""} ${e?.kind || ""}`.toLowerCase();
+      return t.includes(q);
     });
-  }, [sorted, search]);
+  }, [entries, search]);
 
-  const grouped = useMemo(() => {
-    const buckets = new Map(); // dayKey -> { label, items }
-    for (const e of filtered) {
-      const ts = e?.created_at;
-      if (!ts) continue;
-      const key = dayKeyFromTs(ts);
-      if (!buckets.has(key)) {
-        buckets.set(key, { label: dayHeadingLabel(ts), items: [] });
-      }
-      buckets.get(key).items.push(e);
-    }
-
-    const keys = Array.from(buckets.keys()).sort((a, b) => Number(b) - Number(a));
-    return keys.map((k) => ({ dayKey: k, label: buckets.get(k).label, items: buckets.get(k).items }));
-  }, [filtered]);
+  const grouped = useMemo(() => groupByDay(filtered || []), [filtered]);
 
   async function handleSave(payload) {
-    if (!userId) return;
-    setSaving(true);
+    setBusy(true);
     setErr("");
     try {
-      if (editing?.id) {
-        await updateJournalEntry({ supabase, id: editing.id, patch: payload });
-        showToast?.("Saved");
+      if (editing?.mode === "edit" && editing?.entry?.id) {
+        await updateJournalEntry(editing.entry.id, payload);
       } else {
-        await createJournalEntry({ supabase, userId, entry: payload });
-        showToast?.("Created");
+        await createJournalEntry(payload);
       }
       setEditing(null);
-      await load({ silent: true });
+      await load();
     } catch (e) {
-      setErr(e?.message || "Save failed.");
+      setErr(e?.message || "Failed to save.");
     } finally {
-      setSaving(false);
+      setBusy(false);
     }
   }
 
-  async function handleDelete(id) {
+  async function handleDelete(entryId) {
     const ok = window.confirm("Delete this entry?");
     if (!ok) return;
 
+    setBusy(true);
     setErr("");
     try {
-      await deleteJournalEntry({ supabase, id });
-      showToast?.("Deleted");
-      await load({ silent: true });
+      await deleteJournalEntry(entryId);
+      setMenuOpenForId(null);
+      if (openEntryId === entryId) setOpenEntryId(null);
+      await load();
     } catch (e) {
-      setErr(e?.message || "Delete failed.");
+      setErr(e?.message || "Failed to delete.");
+    } finally {
+      setBusy(false);
     }
-  }
-
-  function openEntry(id) {
-    navigate(`/journal/${id}`);
-  }
-
-  function toggleMenu(id) {
-    setMenuOpenForId((cur) => (cur === id ? null : id));
-  }
-
-  function handleMenuEdit(entry) {
-    setMenuOpenForId(null);
-    setEditing(entry);
-  }
-
-  async function handleMenuDelete(entry) {
-    setMenuOpenForId(null);
-    await handleDelete(entry.id);
   }
 
   return (
     <div>
-      <Page style={{ display: "grid", gap: 14 }}>
-        {/* Contextual actions row */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-          <div style={{ display: "flex", gap: 10 }}>
-            <SmallButton onClick={() => setEditing({ mode: "new" })} disabled={saving}>
-              New entry
-            </SmallButton>
-            <SmallButton onClick={() => load()} disabled={loading || saving}>
-              {loading ? "Loading…" : "Refresh"}
-            </SmallButton>
-          </div>
-          <div style={{ fontSize: 12, opacity: 0.7 }}>{loading ? "Loading…" : `${entries.length} entries`}</div>
+      <Page
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          marginBottom: 14,
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <SmallButton disabled={busy} onClick={() => setEditing({ mode: "new" })}>
+            New entry
+          </SmallButton>
+          <SmallButton disabled={busy} onClick={load}>
+            Refresh
+          </SmallButton>
         </div>
 
-        {err ? (
-          <Card>
-            <div
-              style={{
-                padding: 12,
-                borderRadius: 12,
-                border: "1px solid rgba(255,80,80,0.30)",
-                background: "rgba(255,80,80,0.08)",
-                lineHeight: 1.4,
-                fontSize: 13,
-              }}
-            >
-              {err}
-            </div>
-          </Card>
-        ) : null}
+        <div style={{ opacity: 0.7, fontWeight: 800 }}>{filtered.length} entries</div>
+      </Page>
 
-        <Card>
-          <Input placeholder="Search entries…" value={search} onChange={(e) => setSearch(e.target.value)} />
-        </Card>
-
-        {editing ? (
-          <EntryEditor
-            initial={editing?.id ? editing : { entry_type: "reflection", title: "", body: "" }}
-            saving={saving}
-            onCancel={() => setEditing(null)}
-            onSave={handleSave}
-          />
-        ) : null}
-
-        {/* Timeline */}
-        <div style={{ display: "grid", gap: 14 }}>
-          {!loading && filtered.length === 0 ? (
+      <Page>
+        <div style={{ display: "grid", gap: 12 }}>
+          {err ? (
             <Card>
-              <div style={{ opacity: 0.85, lineHeight: 1.4 }}>
-                No entries yet.
-                <div style={{ marginTop: 10 }}>
-                  <SmallButton onClick={() => setEditing({ mode: "new" })}>Create your first entry</SmallButton>
-                </div>
+              <div
+                style={{
+                  padding: 12,
+                  borderRadius: 12,
+                  border: "1px solid rgba(255,80,80,0.30)",
+                  background: "rgba(255,80,80,0.08)",
+                  lineHeight: 1.4,
+                  fontSize: 13,
+                }}
+              >
+                {err}
               </div>
             </Card>
           ) : null}
 
-          {grouped.map((group) => (
-            <div key={group.dayKey} style={{ display: "grid", gap: 10 }}>
-              <div
-                style={{
-                  padding: "4px 2px",
-                  fontSize: 12,
-                  fontWeight: 900,
-                  letterSpacing: 0.2,
-                  opacity: 0.75,
-                }}
-              >
-                {group.label}
-              </div>
+          <Card>
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search entries…"
+              style={{
+                width: "100%",
+                height: 44,
+                borderRadius: 12,
+                border: "1px solid rgba(255,255,255,0.12)",
+                background: "rgba(255,255,255,0.04)",
+                color: "#f3f3f7",
+                padding: "0 12px",
+                outline: "none",
+                fontSize: 14,
+              }}
+            />
+          </Card>
 
-              <div style={{ display: "grid", gap: 10 }}>
-                {group.items.map((e) => {
-                  const typeLabel =
-                    ENTRY_TYPES.find((t) => t.value === e.entry_type)?.label || e.entry_type || "Entry";
-                  const title = e.title?.trim() ? e.title : "Untitled";
-                  const preview =
-                    e.body && e.body.trim() ? (e.body.length > 180 ? `${e.body.slice(0, 180)}…` : e.body) : "";
+          {editing ? (
+            <EntryEditor
+              mode={editing.mode}
+              initial={editing.mode === "edit" ? editing.entry : null}
+              busy={busy}
+              onCancel={() => setEditing(null)}
+              onSave={handleSave}
+            />
+          ) : null}
 
-                  const menuOpen = menuOpenForId === e.id;
+          {loading ? <div style={{ opacity: 0.7 }}>Loading…</div> : null}
 
-                  return (
-                    <div
-                      key={e.id}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => openEntry(e.id)}
-                      onKeyDown={(ev) => {
-                        if (ev.key === "Enter" || ev.key === " ") openEntry(e.id);
-                      }}
-                      style={{ cursor: "pointer", position: "relative" }}
-                      title="Open entry"
-                      ref={menuOpen ? menuRootRef : null}
-                    >
-                      <Card>
-                        <div style={{ display: "grid", gap: 8 }}>
-                          <div
-                            style={{
-                              display: "flex",
-                              justifyContent: "space-between",
-                              gap: 12,
-                              alignItems: "flex-start",
-                            }}
-                          >
-                            <div style={{ minWidth: 0 }}>
-                              <div
-                                style={{
-                                  fontWeight: 900,
-                                  letterSpacing: 0.2,
-                                  whiteSpace: "nowrap",
-                                  overflow: "hidden",
-                                  textOverflow: "ellipsis",
-                                }}
-                              >
-                                {title}
+          {!loading && !grouped.length ? (
+            <div style={{ opacity: 0.7, fontSize: 13 }}>No entries yet.</div>
+          ) : null}
+
+          {!loading && grouped.length ? (
+            <div style={{ display: "grid", gap: 18 }}>
+              {grouped.map((g) => (
+                <div key={g.dayKey} style={{ display: "grid", gap: 10 }}>
+                  <div style={{ fontWeight: 900, opacity: 0.75 }}>
+                    {(() => {
+                      try {
+                        return new Date(g.dayKey).toLocaleDateString(undefined, {
+                          weekday: "short",
+                          year: "numeric",
+                          month: "short",
+                          day: "2-digit",
+                        });
+                      } catch {
+                        return g.dayKey;
+                      }
+                    })()}
+                  </div>
+
+                  <div style={{ display: "grid", gap: 10 }}>
+                    {g.list.map((e) => {
+                      const created = formatDate(e.created_at);
+                      const preview = safePreview(e.body, 180);
+                      const isOpen = openEntryId === e.id;
+
+                      const kindLabel = String(e?.kind || "Reflection");
+                      const kindPretty = kindLabel.charAt(0).toUpperCase() + kindLabel.slice(1);
+
+                      return (
+                        <Card key={e.id} onClick={() => toggleEntry(e.id)} title="Tap to expand/collapse">
+                          <div style={{ display: "grid", gap: 10 }}>
+                            <div
+                              style={{
+                                display: "flex",
+                                justifyContent: "space-between",
+                                gap: 10,
+                                alignItems: "flex-start",
+                              }}
+                            >
+                              <div style={{ minWidth: 0 }}>
+                                <div style={{ fontWeight: 950, fontSize: 16, marginBottom: 6 }}>
+                                  {e.title}
+                                </div>
+
+                                <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                                  <div
+                                    style={{
+                                      fontSize: 12,
+                                      fontWeight: 900,
+                                      padding: "4px 10px",
+                                      borderRadius: 999,
+                                      border: "1px solid rgba(255,255,255,0.12)",
+                                      background: "rgba(255,255,255,0.04)",
+                                      opacity: 0.9,
+                                    }}
+                                  >
+                                    {kindPretty}
+                                  </div>
+
+                                  {created ? (
+                                    <div style={{ fontSize: 12, opacity: 0.65, fontWeight: 800 }}>
+                                      {created}
+                                    </div>
+                                  ) : null}
+                                </div>
                               </div>
 
-                              <div
-                                style={{
-                                  marginTop: 4,
-                                  display: "flex",
-                                  gap: 8,
-                                  flexWrap: "wrap",
-                                  alignItems: "center",
-                                }}
-                              >
-                                <Chip>{typeLabel}</Chip>
-                                <span style={{ fontSize: 12, opacity: 0.65 }}>{formatDate(e.created_at)}</span>
+                              <div style={{ position: "relative", flex: "0 0 auto" }}>
+                                <IconButton
+                                  title="More"
+                                  onClick={(ev) => {
+                                    ev?.stopPropagation?.();
+                                    setMenuOpenForId((cur) => (cur === e.id ? null : e.id));
+                                  }}
+                                >
+                                  ⋯
+                                </IconButton>
+
+                                {menuOpenForId === e.id ? (
+                                  <div
+                                    onClick={(ev) => ev?.stopPropagation?.()}
+                                    style={{
+                                      position: "absolute",
+                                      right: 0,
+                                      top: 34,
+                                      zIndex: 20,
+                                      width: 180,
+                                      borderRadius: 14,
+                                      border: "1px solid rgba(255,255,255,0.12)",
+                                      background: "rgba(20,20,26,0.98)",
+                                      boxShadow: "0 10px 30px rgba(0,0,0,0.4)",
+                                      overflow: "hidden",
+                                    }}
+                                  >
+                                    <button
+                                      disabled={busy}
+                                      onClick={() => {
+                                        setMenuOpenForId(null);
+                                        setEditing({ mode: "edit", entry: e });
+                                      }}
+                                      style={{
+                                        width: "100%",
+                                        textAlign: "left",
+                                        padding: "10px 12px",
+                                        background: "transparent",
+                                        border: "none",
+                                        color: "#f3f3f7",
+                                        cursor: busy ? "default" : "pointer",
+                                        fontWeight: 800,
+                                      }}
+                                    >
+                                      Edit
+                                    </button>
+                                    <button
+                                      disabled={busy}
+                                      onClick={() => handleDelete(e.id)}
+                                      style={{
+                                        width: "100%",
+                                        textAlign: "left",
+                                        padding: "10px 12px",
+                                        background: "transparent",
+                                        border: "none",
+                                        color: "#ffb5b5",
+                                        cursor: busy ? "default" : "pointer",
+                                        fontWeight: 900,
+                                      }}
+                                    >
+                                      Delete
+                                    </button>
+                                  </div>
+                                ) : null}
                               </div>
                             </div>
 
-                            <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-                              <div onClick={(ev) => ev.stopPropagation()}>
-                                <KebabButton onClick={() => toggleMenu(e.id)} title="Entry actions" />
+                            {(isOpen ? e.body : preview) ? (
+                              <div style={{ opacity: 0.88, whiteSpace: "pre-wrap", lineHeight: 1.45 }}>
+                                {isOpen ? e.body : preview}
                               </div>
-                            </div>
+                            ) : null}
                           </div>
-
-                          {menuOpen ? (
-                            <KebabMenu onEdit={() => handleMenuEdit(e)} onDelete={() => handleMenuDelete(e)} />
-                          ) : null}
-
-                          {preview ? (
-                            <div style={{ opacity: 0.88, whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{preview}</div>
-                          ) : null}
-
-                          {e.scene_id ? (
-                            <div style={{ fontSize: 12, opacity: 0.65 }}>Linked scene: {e.scene_id}</div>
-                          ) : null}
-                        </div>
-                      </Card>
-                    </div>
-                  );
-                })}
-              </div>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
             </div>
-          ))}
+          ) : null}
         </div>
-
-        <div style={{ height: 24 }} />
       </Page>
     </div>
   );

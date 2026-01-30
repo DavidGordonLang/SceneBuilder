@@ -222,6 +222,65 @@ export function useToolsData() {
     }
   }
 
+  // --- ToolsHome compatibility wrappers (minimal surface) ---
+  // ToolsHome was refactored to expect a slightly different API. We provide stable aliases here
+  // so screens can evolve without breaking builds.
+  async function refresh() {
+    return reload();
+  }
+
+  async function createNew(payload) {
+    const tool_global_id = payload?.tool_global_id;
+    const status = payload?.status || "owned";
+    const instance_label = payload?.instance_label;
+
+    if (!tool_global_id) throw new Error("Missing tool type.");
+
+    setErr("");
+    setBusy(true);
+    try {
+      await addGlobalToolToUser(tool_global_id, status, {
+        instance_label: instance_label ? String(instance_label).trim() : null,
+      });
+      await reload();
+    } catch (e) {
+      setErr(e?.message || "Could not create tool.");
+      throw e;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function updateExisting(toolUserId, payload) {
+    if (!toolUserId) return;
+    setErr("");
+    setBusy(true);
+    try {
+      await updateUserToolInstanceDetails(toolUserId, payload || {});
+      await reload();
+    } catch (e) {
+      setErr(e?.message || "Could not update tool.");
+      throw e;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteExisting(toolUserId) {
+    if (!toolUserId) return;
+    setErr("");
+    setBusy(true);
+    try {
+      await deleteUserTool(toolUserId);
+      await reload();
+    } catch (e) {
+      setErr(e?.message || "Could not delete tool.");
+      throw e;
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return {
     // view state
     tab,
@@ -239,6 +298,13 @@ export function useToolsData() {
     cravingGroups,
     ownedGlobalIds,
     cravingGlobalIds,
+
+    // ToolsHome compatibility aliases
+    ownedTools: owned,
+    refresh,
+    createNew,
+    updateExisting,
+    deleteExisting,
 
     // instance ui state
     draftLabel,

@@ -11,171 +11,117 @@ async function getAuthedUserId() {
 }
 
 function makeSafeFilename(originalName = "photo") {
-  const base = String(originalName || "photo").replace(/[^\w.\-]+/g, "_");
-  const stamp = Date.now();
-  const rand = Math.random().toString(16).slice(2, 10);
-  return `${stamp}-${rand}-${base}`.slice(0, 120);
+  const base = String(originalName || "photo")
+    .trim()
+    .replace(/[^\w.\-]+/g, "_")
+    .replace(/_+/g, "_");
+
+  const parts = base.split(".");
+  const ext = parts.length > 1 ? parts.pop() : "";
+  const stem = parts.join(".") || "photo";
+  const safeExt = ext ? `.${ext}` : "";
+  return `${stem}${safeExt}`;
 }
 
 /**
- * Fetch Tool Vault (global tools).
+ * Vault = global tools table (curated list)
  */
 export async function fetchToolVault() {
   const { data, error } = await supabase
     .from("tools_global")
-    .select("id, name, icon, tags, safety_level, is_active")
-    .eq("is_active", true)
+    .select("*")
     .order("name", { ascending: true });
 
   if (error) throw error;
-  return data ?? [];
+  return data || [];
 }
 
 /**
- * Back-compat: ToolsHome.jsx expects fetchGlobalTools().
+ * Global tools (alias)
  */
 export async function fetchGlobalTools() {
   return fetchToolVault();
 }
 
 /**
- * Fetch user's tools (all statuses).
+ * User tools (tools_user joined with tools_global)
  */
 export async function fetchUserTools() {
+  const uid = await getAuthedUserId();
+
   const { data, error } = await supabase
     .from("tools_user")
     .select(
-      [
-        "id",
-        "user_id",
-        "status",
-        "notes",
-        "tool_global_id",
-        "custom_name",
-        "custom_icon",
-        "tags_override",
-        "instance_label",
-        "photo_path",
-        "created_at",
-        "updated_at",
-        "tools_global(id, name, icon, tags, safety_level)",
-      ].join(", ")
+      `
+      *,
+      tools_global (*)
+    `
     )
+    .eq("user_id", uid)
     .order("created_at", { ascending: false });
 
   if (error) throw error;
-  return data ?? [];
+  return data || [];
 }
 
-/**
- * Back-compat: some screens expect fetchOwnedTools().
- */
 export async function fetchOwnedTools() {
-  const { data, error } = await supabase
-    .from("tools_user")
-    .select(
-      [
-        "id",
-        "user_id",
-        "status",
-        "notes",
-        "tool_global_id",
-        "custom_name",
-        "custom_icon",
-        "tags_override",
-        "instance_label",
-        "photo_path",
-        "created_at",
-        "updated_at",
-        "tools_global(id, name, icon, tags, safety_level)",
-      ].join(", ")
-    )
-    .eq("status", "owned")
-    .order("created_at", { ascending: false });
-
-  if (error) throw error;
-  return data ?? [];
+  const list = await fetchUserTools();
+  return list.filter((t) => t.status === "owned");
 }
 
-/**
- * Fetch one tools_user row.
- */
 export async function fetchToolUserById(toolUserId) {
+  const uid = await getAuthedUserId();
+
   const { data, error } = await supabase
     .from("tools_user")
     .select(
-      [
-        "id",
-        "user_id",
-        "status",
-        "notes",
-        "tool_global_id",
-        "custom_name",
-        "custom_icon",
-        "tags_override",
-        "instance_label",
-        "photo_path",
-        "created_at",
-        "updated_at",
-        "tools_global(id, name, icon, tags, safety_level)",
-      ].join(", ")
+      `
+      *,
+      tools_global (*)
+    `
     )
+    .eq("user_id", uid)
     .eq("id", toolUserId)
-    .single();
+    .maybeSingle();
 
   if (error) throw error;
   return data;
 }
 
 /**
- * Add a global tool to user's drawer.
- * status: 'owned' | 'craving'
+ * NOTE: patched to accept an optional patch so we can set instance_label at insert-time.
+ * Only use for safe fields (e.g. instance_label, photo_path) that belong on tools_user.
  */
-export async function addGlobalToolToUser(toolGlobalId, status) {
+export async function addGlobalToolToUser(toolGlobalId, status, patch = {}) {
+  const safePatch = patch && typeof patch === "object" ? patch : {};
+
   const { error } = await supabase.from("tools_user").insert({
     tool_global_id: toolGlobalId,
     status,
+    ...safePatch,
   });
 
   if (error) throw error;
 }
 
-/**
- * Back-compat: ToolsHome.jsx expects createToolUser(tool_global_id, status).
- */
 export async function createToolUser(toolGlobalId, status = "owned") {
   return addGlobalToolToUser(toolGlobalId, status);
 }
 
-/**
- * Update tool status (e.g. craving → owned).
- */
 export async function updateUserToolStatus(toolUserId, status) {
-  const { error } = await supabase
-    .from("tools_user")
-    .update({ status })
-    .eq("id", toolUserId);
+  const { error } = await supabase.from("tools_user").update({ status }).eq("id", toolUserId);
   if (error) throw error;
 }
 
-/**
- * Remove a tool from user's drawer.
- */
 export async function deleteUserTool(toolUserId) {
   const { error } = await supabase.from("tools_user").delete().eq("id", toolUserId);
   if (error) throw error;
 }
 
-/**
- * Back-compat: ToolsHome.jsx expects deleteToolUser().
- */
 export async function deleteToolUser(toolUserId) {
   return deleteUserTool(toolUserId);
 }
 
-/**
- * Update per-instance details on tools_user (instance_label + photo_path etc.)
- */
 export async function updateUserToolInstanceDetails(toolUserId, patch) {
   const safePatch = {};
 
@@ -204,50 +150,36 @@ export async function updateUserToolInstanceDetails(toolUserId, patch) {
   if (error) throw error;
 }
 
-/**
- * Back-compat: ToolsHome.jsx expects updateToolUser().
- */
 export async function updateToolUser(toolUserId, patch) {
   return updateUserToolInstanceDetails(toolUserId, patch);
 }
 
-/**
- * Get a signed URL for a private tool photo.
- */
 export async function getToolPhotoSignedUrl(photo_path, expiresInSeconds = 60 * 60) {
   const path = String(photo_path || "").trim();
-  if (!path) return null;
+  if (!path) throw new Error("Missing photo path.");
 
   const { data, error } = await supabase.storage
     .from(TOOL_PHOTOS_BUCKET)
     .createSignedUrl(path, expiresInSeconds);
 
   if (error) throw error;
-  return data?.signedUrl || null;
+  return data?.signedUrl || "";
 }
 
-/**
- * Upload a tool photo for a specific tools_user row.
- * Storage path format: <user_id>/<tools_user_id>/<filename>
- */
 export async function uploadToolPhoto(toolUserId, file) {
-  if (!toolUserId) throw new Error("Missing toolUserId.");
+  const uid = await getAuthedUserId();
+
   if (!file) throw new Error("Missing file.");
 
-  const uid = await getAuthedUserId();
-  const filename = makeSafeFilename(file?.name || "photo");
-  const photo_path = `${uid}/${toolUserId}/${filename}`;
+  const safeName = makeSafeFilename(file.name || "photo");
+  const path = `${uid}/${toolUserId}/${Date.now()}_${safeName}`;
 
-  const { error: uploadError } = await supabase.storage
-    .from(TOOL_PHOTOS_BUCKET)
-    .upload(photo_path, file, {
-      upsert: true,
-      cacheControl: "3600",
-      contentType: file?.type || undefined,
-    });
+  const { error: uploadErr } = await supabase.storage.from(TOOL_PHOTOS_BUCKET).upload(path, file, {
+    upsert: true,
+  });
 
-  if (uploadError) throw uploadError;
+  if (uploadErr) throw uploadErr;
 
-  const signedUrl = await getToolPhotoSignedUrl(photo_path);
-  return { photo_path, signedUrl };
+  const signedUrl = await getToolPhotoSignedUrl(path);
+  return { photo_path: path, signedUrl };
 }
