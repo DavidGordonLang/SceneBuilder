@@ -5,6 +5,32 @@ import Page from "../components/Page";
 import { useAvatarUpload } from "../hooks/useAvatarUpload";
 import { useProfile } from "../hooks/useProfile";
 
+/**
+ * Cache signed avatar URLs by storage path.
+ * Avoids re-fetch + flicker every time Profile tab mounts.
+ */
+let avatarSignedUrlCache = {
+  // [path]: { url, expiresAtMs }
+};
+
+function getCachedAvatarUrl(path) {
+  const key = String(path || "").trim();
+  if (!key) return "";
+  const hit = avatarSignedUrlCache[key];
+  if (!hit?.url || !hit?.expiresAtMs) return "";
+  if (Date.now() >= hit.expiresAtMs) return "";
+  return hit.url;
+}
+
+function setCachedAvatarUrl(path, url, ttlSeconds) {
+  const key = String(path || "").trim();
+  if (!key) return;
+  const safeTtl = Number(ttlSeconds) > 0 ? Number(ttlSeconds) : 3600;
+  // shave a little off so we don't ride the exact expiry edge
+  const expiresAtMs = Date.now() + (safeTtl - 30) * 1000;
+  avatarSignedUrlCache[key] = { url: String(url || ""), expiresAtMs };
+}
+
 function Field({ label, children, hint }) {
   return (
     <div style={{ display: "grid", gap: 6 }}>
@@ -89,25 +115,53 @@ export default function ProfileScreen({ session, supabase }) {
     setBio(profile?.bio || "");
   }, [profile?.display_name, profile?.bio]);
 
+  // Signed avatar URL: use cache immediately, refresh only if needed.
   useEffect(() => {
     let cancelled = false;
 
-    async function run() {
-      setSignedAvatarUrl("");
+    async function run(path) {
+      if (!supabase) return;
 
-      const path = profile?.avatar_url;
-      if (!path) return;
+      const cached = getCachedAvatarUrl(path);
+      if (cached) {
+        setSignedAvatarUrl(cached);
+        return;
+      }
 
       try {
-        const { data, error: sErr } = await supabase.storage.from("avatars").createSignedUrl(path, 60 * 60);
+        const ttl = 60 * 60;
+        const { data, error: sErr } = await supabase.storage.from("avatars").createSignedUrl(path, ttl);
         if (sErr) throw sErr;
-        if (!cancelled) setSignedAvatarUrl(data?.signedUrl || "");
+
+        const nextUrl = data?.signedUrl || "";
+        if (!cancelled) {
+          if (nextUrl) {
+            setSignedAvatarUrl(nextUrl);
+            setCachedAvatarUrl(path, nextUrl, ttl);
+          } else {
+            setSignedAvatarUrl("");
+          }
+        }
       } catch (_e) {
-        if (!cancelled) setSignedAvatarUrl("");
+        if (!cancelled) {
+          // Keep whatever we had if possible (prevents flicker on transient failures)
+          const fallback = getCachedAvatarUrl(path);
+          if (fallback) setSignedAvatarUrl(fallback);
+          else setSignedAvatarUrl("");
+        }
       }
     }
 
-    if (supabase && profile?.avatar_url) run();
+    const path = String(profile?.avatar_url || "").trim();
+    if (!path) {
+      setSignedAvatarUrl("");
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    run(path);
+
     return () => {
       cancelled = true;
     };
@@ -178,8 +232,11 @@ export default function ProfileScreen({ session, supabase }) {
       const path = await uploadAvatar(file);
       await updateProfile({ avatar_url: path });
 
-      const { data } = await supabase.storage.from("avatars").createSignedUrl(path, 60 * 60);
-      setSignedAvatarUrl(data?.signedUrl || "");
+      const ttl = 60 * 60;
+      const { data } = await supabase.storage.from("avatars").createSignedUrl(path, ttl);
+      const nextUrl = data?.signedUrl || "";
+      setSignedAvatarUrl(nextUrl);
+      if (nextUrl) setCachedAvatarUrl(path, nextUrl, ttl);
 
       setLocalOk("Avatar updated.");
     } catch (err) {
@@ -190,6 +247,13 @@ export default function ProfileScreen({ session, supabase }) {
   }
 
   const busy = loading || uploading || busySave;
+
+  // Onboarding label: avoid "Not complete" flash by not showing until profile is loaded.
+  const onboardingLabel = profile
+    ? profile.onboarding_complete
+      ? "Complete"
+      : "Not complete"
+    : "";
 
   return (
     <div>
@@ -302,9 +366,12 @@ export default function ProfileScreen({ session, supabase }) {
               </SmallButton>
             </div>
 
-            <div style={{ fontSize: 12, opacity: 0.6 }}>
-              Onboarding: <b>{profile?.onboarding_complete ? "Complete" : "Not complete"}</b>
-            </div>
+            {/* Only show onboarding status once we actually have a profile row */}
+            {profile ? (
+              <div style={{ fontSize: 12, opacity: 0.6 }}>
+                Onboarding: <b>{onboardingLabel}</b>
+              </div>
+            ) : null}
           </div>
 
           <input ref={fileRef} type="file" accept="image/*" onChange={handleAvatarFile} style={{ display: "none" }} />
@@ -345,7 +412,8 @@ export default function ProfileScreen({ session, supabase }) {
           </div>
         )}
 
-        {!profile?.onboarding_complete ? (
+        {/* Avoid showing the onboarding CTA until profile is loaded, otherwise it flashes */}
+        {profile && !profile.onboarding_complete ? (
           <div
             style={{
               padding: 12,
