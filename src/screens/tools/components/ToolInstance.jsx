@@ -77,7 +77,8 @@ export default function ToolInstance({
           },
         ];
 
-  const instanceTitle = tu.instance_label ? `“${tu.instance_label}”` : "No label";
+  // ✅ No quotes, just the label
+  const instanceTitle = tu.instance_label || "No label";
 
   return (
     <div
@@ -91,7 +92,7 @@ export default function ToolInstance({
       }}
       onClick={(e) => e.stopPropagation()}
     >
-      {/* Instance header */}
+      {/* Header */}
       <div
         role="button"
         tabIndex={0}
@@ -116,9 +117,9 @@ export default function ToolInstance({
           cursor: "pointer",
           userSelect: "none",
         }}
-        title="Tap to expand / collapse instance"
+        title="Tap to expand / collapse"
       >
-        <div style={{ display: "grid", gap: 2, minWidth: 0 }}>
+        <div style={{ minWidth: 0 }}>
           <div
             style={{
               fontSize: 12,
@@ -153,13 +154,17 @@ export default function ToolInstance({
                 background: "rgba(255,255,255,0.03)",
               }}
             >
-              <img src={photoUrl} alt="" style={{ display: "block", width: "100%", height: "auto" }} />
+              <img
+                src={photoUrl}
+                alt=""
+                style={{ display: "block", width: "100%", height: "auto" }}
+              />
             </div>
           ) : (
             <div style={{ opacity: 0.7, fontSize: 13 }}>No photo yet.</div>
           )}
 
-          {/* Upload + refresh */}
+          {/* Upload */}
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
             <label
               style={{
@@ -175,7 +180,7 @@ export default function ToolInstance({
                 fontSize: 12,
                 opacity: busy ? 0.6 : 1,
               }}
-              title="Upload a photo for this tool instance"
+              title="Upload a photo for this tool"
               onClick={(e) => e.stopPropagation()}
             >
               📷 Upload photo
@@ -213,7 +218,7 @@ export default function ToolInstance({
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
               <input
                 value={draftLabelValue}
-                placeholder='e.g. "Black cuffs", "Travel kit"'
+                placeholder='e.g. Black cuffs, Travel kit'
                 disabled={busy}
                 onClick={(e) => e.stopPropagation()}
                 onKeyDown={(e) => e.stopPropagation()}
