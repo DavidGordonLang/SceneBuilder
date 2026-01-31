@@ -26,21 +26,6 @@ const ENTRY_TYPES = [
   { value: "note", label: "Note" },
 ];
 
-function formatDate(ts) {
-  try {
-    const d = new Date(ts);
-    return d.toLocaleString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return "";
-  }
-}
-
 function startOfDay(d) {
   const x = new Date(d);
   x.setHours(0, 0, 0, 0);
@@ -292,13 +277,6 @@ function KebabMenu({ onEdit, onDelete }) {
   );
 }
 
-function toggleInSet(prevSet, id) {
-  const next = new Set(prevSet);
-  if (next.has(id)) next.delete(id);
-  else next.add(id);
-  return next;
-}
-
 export default function JournalHome({ supabase, session }) {
   const { showToast } = useToast();
   const navigate = useNavigate();
@@ -315,40 +293,12 @@ export default function JournalHome({ supabase, session }) {
   const [editing, setEditing] = useState(null);
   const handledEditStateRef = useRef(false);
 
-  // Expanded cards (Scenes-style)
-  const [openEntryIds, setOpenEntryIds] = useState(() => new Set());
+  // Expand/collapse per entry
+  const [openEntryId, setOpenEntryId] = useState(null);
 
   // Kebab state
   const [menuOpenForId, setMenuOpenForId] = useState(null);
-
-  // Sync refs for event ordering (pointerdown vs click)
-  const menuOpenForIdRef = useRef(null);
-  useEffect(() => {
-    menuOpenForIdRef.current = menuOpenForId;
-  }, [menuOpenForId]);
-
-  // Ref points ONLY to kebab area, not the whole card.
-  const kebabAreaRef = useRef(null);
-
-  // When we close the kebab via an outside tap, we suppress the card toggle
-  // for a short window so the same interaction doesn’t also open/close the card.
-  const suppressCardToggleRef = useRef(false);
-  const suppressTimerRef = useRef(null);
-
-  function suppressNextCardToggle(ms = 250) {
-    suppressCardToggleRef.current = true;
-    if (suppressTimerRef.current) clearTimeout(suppressTimerRef.current);
-    suppressTimerRef.current = setTimeout(() => {
-      suppressCardToggleRef.current = false;
-      suppressTimerRef.current = null;
-    }, ms);
-  }
-
-  useEffect(() => {
-    return () => {
-      if (suppressTimerRef.current) clearTimeout(suppressTimerRef.current);
-    };
-  }, []);
+  const menuBoxRef = useRef(null);
 
   function persistCache(nextEntries) {
     if (!userId) return;
@@ -381,6 +331,7 @@ export default function JournalHome({ supabase, session }) {
   useEffect(() => {
     if (!userId) return;
 
+    // Seed from cache on user change, then refresh silently.
     const cached = journalHomeCache.entriesByUserId?.[userId];
     if (Array.isArray(cached)) {
       setEntries(cached);
@@ -392,7 +343,7 @@ export default function JournalHome({ supabase, session }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
-  // Backward compatibility for older flow that might still push state.editId
+  // Handle "return from entry view -> open editor" flow (legacy support).
   useEffect(() => {
     const editId = location?.state?.editId;
     if (!editId || handledEditStateRef.current) return;
@@ -427,32 +378,23 @@ export default function JournalHome({ supabase, session }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location?.state]);
 
-  // Close kebab on outside tap / escape (mobile-friendly)
+  // Close kebab on outside click / escape (ONLY closes kebab; never touches card open state)
   useEffect(() => {
     if (!menuOpenForId) return;
 
-    function isInsideKebab(target) {
-      const el = kebabAreaRef.current;
-      return el && target && el.contains(target);
-    }
-
-    function onAnyDown(e) {
-      // If menu is open and the tap is outside kebab area, close menu and suppress card toggle
-      if (menuOpenForIdRef.current && !isInsideKebab(e.target)) {
-        setMenuOpenForId(null);
-        suppressNextCardToggle(250);
-      }
+    function onDocDown(e) {
+      if (menuBoxRef.current && menuBoxRef.current.contains(e.target)) return;
+      setMenuOpenForId(null);
     }
 
     function onKey(e) {
       if (e.key === "Escape") setMenuOpenForId(null);
     }
 
-    document.addEventListener("pointerdown", onAnyDown);
+    document.addEventListener("mousedown", onDocDown);
     document.addEventListener("keydown", onKey);
-
     return () => {
-      document.removeEventListener("pointerdown", onAnyDown);
+      document.removeEventListener("mousedown", onDocDown);
       document.removeEventListener("keydown", onKey);
     };
   }, [menuOpenForId]);
@@ -479,12 +421,14 @@ export default function JournalHome({ supabase, session }) {
   }, [sorted, search]);
 
   const grouped = useMemo(() => {
-    const buckets = new Map();
+    const buckets = new Map(); // dayKey -> { label, items }
     for (const e of filtered) {
       const ts = e?.created_at;
       if (!ts) continue;
       const key = dayKeyFromTs(ts);
-      if (!buckets.has(key)) buckets.set(key, { label: dayHeadingLabel(ts), items: [] });
+      if (!buckets.has(key)) {
+        buckets.set(key, { label: dayHeadingLabel(ts), items: [] });
+      }
       buckets.get(key).items.push(e);
     }
 
@@ -521,13 +465,8 @@ export default function JournalHome({ supabase, session }) {
     try {
       await deleteJournalEntry({ supabase, id });
       showToast?.("Deleted");
-
-      setOpenEntryIds((prev) => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
-
+      // If the open card was deleted, close it
+      setOpenEntryId((cur) => (cur === id ? null : cur));
       await load({ silent: true });
     } catch (e) {
       setErr(e?.message || "Delete failed.");
@@ -548,24 +487,19 @@ export default function JournalHome({ supabase, session }) {
     await handleDelete(entry.id);
   }
 
-  function toggleOpenCard(entryId) {
-    // If we just closed the kebab via outside tap, do NOTHING else.
-    if (suppressCardToggleRef.current) return;
-
-    // If a menu is open, first close it and suppress toggling for this tap.
-    if (menuOpenForIdRef.current) {
+  function handleCardToggle(entryId) {
+    // If a kebab is open (for this card or any card), tapping the card should ONLY close the kebab.
+    if (menuOpenForId) {
       setMenuOpenForId(null);
-      suppressNextCardToggle(250);
       return;
     }
-
-    setOpenEntryIds((prev) => toggleInSet(prev, entryId));
+    setOpenEntryId((cur) => (cur === entryId ? null : entryId));
   }
 
   return (
     <div>
       <Page style={{ display: "grid", gap: 14 }}>
-        {/* Actions row */}
+        {/* Contextual actions row */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
           <div style={{ display: "flex", gap: 10 }}>
             <SmallButton onClick={() => setEditing({ mode: "new" })} disabled={saving}>
@@ -637,10 +571,15 @@ export default function JournalHome({ supabase, session }) {
                   const typeLabel =
                     ENTRY_TYPES.find((t) => t.value === e.entry_type)?.label || e.entry_type || "Entry";
                   const title = e.title?.trim() ? e.title : "Untitled";
-                  const preview =
-                    e.body && e.body.trim() ? (e.body.length > 180 ? `${e.body.slice(0, 180)}…` : e.body) : "";
 
-                  const isOpen = openEntryIds.has(e.id);
+                  const preview =
+                    e.body && e.body.trim()
+                      ? e.body.length > 160
+                        ? `${e.body.slice(0, 160)}…`
+                        : e.body
+                      : "";
+
+                  const isOpen = openEntryId === e.id;
                   const menuOpen = menuOpenForId === e.id;
 
                   return (
@@ -648,18 +587,19 @@ export default function JournalHome({ supabase, session }) {
                       key={e.id}
                       role="button"
                       tabIndex={0}
-                      onClick={() => toggleOpenCard(e.id)}
+                      onClick={() => handleCardToggle(e.id)}
                       onKeyDown={(ev) => {
                         if (ev.key === "Enter" || ev.key === " ") {
                           ev.preventDefault();
-                          toggleOpenCard(e.id);
+                          handleCardToggle(e.id);
                         }
                       }}
                       style={{ cursor: "pointer", position: "relative" }}
-                      title={isOpen ? "Collapse entry" : "Expand entry"}
+                      title={menuOpenForId ? "Close menu" : isOpen ? "Collapse entry" : "Expand entry"}
                     >
                       <Card>
-                        <div style={{ display: "grid", gap: 8 }}>
+                        <div style={{ display: "grid", gap: 10 }}>
+                          {/* Header row: title + pill inline, kebab on the right */}
                           <div
                             style={{
                               display: "flex",
@@ -668,7 +608,7 @@ export default function JournalHome({ supabase, session }) {
                               alignItems: "flex-start",
                             }}
                           >
-                            <div style={{ minWidth: 0 }}>
+                            <div style={{ minWidth: 0, display: "flex", gap: 10, alignItems: "center" }}>
                               <div
                                 style={{
                                   fontWeight: 900,
@@ -676,55 +616,50 @@ export default function JournalHome({ supabase, session }) {
                                   whiteSpace: "nowrap",
                                   overflow: "hidden",
                                   textOverflow: "ellipsis",
+                                  minWidth: 0,
                                 }}
                               >
                                 {title}
                               </div>
 
-                              <div
-                                style={{
-                                  marginTop: 4,
-                                  display: "flex",
-                                  gap: 8,
-                                  flexWrap: "wrap",
-                                  alignItems: "center",
-                                }}
-                              >
+                              <div style={{ flex: "0 0 auto" }}>
                                 <Chip>{typeLabel}</Chip>
-                                <span style={{ fontSize: 12, opacity: 0.65 }}>{formatDate(e.created_at)}</span>
-                                <span style={{ fontSize: 12, opacity: 0.65 }}>{isOpen ? "▾" : "▸"}</span>
                               </div>
                             </div>
 
-                            {/* Kebab area */}
-                            <div
-                              ref={menuOpen ? kebabAreaRef : null}
-                              style={{ display: "flex", alignItems: "flex-start", gap: 8 }}
-                              onClick={(ev) => ev.stopPropagation()}
-                            >
-                              <KebabButton onClick={() => toggleMenu(e.id)} title="Entry actions" />
-                              {menuOpen ? (
-                                <KebabMenu onEdit={() => handleMenuEdit(e)} onDelete={() => handleMenuDelete(e)} />
-                              ) : null}
+                            <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                              <div
+                                onClick={(ev) => {
+                                  ev.stopPropagation();
+                                }}
+                              >
+                                <KebabButton onClick={() => toggleMenu(e.id)} title="Entry actions" />
+                              </div>
                             </div>
                           </div>
 
-                          {isOpen ? (
-                            <div style={{ display: "grid", gap: 10 }}>
-                              {e.body ? (
-                                <div style={{ opacity: 0.92, whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
-                                  {e.body}
-                                </div>
-                              ) : (
-                                <div style={{ opacity: 0.7, fontSize: 13 }}>No text.</div>
-                              )}
+                          {menuOpen ? (
+                            <div
+                              ref={menuBoxRef}
+                              onClick={(ev) => {
+                                ev.stopPropagation();
+                              }}
+                            >
+                              <KebabMenu onEdit={() => handleMenuEdit(e)} onDelete={() => handleMenuDelete(e)} />
+                            </div>
+                          ) : null}
 
-                              {e.scene_id ? (
-                                <div style={{ fontSize: 12, opacity: 0.65 }}>Linked scene: {e.scene_id}</div>
-                              ) : null}
+                          {/* Body */}
+                          {isOpen ? (
+                            <div style={{ opacity: 0.92, whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
+                              {e.body || ""}
                             </div>
                           ) : preview ? (
                             <div style={{ opacity: 0.88, whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{preview}</div>
+                          ) : null}
+
+                          {isOpen && e.scene_id ? (
+                            <div style={{ fontSize: 12, opacity: 0.65 }}>Linked scene: {e.scene_id}</div>
                           ) : null}
                         </div>
                       </Card>
