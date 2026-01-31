@@ -1,35 +1,66 @@
 import { useCallback, useEffect, useState } from "react";
 
 /**
+ * Small module cache to reduce UI flashes between tab navigations.
+ * Keyed by userId.
+ */
+let profileCacheByUserId = {
+  // [userId]: { profile, ts }
+};
+
+/**
  * Fetch + update the logged-in user's profile row in public.profiles.
  * Assumes profiles.id = auth user id (standard Supabase pattern).
  */
 export function useProfile({ supabase, userId }) {
-  const [profile, setProfile] = useState(null);
-  const [loading, setLoading] = useState(Boolean(userId));
+  const cached = userId ? profileCacheByUserId[userId]?.profile : null;
+
+  const [profile, setProfile] = useState(() => cached ?? null);
+  const [loading, setLoading] = useState(() => Boolean(userId) && !cached);
   const [error, setError] = useState("");
 
-  const reload = useCallback(async () => {
-    if (!supabase || !userId) return;
-    setLoading(true);
-    setError("");
+  const writeCache = useCallback((uid, nextProfile) => {
+    if (!uid) return;
+    profileCacheByUserId[uid] = { profile: nextProfile ?? null, ts: Date.now() };
+  }, []);
 
-    try {
-      const { data, error: qErr } = await supabase
-        .from("profiles")
-        .select("id, display_name, bio, avatar_url, onboarding_complete")
-        .eq("id", userId)
-        .single();
+  const reload = useCallback(
+    async (opts = {}) => {
+      if (!supabase || !userId) return;
 
-      if (qErr) throw qErr;
-      setProfile(data ?? null);
-    } catch (e) {
-      setError(e?.message || "Failed to load profile.");
-      setProfile(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [supabase, userId]);
+      const silent = !!opts.silent;
+
+      // If we're doing a silent refresh, don't flip the whole UI into "loading".
+      if (!silent) setLoading(true);
+      setError("");
+
+      try {
+        const { data, error: qErr } = await supabase
+          .from("profiles")
+          .select("id, display_name, bio, avatar_url, onboarding_complete")
+          .eq("id", userId)
+          .single();
+
+        if (qErr) throw qErr;
+
+        const next = data ?? null;
+        setProfile(next);
+        writeCache(userId, next);
+      } catch (e) {
+        setError(e?.message || "Failed to load profile.");
+        // Important: don't nuke profile on silent reload failure,
+        // or we reintroduce the flash.
+        if (!silent) {
+          setProfile(null);
+          writeCache(userId, null);
+        }
+      } finally {
+        if (!silent) setLoading(false);
+        else setLoading(false);
+      }
+    },
+    [supabase, userId, writeCache]
+  );
 
   const updateProfile = useCallback(
     async (updates) => {
@@ -43,19 +74,23 @@ export function useProfile({ supabase, userId }) {
       };
 
       const { data, error: uErr } = await supabase.from("profiles").upsert(payload).select().single();
-
       if (uErr) throw uErr;
 
-      // Keep local state fresh.
-      setProfile(data ?? payload);
-      return data ?? payload;
+      const next = data ?? payload;
+      setProfile(next);
+      writeCache(userId, next);
+      return next;
     },
-    [supabase, userId]
+    [supabase, userId, writeCache]
   );
 
   useEffect(() => {
-    reload();
-  }, [reload]);
+    if (!supabase || !userId) return;
+
+    // If we had cached data, do a silent refresh so UI doesn't flash.
+    const hasCached = !!profileCacheByUserId?.[userId]?.profile;
+    reload({ silent: hasCached });
+  }, [reload, supabase, userId]);
 
   return { profile, loading, error, reload, updateProfile };
 }
