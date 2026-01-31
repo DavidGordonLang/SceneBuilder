@@ -1,3 +1,5 @@
+// src/screens/tools/hooks/useToolsData.js
+
 import { useEffect, useMemo, useState } from "react";
 import {
   addGlobalToolToUser,
@@ -9,6 +11,16 @@ import {
   updateUserToolStatus,
   uploadToolPhoto,
 } from "../../../lib/toolsApi";
+
+/* ---------------- module cache to reduce loading flash ----------------
+   - Keeps vault + userTools across unmount/remount (tab switches)
+   - Allows "silent refresh" without briefly showing empty-state UI
+*/
+let toolsCache = {
+  vault: null, // array
+  userTools: null, // array
+  ts: 0,
+};
 
 function groupKeyForToolUser(tu) {
   if (tu?.tool_global_id) return `g:${tu.tool_global_id}`;
@@ -27,30 +39,44 @@ function groupIconForToolUser(tu) {
 }
 
 export function useToolsData() {
+  const hasCache =
+    Array.isArray(toolsCache.vault) && Array.isArray(toolsCache.userTools);
+
   const [tab, setTab] = useState("drawer"); // drawer | vault
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !hasCache);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
-  const [vault, setVault] = useState([]);
-  const [userTools, setUserTools] = useState([]);
+  const [vault, setVault] = useState(() => toolsCache.vault || []);
+  const [userTools, setUserTools] = useState(() => toolsCache.userTools || []);
 
   // Per-instance UI state
   const [draftLabel, setDraftLabel] = useState({}); // { [tools_user_id]: string }
   const [photoUrlById, setPhotoUrlById] = useState({}); // { [tools_user_id]: signedUrl }
   const [photoPathById, setPhotoPathById] = useState({}); // { [tools_user_id]: photo_path last loaded }
 
-  async function reload() {
-    setLoading(true);
+  function persistCache(nextVault, nextUserTools) {
+    toolsCache = {
+      vault: Array.isArray(nextVault) ? nextVault : toolsCache.vault,
+      userTools: Array.isArray(nextUserTools) ? nextUserTools : toolsCache.userTools,
+      ts: Date.now(),
+    };
+  }
+
+  async function reload(opts = {}) {
+    const silent = !!opts.silent;
+    if (!silent) setLoading(true);
+
     setErr("");
     try {
       const [v, ut] = await Promise.all([fetchToolVault(), fetchUserTools()]);
       setVault(v);
       setUserTools(ut);
+      persistCache(v, ut);
     } catch (e) {
       setErr(e?.message || "Failed to load tools.");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }
 
@@ -58,7 +84,11 @@ export function useToolsData() {
     let alive = true;
     (async () => {
       if (!alive) return;
-      await reload();
+      // If we have cache, don't show Loading/empty-state flash.
+      // Still do a silent refresh to keep data accurate.
+      await reload({ silent: hasCache });
+      if (!alive) return;
+      if (hasCache) setLoading(false);
     })();
     return () => {
       alive = false;
@@ -124,7 +154,7 @@ export function useToolsData() {
     setBusy(true);
     try {
       await addGlobalToolToUser(toolGlobalId, status);
-      await reload();
+      await reload({ silent: true });
     } catch (e) {
       setErr(e?.message || "Could not add tool.");
     } finally {
@@ -138,7 +168,7 @@ export function useToolsData() {
     setBusy(true);
     try {
       await addGlobalToolToUser(toolGlobalId, status);
-      await reload();
+      await reload({ silent: true });
     } catch (e) {
       setErr(e?.message || "Could not add another instance.");
     } finally {
@@ -151,7 +181,7 @@ export function useToolsData() {
     setBusy(true);
     try {
       await updateUserToolStatus(toolUserId, "owned");
-      await reload();
+      await reload({ silent: true });
     } catch (e) {
       setErr(e?.message || "Could not move tool.");
     } finally {
@@ -167,7 +197,7 @@ export function useToolsData() {
     setBusy(true);
     try {
       await deleteUserTool(toolUserId);
-      await reload();
+      await reload({ silent: true });
     } catch (e) {
       setErr(e?.message || "Could not remove tool.");
     } finally {
@@ -197,7 +227,7 @@ export function useToolsData() {
     setBusy(true);
     try {
       await updateUserToolInstanceDetails(toolUserId, { instance_label: nextLabel || null });
-      await reload();
+      await reload({ silent: true });
     } catch (e) {
       setErr(e?.message || "Could not save label.");
     } finally {
@@ -214,7 +244,7 @@ export function useToolsData() {
       await updateUserToolInstanceDetails(toolUserId, { photo_path });
       setPhotoPathById((prev) => ({ ...prev, [toolUserId]: photo_path }));
       setPhotoUrlById((prev) => ({ ...prev, [toolUserId]: signedUrl || null }));
-      await reload();
+      await reload({ silent: true });
     } catch (e) {
       setErr(e?.message || "Could not upload photo.");
     } finally {
