@@ -1,5 +1,6 @@
+// src/screens/tools/ToolsHome.jsx
+
 import React, { useMemo, useState } from "react";
-import { SmallButton } from "../../components/routesUi";
 import Page from "../../components/Page";
 
 import { useToolsData } from "./hooks/useToolsData";
@@ -35,7 +36,6 @@ export default function ToolsHome() {
     draftLabel,
     setDraftLabel,
     photoUrlById,
-    reload,
     addTo,
     addAnotherInstance,
     moveCravingToOwned,
@@ -90,9 +90,6 @@ export default function ToolsHome() {
                 { value: "vault", label: "Vault" },
               ]}
             />
-            <SmallButton onClick={reload} disabled={loading || busy} title="Refresh tools">
-              {loading ? "Loading…" : "Refresh"}
-            </SmallButton>
           </div>
 
           <div style={{ fontSize: 12, opacity: 0.7 }}>{infoText}</div>
@@ -138,7 +135,8 @@ export default function ToolsHome() {
                         expandedContent={
                           <div style={{ display: "grid", gap: 12 }}>
                             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                              <SmallButton
+                              <button
+                                type="button"
                                 disabled={busy || !g.tool_global_id}
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -154,12 +152,24 @@ export default function ToolsHome() {
                                     ? "Add another owned instance"
                                     : "Custom tools can't add instances yet"
                                 }
+                                style={{
+                                  padding: "10px 12px",
+                                  borderRadius: 12,
+                                  border: "1px solid rgba(255,255,255,0.18)",
+                                  background: "rgba(255,255,255,0.06)",
+                                  color: "#f3f3f7",
+                                  fontWeight: 800,
+                                  cursor: busy ? "not-allowed" : "pointer",
+                                  opacity: busy ? 0.6 : 1,
+                                }}
                               >
                                 + Add another
-                              </SmallButton>
+                              </button>
 
                               {g.isCustom ? (
-                                <div style={{ fontSize: 12, opacity: 0.65 }}>(Custom tool grouping is temporary)</div>
+                                <div style={{ fontSize: 12, opacity: 0.65 }}>
+                                  (Custom tool grouping is temporary)
+                                </div>
                               ) : null}
                             </div>
 
@@ -216,7 +226,8 @@ export default function ToolsHome() {
                         expandedContent={
                           <div style={{ display: "grid", gap: 12 }}>
                             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                              <SmallButton
+                              <button
+                                type="button"
                                 disabled={busy || !g.tool_global_id}
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -232,12 +243,24 @@ export default function ToolsHome() {
                                     ? "Add another craving instance"
                                     : "Custom tools can't add instances yet"
                                 }
+                                style={{
+                                  padding: "10px 12px",
+                                  borderRadius: 12,
+                                  border: "1px solid rgba(255,255,255,0.18)",
+                                  background: "rgba(255,255,255,0.06)",
+                                  color: "#f3f3f7",
+                                  fontWeight: 800,
+                                  cursor: busy ? "not-allowed" : "pointer",
+                                  opacity: busy ? 0.6 : 1,
+                                }}
                               >
                                 + Add another
-                              </SmallButton>
+                              </button>
 
                               {g.isCustom ? (
-                                <div style={{ fontSize: 12, opacity: 0.65 }}>(Custom tool grouping is temporary)</div>
+                                <div style={{ fontSize: 12, opacity: 0.65 }}>
+                                  (Custom tool grouping is temporary)
+                                </div>
                               ) : null}
                             </div>
 
@@ -302,7 +325,8 @@ export default function ToolsHome() {
                     expandedContent={
                       <div style={{ display: "grid", gap: 10 }}>
                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                          <SmallButton
+                          <button
+                            type="button"
                             disabled={busy || inCraving || inOwned}
                             onClick={(e) => {
                               e.stopPropagation();
@@ -315,20 +339,41 @@ export default function ToolsHome() {
                                 ? "Already in Craving"
                                 : "Add to Craving Drawer"
                             }
+                            style={{
+                              padding: "10px 12px",
+                              borderRadius: 12,
+                              border: "1px solid rgba(255,255,255,0.18)",
+                              background: "rgba(255,255,255,0.06)",
+                              color: "#f3f3f7",
+                              fontWeight: 800,
+                              cursor: busy ? "not-allowed" : "pointer",
+                              opacity: busy ? 0.6 : 1,
+                            }}
                           >
                             + Craving
-                          </SmallButton>
+                          </button>
 
-                          <SmallButton
+                          <button
+                            type="button"
                             disabled={busy || inOwned}
                             onClick={(e) => {
                               e.stopPropagation();
                               addTo("owned", t.id);
                             }}
                             title={inOwned ? "Already in Owned" : "Add to Owned Tools"}
+                            style={{
+                              padding: "10px 12px",
+                              borderRadius: 12,
+                              border: "1px solid rgba(255,255,255,0.18)",
+                              background: "rgba(255,255,255,0.06)",
+                              color: "#f3f3f7",
+                              fontWeight: 800,
+                              cursor: busy ? "not-allowed" : "pointer",
+                              opacity: busy ? 0.6 : 1,
+                            }}
                           >
                             + Owned
-                          </SmallButton>
+                          </button>
                         </div>
 
                         <div style={{ opacity: 0.75 }}>
