@@ -320,7 +320,9 @@ export default function JournalHome({ supabase, session }) {
 
   // Kebab state
   const [menuOpenForId, setMenuOpenForId] = useState(null);
-  const menuRootRef = useRef(null);
+
+  // IMPORTANT: ref now points ONLY to kebab area, not the whole card.
+  const kebabAreaRef = useRef(null);
 
   function persistCache(nextEntries) {
     if (!userId) return;
@@ -353,7 +355,6 @@ export default function JournalHome({ supabase, session }) {
   useEffect(() => {
     if (!userId) return;
 
-    // Seed from cache on user change, then refresh silently.
     const cached = journalHomeCache.entriesByUserId?.[userId];
     if (Array.isArray(cached)) {
       setEntries(cached);
@@ -365,7 +366,7 @@ export default function JournalHome({ supabase, session }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
-  // Handle "return from entry view -> open editor" flow (kept for backward compatibility).
+  // Backward compatibility for older flow that might still push state.editId
   useEffect(() => {
     const editId = location?.state?.editId;
     if (!editId || handledEditStateRef.current) return;
@@ -400,12 +401,17 @@ export default function JournalHome({ supabase, session }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location?.state]);
 
-  // Close kebab on outside click / escape
+  // Close kebab on outside tap / escape (mobile-friendly)
   useEffect(() => {
     if (!menuOpenForId) return;
 
-    function onDocDown(e) {
-      if (menuRootRef.current && menuRootRef.current.contains(e.target)) return;
+    function isInsideKebab(target) {
+      const el = kebabAreaRef.current;
+      return el && target && el.contains(target);
+    }
+
+    function onAnyDown(e) {
+      if (isInsideKebab(e.target)) return;
       setMenuOpenForId(null);
     }
 
@@ -413,10 +419,15 @@ export default function JournalHome({ supabase, session }) {
       if (e.key === "Escape") setMenuOpenForId(null);
     }
 
-    document.addEventListener("mousedown", onDocDown);
+    // pointerdown covers mouse + touch on modern browsers
+    document.addEventListener("pointerdown", onAnyDown);
+    // fallback for older/mobile oddities
+    document.addEventListener("touchstart", onAnyDown, { passive: true });
     document.addEventListener("keydown", onKey);
+
     return () => {
-      document.removeEventListener("mousedown", onDocDown);
+      document.removeEventListener("pointerdown", onAnyDown);
+      document.removeEventListener("touchstart", onAnyDown);
       document.removeEventListener("keydown", onKey);
     };
   }, [menuOpenForId]);
@@ -443,14 +454,12 @@ export default function JournalHome({ supabase, session }) {
   }, [sorted, search]);
 
   const grouped = useMemo(() => {
-    const buckets = new Map(); // dayKey -> { label, items }
+    const buckets = new Map();
     for (const e of filtered) {
       const ts = e?.created_at;
       if (!ts) continue;
       const key = dayKeyFromTs(ts);
-      if (!buckets.has(key)) {
-        buckets.set(key, { label: dayHeadingLabel(ts), items: [] });
-      }
+      if (!buckets.has(key)) buckets.set(key, { label: dayHeadingLabel(ts), items: [] });
       buckets.get(key).items.push(e);
     }
 
@@ -488,7 +497,6 @@ export default function JournalHome({ supabase, session }) {
       await deleteJournalEntry({ supabase, id });
       showToast?.("Deleted");
 
-      // Close if it was open
       setOpenEntryIds((prev) => {
         const next = new Set(prev);
         next.delete(id);
@@ -515,18 +523,22 @@ export default function JournalHome({ supabase, session }) {
     await handleDelete(entry.id);
   }
 
+  function toggleOpenCard(entryId) {
+    // If kebab is open, a tap anywhere else should close it first (and not require precision).
+    if (menuOpenForId) {
+      setMenuOpenForId(null);
+      return;
+    }
+    setOpenEntryIds((prev) => toggleInSet(prev, entryId));
+  }
+
   return (
     <div>
       <Page style={{ display: "grid", gap: 14 }}>
-        {/* Contextual actions row */}
+        {/* Actions row */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
           <div style={{ display: "flex", gap: 10 }}>
-            <SmallButton
-              onClick={() => {
-                setEditing({ mode: "new" });
-              }}
-              disabled={saving}
-            >
+            <SmallButton onClick={() => setEditing({ mode: "new" })} disabled={saving}>
               New entry
             </SmallButton>
           </div>
@@ -595,7 +607,6 @@ export default function JournalHome({ supabase, session }) {
                   const typeLabel =
                     ENTRY_TYPES.find((t) => t.value === e.entry_type)?.label || e.entry_type || "Entry";
                   const title = e.title?.trim() ? e.title : "Untitled";
-
                   const preview =
                     e.body && e.body.trim() ? (e.body.length > 180 ? `${e.body.slice(0, 180)}…` : e.body) : "";
 
@@ -607,18 +618,15 @@ export default function JournalHome({ supabase, session }) {
                       key={e.id}
                       role="button"
                       tabIndex={0}
-                      onClick={() => {
-                        setOpenEntryIds((prev) => toggleInSet(prev, e.id));
-                      }}
+                      onClick={() => toggleOpenCard(e.id)}
                       onKeyDown={(ev) => {
                         if (ev.key === "Enter" || ev.key === " ") {
                           ev.preventDefault();
-                          setOpenEntryIds((prev) => toggleInSet(prev, e.id));
+                          toggleOpenCard(e.id);
                         }
                       }}
                       style={{ cursor: "pointer", position: "relative" }}
                       title={isOpen ? "Collapse entry" : "Expand entry"}
-                      ref={menuOpen ? menuRootRef : null}
                     >
                       <Card>
                         <div style={{ display: "grid", gap: 8 }}>
@@ -658,19 +666,21 @@ export default function JournalHome({ supabase, session }) {
                               </div>
                             </div>
 
-                            <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-                              <div onClick={(ev) => ev.stopPropagation()}>
-                                <KebabButton onClick={() => toggleMenu(e.id)} title="Entry actions" />
-                              </div>
+                            {/* Kebab area (ref lives here, not on the whole card) */}
+                            <div
+                              ref={menuOpen ? kebabAreaRef : null}
+                              style={{ display: "flex", alignItems: "flex-start", gap: 8 }}
+                              onClick={(ev) => ev.stopPropagation()}
+                            >
+                              <KebabButton onClick={() => toggleMenu(e.id)} title="Entry actions" />
+                              {menuOpen ? (
+                                <KebabMenu onEdit={() => handleMenuEdit(e)} onDelete={() => handleMenuDelete(e)} />
+                              ) : null}
                             </div>
                           </div>
 
-                          {menuOpen ? (
-                            <KebabMenu onEdit={() => handleMenuEdit(e)} onDelete={() => handleMenuDelete(e)} />
-                          ) : null}
-
                           {isOpen ? (
-                            <div style={{ display: "grid", gap: 10 }} onClick={(ev) => ev.stopPropagation()}>
+                            <div style={{ display: "grid", gap: 10 }}>
                               {e.body ? (
                                 <div style={{ opacity: 0.92, whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
                                   {e.body}
@@ -682,31 +692,6 @@ export default function JournalHome({ supabase, session }) {
                               {e.scene_id ? (
                                 <div style={{ fontSize: 12, opacity: 0.65 }}>Linked scene: {e.scene_id}</div>
                               ) : null}
-
-                              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                                <SmallButton
-                                  disabled={saving}
-                                  onClick={(ev) => {
-                                    ev.stopPropagation();
-                                    setEditing(e);
-                                  }}
-                                  title="Edit entry"
-                                >
-                                  Edit
-                                </SmallButton>
-
-                                <SmallButton
-                                  tone="danger"
-                                  disabled={saving}
-                                  onClick={(ev) => {
-                                    ev.stopPropagation();
-                                    handleDelete(e.id);
-                                  }}
-                                  title="Delete entry"
-                                >
-                                  Delete
-                                </SmallButton>
-                              </div>
                             </div>
                           ) : preview ? (
                             <div style={{ opacity: 0.88, whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{preview}</div>
