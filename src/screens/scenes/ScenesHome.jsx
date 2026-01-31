@@ -1,11 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Card, Chip, SmallButton } from "../../components/routesUi";
 import Page from "../../components/Page";
-import {
-  fetchSceneById,
-  fetchScenes,
-  updateScenePlanningStage,
-} from "../../lib/scenesApi";
+import { fetchSceneById, fetchScenes, updateScenePlanningStage } from "../../lib/scenesApi";
 import {
   formatDate,
   pickParticipantLabel,
@@ -203,9 +199,7 @@ export default function ScenesHome() {
     try {
       await updateScenePlanningStage(scene.id, next);
       setScenes((prev) => {
-        const nextScenes = prev.map((s) =>
-          s.id === scene.id ? { ...s, planning_stage: next } : s
-        );
+        const nextScenes = prev.map((s) => (s.id === scene.id ? { ...s, planning_stage: next } : s));
         persistCache(nextScenes, details);
         return nextScenes;
       });
@@ -221,9 +215,7 @@ export default function ScenesHome() {
     setBusy(true);
     setErr("");
     try {
-      const { supabase } = await import("../../lib/supabaseClient.js").then(
-        (m) => m
-      );
+      const { supabase } = await import("../../lib/supabaseClient.js").then((m) => m);
 
       await supabase.from("scene_participants").delete().eq("scene_id", sceneId);
       await supabase.from("scene_tools").delete().eq("scene_id", sceneId);
@@ -267,15 +259,10 @@ export default function ScenesHome() {
             <SmallButton asLink to="/scenes/new">
               + New scene
             </SmallButton>
-            <SmallButton onClick={() => reload()} disabled={loading || busy}>
-              {loading ? "Loading…" : "Refresh"}
-            </SmallButton>
           </div>
 
           <div style={{ fontSize: 12, opacity: 0.7 }}>
-            {loading
-              ? "Loading scenes…"
-              : `${scenes.length} scene${scenes.length === 1 ? "" : "s"}`}
+            {loading ? "Loading…" : `${scenes.length} scene${scenes.length === 1 ? "" : "s"}`}
           </div>
         </div>
 
@@ -305,14 +292,9 @@ export default function ScenesHome() {
             const full = det?.status === "ready" ? det.data : null;
 
             const participants =
-              full?.scene_participants
-                ?.map((sp) => sp?.participants)
-                .filter(Boolean) ?? [];
+              full?.scene_participants?.map((sp) => sp?.participants).filter(Boolean) ?? [];
 
-            const tools =
-              full?.scene_tools
-                ?.map((st) => st?.tools_user)
-                .filter(Boolean) ?? [];
+            const tools = full?.scene_tools?.map((st) => st?.tools_user).filter(Boolean) ?? [];
 
             const sections = sectionsFromBlocks(full?.scene_blocks);
 
@@ -334,16 +316,8 @@ export default function ScenesHome() {
                   >
                     <div>
                       <div style={{ fontWeight: 800 }}>{s.title}</div>
-                      {intent && (
-                        <div style={{ fontSize: 13, opacity: 0.85 }}>
-                          {intent}
-                        </div>
-                      )}
-                      {when && (
-                        <div style={{ fontSize: 12, opacity: 0.7 }}>
-                          {when}
-                        </div>
-                      )}
+                      {intent && <div style={{ fontSize: 13, opacity: 0.85 }}>{intent}</div>}
+                      {when && <div style={{ fontSize: 12, opacity: 0.7 }}>{when}</div>}
                     </div>
 
                     <button
@@ -366,14 +340,9 @@ export default function ScenesHome() {
                   </div>
 
                   {isOpen && (
-                    <div
-                      style={{ display: "grid", gap: 12 }}
-                      onClick={(e) => e.stopPropagation()}
-                    >
+                    <div style={{ display: "grid", gap: 12 }} onClick={(e) => e.stopPropagation()}>
                       {det?.status === "loading" ? (
-                        <div style={{ opacity: 0.75, fontSize: 13 }}>
-                          Loading details…
-                        </div>
+                        <div style={{ opacity: 0.75, fontSize: 13 }}>Loading details…</div>
                       ) : det?.status === "error" ? (
                         <div
                           style={{
@@ -390,9 +359,7 @@ export default function ScenesHome() {
                       ) : null}
 
                       <div>
-                        <div style={{ fontSize: 12, opacity: 0.7 }}>
-                          Participants
-                        </div>
+                        <div style={{ fontSize: 12, opacity: 0.7 }}>Participants</div>
                         {participants.length ? (
                           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                             {participants.map((p) => (
@@ -400,9 +367,7 @@ export default function ScenesHome() {
                             ))}
                           </div>
                         ) : (
-                          <div style={{ fontSize: 13, opacity: 0.6 }}>
-                            None selected yet
-                          </div>
+                          <div style={{ fontSize: 13, opacity: 0.6 }}>None selected yet</div>
                         )}
                       </div>
 
@@ -417,9 +382,7 @@ export default function ScenesHome() {
                                 background: "rgba(255,255,255,0.03)",
                               }}
                             >
-                              <div style={{ fontWeight: 850, fontSize: 13 }}>
-                                {sec.title}
-                              </div>
+                              <div style={{ fontWeight: 850, fontSize: 13 }}>{sec.title}</div>
                               {sec.body ? (
                                 <div
                                   style={{
@@ -435,16 +398,12 @@ export default function ScenesHome() {
                           ))}
                         </div>
                       ) : (
-                        <div style={{ fontSize: 13, opacity: 0.6 }}>
-                          No stages filled yet.
-                        </div>
+                        <div style={{ fontSize: 13, opacity: 0.6 }}>No stages filled yet.</div>
                       )}
 
                       {tools.length > 0 && (
                         <div>
-                          <div style={{ fontSize: 12, opacity: 0.7 }}>
-                            Tools
-                          </div>
+                          <div style={{ fontSize: 12, opacity: 0.7 }}>Tools</div>
                           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                             {tools.map((tu) => (
                               <Chip key={tu.id}>
