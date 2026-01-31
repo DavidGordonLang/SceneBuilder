@@ -220,7 +220,7 @@ function KebabButton({ onClick, title = "More actions" }) {
         color: "rgba(243,243,247,0.85)",
         cursor: "pointer",
         padding: 6,
-        margin: -6, // keeps alignment tight without expanding layout
+        margin: -6,
         lineHeight: 1,
         fontSize: 20,
         fontWeight: 900,
@@ -292,6 +292,13 @@ function KebabMenu({ onEdit, onDelete }) {
   );
 }
 
+function toggleInSet(prevSet, id) {
+  const next = new Set(prevSet);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  return next;
+}
+
 export default function JournalHome({ supabase, session }) {
   const { showToast } = useToast();
   const navigate = useNavigate();
@@ -307,6 +314,9 @@ export default function JournalHome({ supabase, session }) {
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState(null);
   const handledEditStateRef = useRef(false);
+
+  // Expanded cards (Scenes-style)
+  const [openEntryIds, setOpenEntryIds] = useState(() => new Set());
 
   // Kebab state
   const [menuOpenForId, setMenuOpenForId] = useState(null);
@@ -355,7 +365,7 @@ export default function JournalHome({ supabase, session }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
-  // Handle "return from entry view -> open editor" flow.
+  // Handle "return from entry view -> open editor" flow (kept for backward compatibility).
   useEffect(() => {
     const editId = location?.state?.editId;
     if (!editId || handledEditStateRef.current) return;
@@ -363,14 +373,12 @@ export default function JournalHome({ supabase, session }) {
     handledEditStateRef.current = true;
 
     (async () => {
-      // Ensure we have the latest list for lookup.
       let list = entries;
       if (!list || list.length === 0) {
         await load();
         list = entries;
       }
 
-      // Fallback: direct fetch if we still didn't find it.
       let found = (list || []).find((e) => e.id === editId);
 
       if (!found) {
@@ -382,7 +390,7 @@ export default function JournalHome({ supabase, session }) {
             persistCache(fresh);
           }
         } catch {
-          // ignore; we'll open new editor as fallback below
+          // ignore
         }
       }
 
@@ -479,14 +487,18 @@ export default function JournalHome({ supabase, session }) {
     try {
       await deleteJournalEntry({ supabase, id });
       showToast?.("Deleted");
+
+      // Close if it was open
+      setOpenEntryIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+
       await load({ silent: true });
     } catch (e) {
       setErr(e?.message || "Delete failed.");
     }
-  }
-
-  function openEntry(id) {
-    navigate(`/journal/${id}`);
   }
 
   function toggleMenu(id) {
@@ -509,11 +521,13 @@ export default function JournalHome({ supabase, session }) {
         {/* Contextual actions row */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
           <div style={{ display: "flex", gap: 10 }}>
-            <SmallButton onClick={() => setEditing({ mode: "new" })} disabled={saving}>
+            <SmallButton
+              onClick={() => {
+                setEditing({ mode: "new" });
+              }}
+              disabled={saving}
+            >
               New entry
-            </SmallButton>
-            <SmallButton onClick={() => load()} disabled={loading || saving}>
-              {loading ? "Loading…" : "Refresh"}
             </SmallButton>
           </div>
           <div style={{ fontSize: 12, opacity: 0.7 }}>{loading ? "Loading…" : `${entries.length} entries`}</div>
@@ -581,9 +595,11 @@ export default function JournalHome({ supabase, session }) {
                   const typeLabel =
                     ENTRY_TYPES.find((t) => t.value === e.entry_type)?.label || e.entry_type || "Entry";
                   const title = e.title?.trim() ? e.title : "Untitled";
+
                   const preview =
                     e.body && e.body.trim() ? (e.body.length > 180 ? `${e.body.slice(0, 180)}…` : e.body) : "";
 
+                  const isOpen = openEntryIds.has(e.id);
                   const menuOpen = menuOpenForId === e.id;
 
                   return (
@@ -591,12 +607,17 @@ export default function JournalHome({ supabase, session }) {
                       key={e.id}
                       role="button"
                       tabIndex={0}
-                      onClick={() => openEntry(e.id)}
+                      onClick={() => {
+                        setOpenEntryIds((prev) => toggleInSet(prev, e.id));
+                      }}
                       onKeyDown={(ev) => {
-                        if (ev.key === "Enter" || ev.key === " ") openEntry(e.id);
+                        if (ev.key === "Enter" || ev.key === " ") {
+                          ev.preventDefault();
+                          setOpenEntryIds((prev) => toggleInSet(prev, e.id));
+                        }
                       }}
                       style={{ cursor: "pointer", position: "relative" }}
-                      title="Open entry"
+                      title={isOpen ? "Collapse entry" : "Expand entry"}
                       ref={menuOpen ? menuRootRef : null}
                     >
                       <Card>
@@ -633,6 +654,7 @@ export default function JournalHome({ supabase, session }) {
                               >
                                 <Chip>{typeLabel}</Chip>
                                 <span style={{ fontSize: 12, opacity: 0.65 }}>{formatDate(e.created_at)}</span>
+                                <span style={{ fontSize: 12, opacity: 0.65 }}>{isOpen ? "▾" : "▸"}</span>
                               </div>
                             </div>
 
@@ -647,12 +669,47 @@ export default function JournalHome({ supabase, session }) {
                             <KebabMenu onEdit={() => handleMenuEdit(e)} onDelete={() => handleMenuDelete(e)} />
                           ) : null}
 
-                          {preview ? (
-                            <div style={{ opacity: 0.88, whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{preview}</div>
-                          ) : null}
+                          {isOpen ? (
+                            <div style={{ display: "grid", gap: 10 }} onClick={(ev) => ev.stopPropagation()}>
+                              {e.body ? (
+                                <div style={{ opacity: 0.92, whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
+                                  {e.body}
+                                </div>
+                              ) : (
+                                <div style={{ opacity: 0.7, fontSize: 13 }}>No text.</div>
+                              )}
 
-                          {e.scene_id ? (
-                            <div style={{ fontSize: 12, opacity: 0.65 }}>Linked scene: {e.scene_id}</div>
+                              {e.scene_id ? (
+                                <div style={{ fontSize: 12, opacity: 0.65 }}>Linked scene: {e.scene_id}</div>
+                              ) : null}
+
+                              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                <SmallButton
+                                  disabled={saving}
+                                  onClick={(ev) => {
+                                    ev.stopPropagation();
+                                    setEditing(e);
+                                  }}
+                                  title="Edit entry"
+                                >
+                                  Edit
+                                </SmallButton>
+
+                                <SmallButton
+                                  tone="danger"
+                                  disabled={saving}
+                                  onClick={(ev) => {
+                                    ev.stopPropagation();
+                                    handleDelete(e.id);
+                                  }}
+                                  title="Delete entry"
+                                >
+                                  Delete
+                                </SmallButton>
+                              </div>
+                            </div>
+                          ) : preview ? (
+                            <div style={{ opacity: 0.88, whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{preview}</div>
                           ) : null}
                         </div>
                       </Card>
