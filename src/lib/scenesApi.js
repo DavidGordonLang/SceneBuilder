@@ -138,6 +138,7 @@ export async function fetchSceneById(sceneId) {
           id,
           status,
           tool_global_id,
+          instance_label,
           custom_name,
           custom_icon,
           tools_global(id, name, icon, tags, safety_level)
@@ -183,6 +184,7 @@ export async function fetchOwnedToolsForPicker() {
       id,
       status,
       tool_global_id,
+      instance_label,
       custom_name,
       custom_icon,
       tags_override,
