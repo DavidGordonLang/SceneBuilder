@@ -77,6 +77,8 @@ export default function ToolInstance({
           },
         ];
 
+  const instanceTitle = tu.instance_label ? `“${tu.instance_label}”` : "No label";
+
   return (
     <div
       style={{
@@ -116,10 +118,18 @@ export default function ToolInstance({
         }}
         title="Tap to expand / collapse instance"
       >
-        <div style={{ display: "grid", gap: 4, minWidth: 0 }}>
-          <div style={{ fontSize: 12, opacity: 0.7, fontWeight: 800 }}>Instance</div>
-          <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 900 }}>
-            {tu.instance_label ? `“${tu.instance_label}”` : "No label"}
+        <div style={{ display: "grid", gap: 2, minWidth: 0 }}>
+          <div
+            style={{
+              fontSize: 12,
+              opacity: 0.85,
+              fontWeight: 900,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {instanceTitle}
           </div>
         </div>
 
