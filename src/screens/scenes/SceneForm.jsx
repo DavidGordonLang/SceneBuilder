@@ -136,9 +136,17 @@ function getToolTypeLabel(toolUserRow) {
   return globalName || "Tool";
 }
 
+/**
+ * ✅ FIX: use instance_label first (real per-instance name),
+ * then custom_name (legacy), then fallback numbering.
+ */
 function buildInstanceLabel(typeLabel, instance, idx, count) {
-  const custom = String(instance?.custom_name || "").trim();
-  if (custom) return custom;
+  const instanceLabel = String(instance?.instance_label || "").trim();
+  if (instanceLabel) return instanceLabel;
+
+  const legacy = String(instance?.custom_name || "").trim();
+  if (legacy) return legacy;
+
   if (count > 1) return `${typeLabel} #${idx + 1}`;
   return typeLabel;
 }
