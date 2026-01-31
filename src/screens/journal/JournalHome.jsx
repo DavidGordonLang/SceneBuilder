@@ -321,8 +321,34 @@ export default function JournalHome({ supabase, session }) {
   // Kebab state
   const [menuOpenForId, setMenuOpenForId] = useState(null);
 
-  // IMPORTANT: ref now points ONLY to kebab area, not the whole card.
+  // Sync refs for event ordering (pointerdown vs click)
+  const menuOpenForIdRef = useRef(null);
+  useEffect(() => {
+    menuOpenForIdRef.current = menuOpenForId;
+  }, [menuOpenForId]);
+
+  // Ref points ONLY to kebab area, not the whole card.
   const kebabAreaRef = useRef(null);
+
+  // When we close the kebab via an outside tap, we suppress the card toggle
+  // for a short window so the same interaction doesn’t also open/close the card.
+  const suppressCardToggleRef = useRef(false);
+  const suppressTimerRef = useRef(null);
+
+  function suppressNextCardToggle(ms = 250) {
+    suppressCardToggleRef.current = true;
+    if (suppressTimerRef.current) clearTimeout(suppressTimerRef.current);
+    suppressTimerRef.current = setTimeout(() => {
+      suppressCardToggleRef.current = false;
+      suppressTimerRef.current = null;
+    }, ms);
+  }
+
+  useEffect(() => {
+    return () => {
+      if (suppressTimerRef.current) clearTimeout(suppressTimerRef.current);
+    };
+  }, []);
 
   function persistCache(nextEntries) {
     if (!userId) return;
@@ -411,23 +437,22 @@ export default function JournalHome({ supabase, session }) {
     }
 
     function onAnyDown(e) {
-      if (isInsideKebab(e.target)) return;
-      setMenuOpenForId(null);
+      // If menu is open and the tap is outside kebab area, close menu and suppress card toggle
+      if (menuOpenForIdRef.current && !isInsideKebab(e.target)) {
+        setMenuOpenForId(null);
+        suppressNextCardToggle(250);
+      }
     }
 
     function onKey(e) {
       if (e.key === "Escape") setMenuOpenForId(null);
     }
 
-    // pointerdown covers mouse + touch on modern browsers
     document.addEventListener("pointerdown", onAnyDown);
-    // fallback for older/mobile oddities
-    document.addEventListener("touchstart", onAnyDown, { passive: true });
     document.addEventListener("keydown", onKey);
 
     return () => {
       document.removeEventListener("pointerdown", onAnyDown);
-      document.removeEventListener("touchstart", onAnyDown);
       document.removeEventListener("keydown", onKey);
     };
   }, [menuOpenForId]);
@@ -524,11 +549,16 @@ export default function JournalHome({ supabase, session }) {
   }
 
   function toggleOpenCard(entryId) {
-    // If kebab is open, a tap anywhere else should close it first (and not require precision).
-    if (menuOpenForId) {
+    // If we just closed the kebab via outside tap, do NOTHING else.
+    if (suppressCardToggleRef.current) return;
+
+    // If a menu is open, first close it and suppress toggling for this tap.
+    if (menuOpenForIdRef.current) {
       setMenuOpenForId(null);
+      suppressNextCardToggle(250);
       return;
     }
+
     setOpenEntryIds((prev) => toggleInSet(prev, entryId));
   }
 
@@ -666,7 +696,7 @@ export default function JournalHome({ supabase, session }) {
                               </div>
                             </div>
 
-                            {/* Kebab area (ref lives here, not on the whole card) */}
+                            {/* Kebab area */}
                             <div
                               ref={menuOpen ? kebabAreaRef : null}
                               style={{ display: "flex", alignItems: "flex-start", gap: 8 }}
