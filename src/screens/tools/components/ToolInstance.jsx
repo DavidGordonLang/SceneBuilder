@@ -1,3 +1,5 @@
+// src/screens/tools/components/ToolInstance.jsx
+
 import React from "react";
 import { SmallButton } from "../../../components/routesUi";
 import KebabMenu from "./KebabMenu";
@@ -77,8 +79,8 @@ export default function ToolInstance({
           },
         ];
 
-  // ✅ No quotes, just the label
-  const instanceTitle = tu.instance_label || "No label";
+  const instanceTitle = tu?.instance_label ? String(tu.instance_label).trim() : "";
+  const headerTitle = instanceTitle || "No label";
 
   return (
     <div
@@ -92,7 +94,7 @@ export default function ToolInstance({
       }}
       onClick={(e) => e.stopPropagation()}
     >
-      {/* Header */}
+      {/* Instance header */}
       <div
         role="button"
         tabIndex={0}
@@ -117,20 +119,20 @@ export default function ToolInstance({
           cursor: "pointer",
           userSelect: "none",
         }}
-        title="Tap to expand / collapse"
+        title="Tap to expand / collapse instance"
       >
-        <div style={{ minWidth: 0 }}>
+        <div style={{ display: "grid", gap: 2, minWidth: 0 }}>
           <div
             style={{
               fontSize: 12,
-              opacity: 0.85,
+              opacity: instanceTitle ? 0.9 : 0.65,
               fontWeight: 900,
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
             }}
           >
-            {instanceTitle}
+            {headerTitle}
           </div>
         </div>
 
@@ -164,7 +166,7 @@ export default function ToolInstance({
             <div style={{ opacity: 0.7, fontSize: 13 }}>No photo yet.</div>
           )}
 
-          {/* Upload */}
+          {/* Single photo action (Upload OR Change) */}
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
             <label
               style={{
@@ -180,10 +182,10 @@ export default function ToolInstance({
                 fontSize: 12,
                 opacity: busy ? 0.6 : 1,
               }}
-              title="Upload a photo for this tool"
+              title={photoUrl ? "Change the photo for this tool instance" : "Upload a photo for this tool instance"}
               onClick={(e) => e.stopPropagation()}
             >
-              📷 Upload photo
+              📷 {photoUrl ? "Change photo" : "Upload photo"}
               <input
                 type="file"
                 accept="image/*"
@@ -197,19 +199,6 @@ export default function ToolInstance({
                 }}
               />
             </label>
-
-            {tu.photo_path ? (
-              <SmallButton
-                disabled={busy}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onEnsurePhoto?.(tu.id, tu.photo_path);
-                }}
-                title="Refresh photo preview"
-              >
-                Refresh photo
-              </SmallButton>
-            ) : null}
           </div>
 
           {/* Label edit */}
@@ -218,7 +207,7 @@ export default function ToolInstance({
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
               <input
                 value={draftLabelValue}
-                placeholder='e.g. Black cuffs, Travel kit'
+                placeholder='e.g. "Black cuffs", "Travel kit"'
                 disabled={busy}
                 onClick={(e) => e.stopPropagation()}
                 onKeyDown={(e) => e.stopPropagation()}
