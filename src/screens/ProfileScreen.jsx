@@ -1,3 +1,5 @@
+// src/screens/ProfileScreen.jsx
+
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { SmallButton } from "../components/routesUi";
@@ -8,10 +10,63 @@ import { useProfile } from "../hooks/useProfile";
 /**
  * Cache signed avatar URLs by storage path.
  * Avoids re-fetch + flicker every time Profile tab mounts.
+ *
+ * Enhancement:
+ * - persist the signed URL cache in localStorage so first open after reload
+ *   can be instant (as long as the signed URL hasn't expired).
  */
+
+const AVATAR_URL_LS_KEY = "scenebuilder.avatarSignedUrlCache.v1";
+
 let avatarSignedUrlCache = {
   // [path]: { url, expiresAtMs }
 };
+
+function readAvatarCacheFromStorage() {
+  try {
+    const raw = localStorage.getItem(AVATAR_URL_LS_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return;
+
+    // sanitize
+    const next = {};
+    const now = Date.now();
+    for (const [k, v] of Object.entries(parsed)) {
+      const path = String(k || "").trim();
+      if (!path) continue;
+      const url = String(v?.url || "");
+      const expiresAtMs = Number(v?.expiresAtMs || 0);
+      if (!url || !expiresAtMs) continue;
+      if (expiresAtMs <= now) continue;
+      next[path] = { url, expiresAtMs };
+    }
+    avatarSignedUrlCache = next;
+  } catch {
+    // ignore
+  }
+}
+
+function writeAvatarCacheToStorage() {
+  try {
+    // cap size to avoid unbounded growth
+    const entries = Object.entries(avatarSignedUrlCache || {});
+    // sort by newest expiry first
+    entries.sort((a, b) => Number(b[1]?.expiresAtMs || 0) - Number(a[1]?.expiresAtMs || 0));
+    const capped = entries.slice(0, 25);
+
+    const obj = {};
+    for (const [k, v] of capped) obj[k] = v;
+    localStorage.setItem(AVATAR_URL_LS_KEY, JSON.stringify(obj));
+  } catch {
+    // ignore (private mode etc)
+  }
+}
+
+// load once at module init
+if (typeof window !== "undefined") {
+  readAvatarCacheFromStorage();
+}
 
 function getCachedAvatarUrl(path) {
   const key = String(path || "").trim();
@@ -29,6 +84,7 @@ function setCachedAvatarUrl(path, url, ttlSeconds) {
   // shave a little off so we don't ride the exact expiry edge
   const expiresAtMs = Date.now() + (safeTtl - 30) * 1000;
   avatarSignedUrlCache[key] = { url: String(url || ""), expiresAtMs };
+  writeAvatarCacheToStorage();
 }
 
 function Field({ label, children, hint }) {
@@ -263,11 +319,7 @@ export default function ProfileScreen({ session, supabase }) {
   const showSkeleton = loading && !profile;
 
   // Onboarding label: avoid "Not complete" flash by not showing until profile is loaded.
-  const onboardingLabel = profile
-    ? profile.onboarding_complete
-      ? "Complete"
-      : "Not complete"
-    : "";
+  const onboardingLabel = profile ? (profile.onboarding_complete ? "Complete" : "Not complete") : "";
 
   return (
     <div>
