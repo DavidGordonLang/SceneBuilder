@@ -18,6 +18,11 @@ import KinkPreferencesScreen from "./screens/KinkPreferencesScreen";
 
 import ProfileScreen from "./screens/ProfileScreen";
 
+import { fetchScenes } from "./lib/scenesApi";
+import { fetchToolVault, fetchUserTools } from "./lib/toolsApi";
+import { fetchJournalEntries } from "./lib/journalApi";
+import { setCachedJournal, setCachedProfile, setCachedScenes, setCachedTools } from "./lib/appDataCache";
+
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -233,6 +238,34 @@ function BootOverlay() {
   );
 }
 
+async function bootstrapPrefetch({ supabase, session }) {
+  const uid = session?.user?.id;
+  if (!uid) return;
+
+  // Fetch in parallel. We only persist "home list" level data.
+  const [scenesRes, toolsVaultRes, userToolsRes, journalRes, profileRes] = await Promise.allSettled([
+    fetchScenes(), // uses auth; ok
+    fetchToolVault(),
+    fetchUserTools(),
+    fetchJournalEntries({ supabase, userId: uid, limit: 80 }),
+    supabase
+      .from("profiles")
+      .select("id, display_name, bio, avatar_url, onboarding_complete")
+      .eq("id", uid)
+      .single(),
+  ]);
+
+  if (scenesRes.status === "fulfilled") setCachedScenes(uid, scenesRes.value ?? []);
+  if (toolsVaultRes.status === "fulfilled" && userToolsRes.status === "fulfilled") {
+    setCachedTools(uid, toolsVaultRes.value ?? [], userToolsRes.value ?? []);
+  }
+  if (journalRes.status === "fulfilled") setCachedJournal(uid, journalRes.value ?? []);
+  if (profileRes.status === "fulfilled") {
+    const row = profileRes.value?.data ?? null;
+    if (row) setCachedProfile(uid, row);
+  }
+}
+
 function AuthedShell({ session }) {
   const location = useLocation();
 
@@ -242,22 +275,42 @@ function AuthedShell({ session }) {
     return true;
   }, [location.pathname]);
 
-  // One-time "boot mask" to hide first-load flashes across routes.
+  // Boot overlay now ties to real data prefetch (with min + max).
   const [booting, setBooting] = useState(true);
 
   useEffect(() => {
-    let t = null;
+    let alive = true;
+    const startMs = Date.now();
+    const MIN_MS = 220;
+    const MAX_MS = 4500; // safety: never hang forever
 
-    // Wait for first paint, then keep overlay for a tiny minimum duration.
-    // This prevents the user seeing empty-state flashes on first app load.
-    requestAnimationFrame(() => {
-      t = window.setTimeout(() => setBooting(false), 220);
-    });
+    const maxTimer = window.setTimeout(() => {
+      if (!alive) return;
+      setBooting(false);
+    }, MAX_MS);
+
+    (async () => {
+      try {
+        await bootstrapPrefetch({ supabase, session });
+      } catch {
+        // ignore; prefetch shouldn't block the app forever
+      } finally {
+        const elapsed = Date.now() - startMs;
+        const remaining = Math.max(0, MIN_MS - elapsed);
+
+        window.setTimeout(() => {
+          if (!alive) return;
+          setBooting(false);
+          window.clearTimeout(maxTimer);
+        }, remaining);
+      }
+    })();
 
     return () => {
-      if (t) window.clearTimeout(t);
+      alive = false;
+      window.clearTimeout(maxTimer);
     };
-  }, []);
+  }, [session]);
 
   return (
     <div style={{ minHeight: "100vh" }}>
@@ -302,14 +355,13 @@ function AuthedShell({ session }) {
             <Route path="/home" element={<HomeRedirect />} />
 
             {/* Scenes */}
-            <Route path="/scenes" element={<ScenesHome supabase={supabase} />} />
+            <Route path="/scenes" element={<ScenesHome supabase={supabase} session={session} />} />
             <Route path="/scenes/new" element={<SceneCreate supabase={supabase} session={session} />} />
-            {/* Old SceneView route is retired: keep the URL but redirect into ScenesHome */}
             <Route path="/scenes/:id" element={<Navigate to="/scenes" replace />} />
             <Route path="/scenes/:id/edit" element={<SceneEdit supabase={supabase} session={session} />} />
 
             {/* Tools */}
-            <Route path="/tools" element={<ToolsHome supabase={supabase} />} />
+            <Route path="/tools" element={<ToolsHome supabase={supabase} session={session} />} />
 
             {/* Journal */}
             <Route path="/journal" element={<JournalHome supabase={supabase} session={session} />} />
@@ -342,37 +394,34 @@ function AuthedShell({ session }) {
       </div>
 
       {showShell ? (
-        <>
-          {/* BOTTOM: utility nav */}
-          <nav
+        <nav
+          style={{
+            position: "fixed",
+            left: 0,
+            right: 0,
+            bottom: 0,
+            zIndex: 60,
+            padding: "10px 12px",
+            borderTop: "1px solid rgba(255,255,255,0.08)",
+            background: "rgba(0,0,0,0.55)",
+            backdropFilter: "blur(10px)",
+            WebkitBackdropFilter: "blur(10px)",
+          }}
+        >
+          <div
             style={{
-              position: "fixed",
-              left: 0,
-              right: 0,
-              bottom: 0,
-              zIndex: 60,
-              padding: "10px 12px",
-              borderTop: "1px solid rgba(255,255,255,0.08)",
-              background: "rgba(0,0,0,0.55)",
-              backdropFilter: "blur(10px)",
-              WebkitBackdropFilter: "blur(10px)",
+              maxWidth: 720,
+              margin: "0 auto",
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr 1fr",
+              gap: 10,
             }}
           >
-            <div
-              style={{
-                maxWidth: 720,
-                margin: "0 auto",
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr 1fr",
-                gap: 10,
-              }}
-            >
-              <PillLink to="/settings" label="Settings" end />
-              <PillLink to="/home" label="Home" end />
-              <PillLink to="/profile" label="Profile" end />
-            </div>
-          </nav>
-        </>
+            <PillLink to="/settings" label="Settings" end />
+            <PillLink to="/home" label="Home" end />
+            <PillLink to="/profile" label="Profile" end />
+          </div>
+        </nav>
       ) : null}
     </div>
   );
