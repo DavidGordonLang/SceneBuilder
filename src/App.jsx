@@ -1,11 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import {
-  NavLink,
-  Route,
-  Routes,
-  Navigate,
-  useLocation,
-} from "react-router-dom";
+import { NavLink, Route, Routes, Navigate, useLocation } from "react-router-dom";
 import { supabase } from "./lib/supabaseClient";
 import { ToastProvider } from "./ui/ToastContext.jsx";
 
@@ -216,6 +210,29 @@ function HomeRedirect() {
   return <Navigate to="/scenes" replace />;
 }
 
+function BootOverlay() {
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 9999,
+        background: "rgba(0,0,0,0.92)",
+        display: "grid",
+        placeItems: "center",
+        padding: 16,
+      }}
+    >
+      <div style={{ width: "100%", maxWidth: 520, textAlign: "center" }}>
+        <div style={{ fontSize: 22, fontWeight: 900, color: "#f3f3f7" }}>SceneBuilder</div>
+        <div style={{ marginTop: 10, opacity: 0.7, color: "#f3f3f7", fontSize: 13 }}>
+          Loading…
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AuthedShell({ session }) {
   const location = useLocation();
 
@@ -225,8 +242,27 @@ function AuthedShell({ session }) {
     return true;
   }, [location.pathname]);
 
+  // One-time "boot mask" to hide first-load flashes across routes.
+  const [booting, setBooting] = useState(true);
+
+  useEffect(() => {
+    let t = null;
+
+    // Wait for first paint, then keep overlay for a tiny minimum duration.
+    // This prevents the user seeing empty-state flashes on first app load.
+    requestAnimationFrame(() => {
+      t = window.setTimeout(() => setBooting(false), 220);
+    });
+
+    return () => {
+      if (t) window.clearTimeout(t);
+    };
+  }, []);
+
   return (
     <div style={{ minHeight: "100vh" }}>
+      {booting ? <BootOverlay /> : null}
+
       {showShell ? (
         <>
           {/* TOP: primary tabs (always) */}
@@ -289,23 +325,14 @@ function AuthedShell({ session }) {
               path="/settings/kink-preferences"
               element={<KinkPreferencesScreen supabase={supabase} session={session} mode="settings" />}
             />
-            <Route
-              path="/settings/partners"
-              element={<div style={{ padding: 16, opacity: 0.75 }}>Coming soon.</div>}
-            />
+            <Route path="/settings/partners" element={<div style={{ padding: 16, opacity: 0.75 }}>Coming soon.</div>} />
 
             {/* Profile */}
             <Route path="/profile" element={<ProfileScreen supabase={supabase} session={session} />} />
-            <Route
-              path="/profile/kinks"
-              element={<KinkPreferencesScreen supabase={supabase} session={session} mode="profile" />}
-            />
+            <Route path="/profile/kinks" element={<KinkPreferencesScreen supabase={supabase} session={session} mode="profile" />} />
 
             {/* Onboarding */}
-            <Route
-              path="/onboarding"
-              element={<KinkPreferencesScreen supabase={supabase} session={session} mode="onboarding" />}
-            />
+            <Route path="/onboarding" element={<KinkPreferencesScreen supabase={supabase} session={session} mode="onboarding" />} />
 
             {/* Default */}
             <Route path="/" element={<Navigate to="/home" replace />} />
