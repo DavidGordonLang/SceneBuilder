@@ -118,122 +118,94 @@ function TextArea(props) {
   );
 }
 
-function Divider() {
-  return <div style={{ height: 1, background: "rgba(255,255,255,0.08)", margin: "10px 0" }} />;
+function SkeletonEntryCard() {
+  return (
+    <Card>
+      <div style={{ display: "grid", gap: 10 }}>
+        <div style={{ height: 12, width: "40%", borderRadius: 999, background: "rgba(255,255,255,0.07)" }} />
+        <div style={{ height: 13, width: "70%", borderRadius: 999, background: "rgba(255,255,255,0.09)" }} />
+        <div style={{ height: 10, width: "88%", borderRadius: 999, background: "rgba(255,255,255,0.05)" }} />
+        <div style={{ height: 10, width: "76%", borderRadius: 999, background: "rgba(255,255,255,0.05)" }} />
+      </div>
+    </Card>
+  );
 }
 
-function EntryEditor({ initial, onCancel, onSave, saving }) {
-  const [entryType, setEntryType] = useState(initial?.entry_type || "reflection");
+function EntryEditor({ initial, saving, onCancel, onSave }) {
+  const [type, setType] = useState(initial?.entry_type || "reflection");
   const [title, setTitle] = useState(initial?.title || "");
   const [body, setBody] = useState(initial?.body || "");
-  const [sceneId, setSceneId] = useState(initial?.scene_id || "");
 
-  const canSave = !!body.trim();
+  useEffect(() => {
+    setType(initial?.entry_type || "reflection");
+    setTitle(initial?.title || "");
+    setBody(initial?.body || "");
+  }, [initial?.entry_type, initial?.title, initial?.body]);
 
   return (
     <Card>
-      <div style={{ display: "grid", gap: 12 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            <div style={{ fontWeight: 900, letterSpacing: 0.2 }}>
-              {initial?.id ? "Edit entry" : "New entry"}
-            </div>
-            <Chip>{ENTRY_TYPES.find((t) => t.value === entryType)?.label || entryType}</Chip>
-          </div>
-
-          <div style={{ display: "flex", gap: 8 }}>
-            <SmallButton disabled={saving} onClick={onCancel}>
-              Close
-            </SmallButton>
-            <SmallButton
-              disabled={saving || !canSave}
-              onClick={() =>
-                onSave({
-                  entry_type: entryType,
-                  title,
-                  body,
-                  scene_id: sceneId.trim() ? sceneId.trim() : null,
-                })
-              }
-            >
-              {saving ? "Saving…" : "Save"}
-            </SmallButton>
-          </div>
-        </div>
-
-        <Divider />
-
-        <div style={{ display: "grid", gap: 10 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "160px 1fr", gap: 10 }}>
-            <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 800 }}>Entry type</div>
-            <Select value={entryType} onChange={(e) => setEntryType(e.target.value)}>
+      <div style={{ display: "grid", gap: 10 }}>
+        <div style={{ display: "grid", gap: 8 }}>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+            <div style={{ fontSize: 12, opacity: 0.7 }}>Type</div>
+            <Select value={type} onChange={(e) => setType(e.target.value)} disabled={saving}>
               {ENTRY_TYPES.map((t) => (
                 <option key={t.value} value={t.value}>
                   {t.label}
                 </option>
               ))}
             </Select>
-
-            <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 800 }}>Title</div>
-            <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Optional title" />
-
-            <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 800 }}>Linked scene</div>
-            <Input
-              value={sceneId}
-              onChange={(e) => setSceneId(e.target.value)}
-              placeholder="Scene ID (optional for now)"
-            />
           </div>
 
-          <TextArea placeholder="Write your entry…" value={body} onChange={(e) => setBody(e.target.value)} />
+          <Input
+            placeholder="Title (optional)"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            disabled={saving}
+          />
+        </div>
+
+        <TextArea
+          placeholder="Write here…"
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          disabled={saving}
+        />
+
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <SmallButton onClick={onCancel} disabled={saving}>
+            Cancel
+          </SmallButton>
+          <SmallButton
+            onClick={() => onSave({ entry_type: type, title, body })}
+            disabled={saving || !String(body || "").trim()}
+          >
+            {saving ? "Saving…" : "Save"}
+          </SmallButton>
         </div>
       </div>
     </Card>
   );
 }
 
-function KebabButton({ onClick, title = "More actions" }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={title}
-      aria-label={title}
-      style={{
-        border: "none",
-        background: "transparent",
-        color: "rgba(243,243,247,0.85)",
-        cursor: "pointer",
-        padding: 6,
-        margin: -6,
-        lineHeight: 1,
-        fontSize: 20,
-        fontWeight: 900,
-      }}
-    >
-      ⋯
-    </button>
-  );
-}
+function KebabMenu({ open, onClose, onEdit, onDelete }) {
+  const boxStyle = {
+    position: "absolute",
+    right: 10,
+    top: 42,
+    minWidth: 170,
+    borderRadius: 12,
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "rgba(24,24,28,0.98)",
+    backdropFilter: "blur(10px)",
+    overflow: "hidden",
+    zIndex: 50,
+  };
 
-function KebabMenu({ onEdit, onDelete }) {
+  if (!open) return null;
+
   return (
-    <div
-      role="menu"
-      style={{
-        position: "absolute",
-        top: 40,
-        right: 10,
-        zIndex: 50,
-        minWidth: 160,
-        borderRadius: 12,
-        border: "1px solid rgba(255,255,255,0.12)",
-        background: "rgba(10,10,12,0.96)",
-        boxShadow: "0 10px 30px rgba(0,0,0,0.45)",
-        overflow: "hidden",
-      }}
-      onClick={(e) => e.stopPropagation()}
-    >
+    <div style={boxStyle} role="menu">
       <button
         type="button"
         role="menuitem"
@@ -247,14 +219,11 @@ function KebabMenu({ onEdit, onDelete }) {
           color: "#f3f3f7",
           cursor: "pointer",
           fontSize: 13,
-          fontWeight: 750,
+          fontWeight: 850,
         }}
       >
         Edit
       </button>
-
-      <div style={{ height: 1, background: "rgba(255,255,255,0.08)" }} />
-
       <button
         type="button"
         role="menuitem"
@@ -284,6 +253,9 @@ export default function JournalHome({ supabase, session }) {
   const userId = session?.user?.id;
 
   const cachedForUser = userId ? journalHomeCache.entriesByUserId?.[userId] : null;
+
+  const hasCache = userId && Array.isArray(cachedForUser);
+  const showInitialSkeleton = loading && !hasCache;
 
   const [loading, setLoading] = useState(() => !(userId && Array.isArray(cachedForUser)));
   const [saving, setSaving] = useState(false);
@@ -358,98 +330,94 @@ export default function JournalHome({ supabase, session }) {
       }
 
       let found = (list || []).find((e) => e.id === editId);
+      if (!found) return;
 
-      if (!found) {
-        try {
-          const fresh = await fetchJournalEntries({ supabase, userId, limit: 200 });
-          found = (fresh || []).find((e) => e.id === editId) || null;
-          if (Array.isArray(fresh) && fresh.length) {
-            setEntries(fresh);
-            persistCache(fresh);
-          }
-        } catch {
-          // ignore
-        }
-      }
-
-      setEditing(found || { mode: "new" });
-      navigate("/journal", { replace: true, state: {} });
+      setEditing(found);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location?.state]);
+  }, [location?.state?.editId]);
 
-  // Close kebab on outside click / escape (ONLY closes kebab; never touches card open state)
+  // Close kebab on outside click, but do NOT collapse card.
   useEffect(() => {
-    if (!menuOpenForId) return;
-
-    function onDocDown(e) {
+    function onDocClick(e) {
+      if (!menuOpenForId) return;
       if (menuBoxRef.current && menuBoxRef.current.contains(e.target)) return;
       setMenuOpenForId(null);
     }
-
-    function onKey(e) {
-      if (e.key === "Escape") setMenuOpenForId(null);
-    }
-
-    document.addEventListener("mousedown", onDocDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDocDown);
-      document.removeEventListener("keydown", onKey);
-    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
   }, [menuOpenForId]);
 
-  const sorted = useMemo(() => {
-    const list = Array.isArray(entries) ? entries : [];
-    return [...list].sort((a, b) => {
-      const ta = new Date(a?.created_at || 0).getTime();
-      const tb = new Date(b?.created_at || 0).getTime();
-      return tb - ta;
-    });
-  }, [entries]);
-
   const filtered = useMemo(() => {
-    const q = (search || "").trim().toLowerCase();
-    if (!q) return sorted;
+    const q = String(search || "").trim().toLowerCase();
+    if (!q) return entries;
 
-    return sorted.filter((e) => {
-      const t = (e.title || "").toLowerCase();
-      const b = (e.body || "").toLowerCase();
-      const ty = (e.entry_type || "").toLowerCase();
-      return t.includes(q) || b.includes(q) || ty.includes(q);
+    return (entries || []).filter((e) => {
+      const hay = `${e.title || ""}\n${e.body || ""}`.toLowerCase();
+      return hay.includes(q);
     });
-  }, [sorted, search]);
+  }, [entries, search]);
 
   const grouped = useMemo(() => {
-    const buckets = new Map(); // dayKey -> { label, items }
-    for (const e of filtered) {
-      const ts = e?.created_at;
-      if (!ts) continue;
-      const key = dayKeyFromTs(ts);
-      if (!buckets.has(key)) {
-        buckets.set(key, { label: dayHeadingLabel(ts), items: [] });
-      }
-      buckets.get(key).items.push(e);
+    const byDay = new Map();
+    for (const e of filtered || []) {
+      const ts = e.updated_at || e.created_at || new Date().toISOString();
+      const k = dayKeyFromTs(ts);
+      const arr = byDay.get(k) || [];
+      arr.push(e);
+      byDay.set(k, arr);
     }
 
-    const keys = Array.from(buckets.keys()).sort((a, b) => Number(b) - Number(a));
-    return keys.map((k) => ({ dayKey: k, label: buckets.get(k).label, items: buckets.get(k).items }));
+    const groups = Array.from(byDay.entries())
+      .map(([dayKey, items]) => {
+        const ts = Number(dayKey);
+        const label = dayHeadingLabel(ts);
+        const sorted = (items || [])
+          .slice()
+          .sort((a, b) => new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime());
+
+        return { dayKey, label, items: sorted };
+      })
+      .sort((a, b) => Number(b.dayKey) - Number(a.dayKey));
+
+    return groups;
   }, [filtered]);
+
+  function handleCardToggle(entryId) {
+    setOpenEntryId((prev) => (prev === entryId ? null : entryId));
+    setMenuOpenForId(null);
+  }
 
   async function handleSave(payload) {
     if (!userId) return;
     setSaving(true);
     setErr("");
+
     try {
       if (editing?.id) {
-        await updateJournalEntry({ supabase, id: editing.id, patch: payload });
-        showToast?.("Saved");
+        const updated = await updateJournalEntry({
+          supabase,
+          userId,
+          id: editing.id,
+          ...payload,
+        });
+        const next = (entries || []).map((e) => (e.id === editing.id ? updated : e));
+        setEntries(next);
+        persistCache(next);
+        showToast("Updated.");
       } else {
-        await createJournalEntry({ supabase, userId, entry: payload });
-        showToast?.("Created");
+        const created = await createJournalEntry({
+          supabase,
+          userId,
+          ...payload,
+        });
+        const next = [created, ...(entries || [])];
+        setEntries(next);
+        persistCache(next);
+        showToast("Saved.");
       }
+
       setEditing(null);
-      await load({ silent: true });
     } catch (e) {
       setErr(e?.message || "Save failed.");
     } finally {
@@ -458,42 +426,28 @@ export default function JournalHome({ supabase, session }) {
   }
 
   async function handleDelete(id) {
-    const ok = window.confirm("Delete this entry?");
+    if (!userId) return;
+    const ok = window.confirm("Delete this entry? This cannot be undone.");
     if (!ok) return;
 
+    setSaving(true);
     setErr("");
+
     try {
-      await deleteJournalEntry({ supabase, id });
-      showToast?.("Deleted");
-      // If the open card was deleted, close it
-      setOpenEntryId((cur) => (cur === id ? null : cur));
-      await load({ silent: true });
+      await deleteJournalEntry({ supabase, userId, id });
+      const next = (entries || []).filter((e) => e.id !== id);
+      setEntries(next);
+      persistCache(next);
+
+      setMenuOpenForId(null);
+      if (openEntryId === id) setOpenEntryId(null);
+
+      showToast("Deleted.");
     } catch (e) {
       setErr(e?.message || "Delete failed.");
+    } finally {
+      setSaving(false);
     }
-  }
-
-  function toggleMenu(id) {
-    setMenuOpenForId((cur) => (cur === id ? null : id));
-  }
-
-  function handleMenuEdit(entry) {
-    setMenuOpenForId(null);
-    setEditing(entry);
-  }
-
-  async function handleMenuDelete(entry) {
-    setMenuOpenForId(null);
-    await handleDelete(entry.id);
-  }
-
-  function handleCardToggle(entryId) {
-    // If a kebab is open (for this card or any card), tapping the card should ONLY close the kebab.
-    if (menuOpenForId) {
-      setMenuOpenForId(null);
-      return;
-    }
-    setOpenEntryId((cur) => (cur === entryId ? null : entryId));
   }
 
   return (
@@ -541,6 +495,14 @@ export default function JournalHome({ supabase, session }) {
 
         {/* Timeline */}
         <div style={{ display: "grid", gap: 14 }}>
+          {showInitialSkeleton ? (
+            <>
+              <SkeletonEntryCard />
+              <SkeletonEntryCard />
+              <SkeletonEntryCard />
+            </>
+          ) : null}
+
           {!loading && filtered.length === 0 ? (
             <Card>
               <div style={{ opacity: 0.85, lineHeight: 1.4 }}>
@@ -589,77 +551,71 @@ export default function JournalHome({ supabase, session }) {
                       tabIndex={0}
                       onClick={() => handleCardToggle(e.id)}
                       onKeyDown={(ev) => {
-                        if (ev.key === "Enter" || ev.key === " ") {
-                          ev.preventDefault();
-                          handleCardToggle(e.id);
-                        }
+                        if (ev.key === "Enter" || ev.key === " ") handleCardToggle(e.id);
                       }}
-                      style={{ cursor: "pointer", position: "relative" }}
-                      title={menuOpenForId ? "Close menu" : isOpen ? "Collapse entry" : "Expand entry"}
+                      style={{ position: "relative" }}
                     >
                       <Card>
                         <div style={{ display: "grid", gap: 10 }}>
-                          {/* Header row: title + pill inline, kebab on the right */}
-                          <div
-                            style={{
-                              display: "flex",
-                              justifyContent: "space-between",
-                              gap: 12,
-                              alignItems: "flex-start",
-                            }}
-                          >
-                            <div style={{ minWidth: 0, display: "flex", gap: 10, alignItems: "center" }}>
-                              <div
-                                style={{
-                                  fontWeight: 900,
-                                  letterSpacing: 0.2,
-                                  whiteSpace: "nowrap",
-                                  overflow: "hidden",
-                                  textOverflow: "ellipsis",
-                                  minWidth: 0,
-                                }}
-                              >
-                                {title}
-                              </div>
-
-                              <div style={{ flex: "0 0 auto" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
+                            <div style={{ display: "grid", gap: 6 }}>
+                              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                                 <Chip>{typeLabel}</Chip>
+                                <div style={{ fontWeight: 900 }}>{title}</div>
                               </div>
+                              {preview ? <div style={{ opacity: 0.8, lineHeight: 1.35 }}>{preview}</div> : null}
                             </div>
 
-                            <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-                              <div
-                                onClick={(ev) => {
-                                  ev.stopPropagation();
+                            <button
+                              type="button"
+                              aria-label="More"
+                              onClick={(ev) => {
+                                ev.stopPropagation();
+                                setMenuOpenForId((prev) => (prev === e.id ? null : e.id));
+                              }}
+                              style={{
+                                width: 34,
+                                height: 34,
+                                borderRadius: 12,
+                                border: "1px solid rgba(255,255,255,0.12)",
+                                background: "rgba(255,255,255,0.04)",
+                                color: "#f3f3f7",
+                                cursor: "pointer",
+                                fontSize: 18,
+                                lineHeight: "34px",
+                                textAlign: "center",
+                                padding: 0,
+                              }}
+                            >
+                              ⋯
+                            </button>
+
+                            <div ref={menuBoxRef}>
+                              <KebabMenu
+                                open={menuOpen}
+                                onClose={() => setMenuOpenForId(null)}
+                                onEdit={() => {
+                                  setMenuOpenForId(null);
+                                  setEditing(e);
+                                  setOpenEntryId(null);
                                 }}
-                              >
-                                <KebabButton onClick={() => toggleMenu(e.id)} title="Entry actions" />
-                              </div>
+                                onDelete={() => handleDelete(e.id)}
+                              />
                             </div>
                           </div>
 
-                          {menuOpen ? (
+                          {isOpen ? (
                             <div
-                              ref={menuBoxRef}
-                              onClick={(ev) => {
-                                ev.stopPropagation();
+                              style={{
+                                paddingTop: 10,
+                                borderTop: "1px solid rgba(255,255,255,0.08)",
+                                whiteSpace: "pre-wrap",
+                                lineHeight: 1.45,
+                                opacity: 0.92,
                               }}
                             >
-                              <KebabMenu onEdit={() => handleMenuEdit(e)} onDelete={() => handleMenuDelete(e)} />
-                            </div>
-                          ) : null}
-
-                          {/* Body */}
-                          {isOpen ? (
-                            <div style={{ opacity: 0.92, whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
                               {e.body || ""}
                             </div>
-                          ) : preview ? (
-                            <div style={{ opacity: 0.88, whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{preview}</div>
-                          ) : null}
-
-                          {isOpen && e.scene_id ? (
-                            <div style={{ fontSize: 12, opacity: 0.65 }}>Linked scene: {e.scene_id}</div>
                           ) : null}
                         </div>
                       </Card>
@@ -670,8 +626,6 @@ export default function JournalHome({ supabase, session }) {
             </div>
           ))}
         </div>
-
-        <div style={{ height: 24 }} />
       </Page>
     </div>
   );
