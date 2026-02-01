@@ -98,15 +98,17 @@ export default function ScenesHome() {
 
   const hasCache = Array.isArray(scenesHomeCache.scenes);
 
+  // Key change: scenes is null until first fetch completes (unknown vs known-empty)
+  const [scenes, setScenes] = useState(() => (hasCache ? scenesHomeCache.scenes : null));
   const [loading, setLoading] = useState(() => !hasCache);
+
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [scenes, setScenes] = useState(() => scenesHomeCache.scenes || []);
 
   const [openScenes, setOpenScenes] = useState(() => new Set());
   const [details, setDetails] = useState(() => scenesHomeCache.details || {});
 
-  const showInitialSkeleton = loading && !hasCache && scenes.length === 0;
+  const showInitialSkeleton = loading && scenes === null;
 
   function persistCache(nextScenes, nextDetails) {
     scenesHomeCache = {
@@ -125,11 +127,14 @@ export default function ScenesHome() {
     setErr("");
     try {
       const data = await fetchScenes();
-      const nextScenes = data || [];
+      const nextScenes = Array.isArray(data) ? data : [];
       setScenes(nextScenes);
       persistCache(nextScenes, details);
     } catch (e) {
       setErr(e?.message || "Failed to load scenes.");
+      // Mark as known-empty so we don't stick in "unknown" forever
+      setScenes([]);
+      persistCache([], details);
     } finally {
       if (!silent || !hasExisting) setLoading(false);
     }
@@ -155,7 +160,7 @@ export default function ScenesHome() {
     if (existingCached?.status === "ready") {
       setDetails((prev) => {
         const next = { ...prev, [sceneId]: existingCached };
-        persistCache(scenes, next);
+        persistCache(Array.isArray(scenes) ? scenes : scenesHomeCache.scenes, next);
         return next;
       });
       return;
@@ -164,7 +169,7 @@ export default function ScenesHome() {
 
     setDetails((prev) => {
       const next = { ...prev, [sceneId]: { status: "loading" } };
-      persistCache(scenes, next);
+      persistCache(Array.isArray(scenes) ? scenes : scenesHomeCache.scenes, next);
       return next;
     });
 
@@ -172,7 +177,7 @@ export default function ScenesHome() {
       const full = await fetchSceneById(sceneId);
       setDetails((prev) => {
         const next = { ...prev, [sceneId]: { status: "ready", data: full } };
-        persistCache(scenes, next);
+        persistCache(Array.isArray(scenes) ? scenes : scenesHomeCache.scenes, next);
         return next;
       });
     } catch (e) {
@@ -184,7 +189,7 @@ export default function ScenesHome() {
             error: e?.message || "Failed to load scene details.",
           },
         };
-        persistCache(scenes, next);
+        persistCache(Array.isArray(scenes) ? scenes : scenesHomeCache.scenes, next);
         return next;
       });
     }
@@ -213,7 +218,8 @@ export default function ScenesHome() {
     try {
       await updateScenePlanningStage(scene.id, next);
       setScenes((prev) => {
-        const nextScenes = prev.map((s) => (s.id === scene.id ? { ...s, planning_stage: next } : s));
+        const prevArr = Array.isArray(prev) ? prev : [];
+        const nextScenes = prevArr.map((s) => (s.id === scene.id ? { ...s, planning_stage: next } : s));
         persistCache(nextScenes, details);
         return nextScenes;
       });
@@ -245,7 +251,7 @@ export default function ScenesHome() {
       setDetails((prev) => {
         const next = { ...prev };
         delete next[sceneId];
-        persistCache(scenes, next);
+        persistCache(Array.isArray(scenes) ? scenes : scenesHomeCache.scenes, next);
         return next;
       });
 
@@ -256,6 +262,9 @@ export default function ScenesHome() {
       setBusy(false);
     }
   }
+
+  const scenesArr = Array.isArray(scenes) ? scenes : [];
+  const isKnownEmpty = Array.isArray(scenes) && scenes.length === 0 && !loading;
 
   return (
     <div>
@@ -276,7 +285,7 @@ export default function ScenesHome() {
           </div>
 
           <div style={{ fontSize: 12, opacity: 0.7 }}>
-            {loading ? "Loading…" : `${scenes.length} scene${scenes.length === 1 ? "" : "s"}`}
+            {loading ? "Loading…" : `${scenesArr.length} scene${scenesArr.length === 1 ? "" : "s"}`}
           </div>
         </div>
 
@@ -302,7 +311,23 @@ export default function ScenesHome() {
             </>
           ) : null}
 
-          {scenes.map((s) => {
+          {isKnownEmpty ? (
+            <Card>
+              <div style={{ display: "grid", gap: 8 }}>
+                <div style={{ fontWeight: 850 }}>No scenes yet</div>
+                <div style={{ fontSize: 13, opacity: 0.75, lineHeight: 1.4 }}>
+                  Create your first scene plan to start building your library.
+                </div>
+                <div>
+                  <SmallButton asLink to="/scenes/new">
+                    + New scene
+                  </SmallButton>
+                </div>
+              </div>
+            </Card>
+          ) : null}
+
+          {scenesArr.map((s) => {
             const isOpen = openScenes.has(s.id);
             const stage = s.planning_stage || "intent";
 
