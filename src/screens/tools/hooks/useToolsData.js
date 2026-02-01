@@ -43,17 +43,24 @@ export function useToolsData() {
     Array.isArray(toolsCache.vault) && Array.isArray(toolsCache.userTools);
 
   const [tab, setTab] = useState("drawer"); // drawer | vault
+
+  // Key change: null means "unknown/not loaded yet"
+  const [vault, setVault] = useState(() => (hasCache ? toolsCache.vault : null));
+  const [userTools, setUserTools] = useState(() => (hasCache ? toolsCache.userTools : null));
+
+  // loading should represent "first load pending" (unless we have cache)
   const [loading, setLoading] = useState(() => !hasCache);
+
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-
-  const [vault, setVault] = useState(() => toolsCache.vault || []);
-  const [userTools, setUserTools] = useState(() => toolsCache.userTools || []);
 
   // Per-instance UI state
   const [draftLabel, setDraftLabel] = useState({}); // { [tools_user_id]: string }
   const [photoUrlById, setPhotoUrlById] = useState({}); // { [tools_user_id]: signedUrl }
   const [photoPathById, setPhotoPathById] = useState({}); // { [tools_user_id]: photo_path last loaded }
+
+  const drawerKnown = userTools !== null;
+  const vaultKnown = vault !== null;
 
   function persistCache(nextVault, nextUserTools) {
     toolsCache = {
@@ -65,18 +72,33 @@ export function useToolsData() {
 
   async function reload(opts = {}) {
     const silent = !!opts.silent;
-    if (!silent) setLoading(true);
+
+    // If we already have known data, don't flip the whole screen into loading on a silent refresh.
+    const hasKnownData = drawerKnown && vaultKnown;
+
+    if (!silent || !hasKnownData) setLoading(true);
 
     setErr("");
     try {
       const [v, ut] = await Promise.all([fetchToolVault(), fetchUserTools()]);
-      setVault(v);
-      setUserTools(ut);
-      persistCache(v, ut);
+      const nextV = Array.isArray(v) ? v : [];
+      const nextUT = Array.isArray(ut) ? ut : [];
+
+      setVault(nextV);
+      setUserTools(nextUT);
+      persistCache(nextV, nextUT);
     } catch (e) {
       setErr(e?.message || "Failed to load tools.");
+
+      // On first load failure, mark as known-empty so we don't remain in "unknown" forever.
+      // On silent refresh failure, keep existing data (no regressions / no flash).
+      if (!hasKnownData) {
+        setVault([]);
+        setUserTools([]);
+        persistCache([], []);
+      }
     } finally {
-      if (!silent) setLoading(false);
+      if (!silent || !hasKnownData) setLoading(false);
     }
   }
 
@@ -84,20 +106,32 @@ export function useToolsData() {
     let alive = true;
     (async () => {
       if (!alive) return;
+
       // If we have cache, don't show Loading/empty-state flash.
       // Still do a silent refresh to keep data accurate.
       await reload({ silent: hasCache });
+
       if (!alive) return;
+
+      // If we had cache, ensure loading is false immediately (we're showing cached data)
       if (hasCache) setLoading(false);
     })();
+
     return () => {
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const owned = useMemo(() => userTools.filter((t) => t.status === "owned"), [userTools]);
-  const craving = useMemo(() => userTools.filter((t) => t.status === "craving"), [userTools]);
+  const owned = useMemo(() => {
+    const arr = Array.isArray(userTools) ? userTools : [];
+    return arr.filter((t) => t.status === "owned");
+  }, [userTools]);
+
+  const craving = useMemo(() => {
+    const arr = Array.isArray(userTools) ? userTools : [];
+    return arr.filter((t) => t.status === "craving");
+  }, [userTools]);
 
   const ownedGlobalIds = useMemo(() => {
     const s = new Set();
@@ -260,9 +294,13 @@ export function useToolsData() {
     busy,
     err,
 
+    // known/unknown flags (useful for UI gating)
+    drawerKnown,
+    vaultKnown,
+
     // data
-    vault,
-    userTools,
+    vault: Array.isArray(vault) ? vault : [],
+    userTools: Array.isArray(userTools) ? userTools : [],
     owned,
     craving,
     ownedGroups,
