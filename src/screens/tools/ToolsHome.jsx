@@ -19,6 +19,34 @@ function toggleInSet(prevSet, id) {
   return next;
 }
 
+function SkeletonRow({ lines = 2 }) {
+  return (
+    <div
+      style={{
+        padding: 12,
+        borderRadius: 14,
+        border: "1px solid rgba(255,255,255,0.10)",
+        background: "rgba(255,255,255,0.03)",
+        display: "grid",
+        gap: 8,
+      }}
+    >
+      <div style={{ height: 12, width: "55%", borderRadius: 999, background: "rgba(255,255,255,0.08)" }} />
+      {Array.from({ length: Math.max(1, lines) }).map((_, i) => (
+        <div
+          key={i}
+          style={{
+            height: 10,
+            width: i === 0 ? "80%" : "68%",
+            borderRadius: 999,
+            background: "rgba(255,255,255,0.06)",
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
 export default function ToolsHome() {
   const {
     tab,
@@ -114,7 +142,13 @@ export default function ToolsHome() {
           <div style={{ display: "grid", gap: 16 }}>
             <Section
               title="Owned tools"
-              subtitle={owned.length ? null : "No owned tools yet. Add some from the Vault."}
+              subtitle={
+                loading
+                  ? "Loading owned tools…"
+                  : owned.length
+                  ? null
+                  : "No owned tools yet. Add some from the Vault."
+              }
             >
               {owned.length ? (
                 <div style={{ display: "grid", gap: 10 }}>
@@ -200,12 +234,24 @@ export default function ToolsHome() {
                     );
                   })}
                 </div>
+              ) : loading ? (
+                <div style={{ display: "grid", gap: 10 }}>
+                  <SkeletonRow />
+                  <SkeletonRow />
+                  <SkeletonRow />
+                </div>
               ) : null}
             </Section>
 
             <Section
               title="Craving drawer"
-              subtitle={craving.length ? null : "Nothing in craving yet. Add items from the Vault."}
+              subtitle={
+                loading
+                  ? "Loading craving drawer…"
+                  : craving.length
+                  ? null
+                  : "Nothing in craving yet. Add items from the Vault."
+              }
             >
               {craving.length ? (
                 <div style={{ display: "grid", gap: 10 }}>
@@ -291,6 +337,11 @@ export default function ToolsHome() {
                     );
                   })}
                 </div>
+              ) : loading ? (
+                <div style={{ display: "grid", gap: 10 }}>
+                  <SkeletonRow />
+                  <SkeletonRow />
+                </div>
               ) : null}
             </Section>
           </div>
@@ -311,6 +362,14 @@ export default function ToolsHome() {
             </div>
 
             <div style={{ display: "grid", gap: 10 }}>
+              {loading && vault.length === 0 ? (
+                <>
+                  <SkeletonRow />
+                  <SkeletonRow />
+                  <SkeletonRow />
+                </>
+              ) : null}
+
               {vault.map((t) => {
                 const inOwned = ownedGlobalIds.has(t.id);
                 const inCraving = cravingGlobalIds.has(t.id);
