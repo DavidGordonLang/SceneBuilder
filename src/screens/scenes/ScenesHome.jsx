@@ -9,16 +9,19 @@ import {
   pickToolLabel,
 } from "../../lib/sceneHelpers";
 import { useLocation, useNavigate } from "react-router-dom";
-import { getCachedScenes, setCachedScenes } from "../../lib/appDataCache";
 
-/* ---------------- module cache (details only) ----------------
-   Keep per-scene details across tab switches (in-memory only).
-   List is now owned by appDataCache (persisted).
+/* ---------------- module cache to reduce jank ----------------
+   - Keeps list + per-scene details across unmount/remount (tab switches)
+   - Enables silent refresh without flipping the whole screen into Loading…
 */
 let scenesHomeCache = {
+  scenes: null, // array
   details: null, // map { [sceneId]: { status, data, error } }
   ts: 0,
 };
+
+// Track background prefetch so we don't duplicate work.
+let scenesPrefetchInFlight = new Set();
 
 /* ---------------- planning stage config ---------------- */
 
@@ -92,68 +95,29 @@ function SkeletonCard() {
   );
 }
 
-export default function ScenesHome({ session }) {
+export default function ScenesHome() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const userId = session?.user?.id;
-  const cached = userId ? getCachedScenes(userId) : null;
-  const hasCache = Array.isArray(cached);
+  const hasCache = Array.isArray(scenesHomeCache.scenes);
 
-  const [loading, setLoading] = useState(() => Boolean(userId) && !hasCache);
+  const [loading, setLoading] = useState(() => !hasCache);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [scenes, setScenes] = useState(() => (hasCache ? cached : null));
+  const [scenes, setScenes] = useState(() => scenesHomeCache.scenes || []);
 
   const [openScenes, setOpenScenes] = useState(() => new Set());
   const [details, setDetails] = useState(() => scenesHomeCache.details || {});
 
-  const showInitialSkeleton = loading && scenes === null;
+  const showInitialSkeleton = loading && !hasCache && scenes.length === 0;
 
-  function persistDetails(nextDetails) {
+  function persistCache(nextScenes, nextDetails) {
     scenesHomeCache = {
+      scenes: Array.isArray(nextScenes) ? nextScenes : scenesHomeCache.scenes,
       details: nextDetails ? nextDetails : scenesHomeCache.details,
       ts: Date.now(),
     };
   }
-
-  async function reload(opts = {}) {
-    const silentRequested = !!opts.silent;
-    const hasExisting = Array.isArray(scenes) && scenes.length > 0;
-    const silent = silentRequested && hasExisting;
-
-    if (!silent) setLoading(true);
-
-    setErr("");
-    try {
-      const data = await fetchScenes();
-      const nextScenes = Array.isArray(data) ? data : [];
-      setScenes(nextScenes);
-      if (userId) setCachedScenes(userId, nextScenes);
-    } catch (e) {
-      setErr(e?.message || "Failed to load scenes.");
-      // If we were in unknown state, mark as known-empty so we don't hang.
-      if (scenes === null) setScenes([]);
-    } finally {
-      if (!silent) setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    if (!userId) return;
-
-    // Rehydrate immediately from persisted cache on mount (hard refresh safe)
-    const persisted = getCachedScenes(userId);
-    if (Array.isArray(persisted)) {
-      setScenes(persisted);
-      setLoading(false);
-      reload({ silent: true });
-    } else {
-      setScenes(null);
-      reload({ silent: false });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId]);
 
   async function ensureDetails(sceneId) {
     const existingLocal = details?.[sceneId];
@@ -163,7 +127,7 @@ export default function ScenesHome({ session }) {
     if (existingCached?.status === "ready") {
       setDetails((prev) => {
         const next = { ...prev, [sceneId]: existingCached };
-        persistDetails(next);
+        persistCache(scenes, next);
         return next;
       });
       return;
@@ -172,7 +136,7 @@ export default function ScenesHome({ session }) {
 
     setDetails((prev) => {
       const next = { ...prev, [sceneId]: { status: "loading" } };
-      persistDetails(next);
+      persistCache(scenes, next);
       return next;
     });
 
@@ -180,7 +144,7 @@ export default function ScenesHome({ session }) {
       const full = await fetchSceneById(sceneId);
       setDetails((prev) => {
         const next = { ...prev, [sceneId]: { status: "ready", data: full } };
-        persistDetails(next);
+        persistCache(scenes, next);
         return next;
       });
     } catch (e) {
@@ -192,11 +156,72 @@ export default function ScenesHome({ session }) {
             error: e?.message || "Failed to load scene details.",
           },
         };
-        persistDetails(next);
+        persistCache(scenes, next);
         return next;
       });
     }
   }
+
+  function prefetchTopDetails(nextScenes) {
+    const list = Array.isArray(nextScenes) ? nextScenes : [];
+    if (!list.length) return;
+
+    // Prefetch only the top few most recent scenes.
+    const top = list.slice(0, 3);
+    for (const s of top) {
+      const id = s?.id;
+      if (!id) continue;
+
+      const already = details?.[id]?.status === "ready" || scenesHomeCache.details?.[id]?.status === "ready";
+      if (already) continue;
+
+      if (scenesPrefetchInFlight.has(id)) continue;
+      scenesPrefetchInFlight.add(id);
+
+      // Defer so we don't block first paint.
+      setTimeout(async () => {
+        try {
+          await ensureDetails(id);
+        } finally {
+          scenesPrefetchInFlight.delete(id);
+        }
+      }, 0);
+    }
+  }
+
+  async function reload(opts = {}) {
+    const silent = !!opts.silent;
+    const hasExisting = Array.isArray(scenes) && scenes.length > 0;
+
+    if (!silent || !hasExisting) setLoading(true);
+
+    setErr("");
+    try {
+      const data = await fetchScenes();
+      const nextScenes = data || [];
+      setScenes(nextScenes);
+      persistCache(nextScenes, details);
+
+      // Warm details so first card open isn't a “fetch wall”.
+      prefetchTopDetails(nextScenes);
+    } catch (e) {
+      setErr(e?.message || "Failed to load scenes.");
+    } finally {
+      if (!silent || !hasExisting) setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      if (!alive) return;
+      await reload({ silent: hasCache });
+    })();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // When returning from Edit, open the requested card and load details
   useEffect(() => {
@@ -221,9 +246,8 @@ export default function ScenesHome({ session }) {
     try {
       await updateScenePlanningStage(scene.id, next);
       setScenes((prev) => {
-        const arr = Array.isArray(prev) ? prev : [];
-        const nextScenes = arr.map((s) => (s.id === scene.id ? { ...s, planning_stage: next } : s));
-        if (userId) setCachedScenes(userId, nextScenes);
+        const nextScenes = prev.map((s) => (s.id === scene.id ? { ...s, planning_stage: next } : s));
+        persistCache(nextScenes, details);
         return nextScenes;
       });
     } catch (err) {
@@ -254,7 +278,7 @@ export default function ScenesHome({ session }) {
       setDetails((prev) => {
         const next = { ...prev };
         delete next[sceneId];
-        persistDetails(next);
+        persistCache(scenes, next);
         return next;
       });
 
@@ -265,9 +289,6 @@ export default function ScenesHome({ session }) {
       setBusy(false);
     }
   }
-
-  const scenesArr = Array.isArray(scenes) ? scenes : [];
-  const isKnownEmpty = scenes !== null && !loading && scenesArr.length === 0;
 
   return (
     <div>
@@ -288,7 +309,7 @@ export default function ScenesHome({ session }) {
           </div>
 
           <div style={{ fontSize: 12, opacity: 0.7 }}>
-            {loading ? "Loading…" : `${scenesArr.length} scene${scenesArr.length === 1 ? "" : "s"}`}
+            {loading ? "Loading…" : `${scenes.length} scene${scenes.length === 1 ? "" : "s"}`}
           </div>
         </div>
 
@@ -314,18 +335,7 @@ export default function ScenesHome({ session }) {
             </>
           ) : null}
 
-          {isKnownEmpty ? (
-            <Card>
-              <div style={{ opacity: 0.85, lineHeight: 1.4 }}>
-                No scenes yet.
-                <div style={{ marginTop: 10 }}>
-                  <SmallButton asLink to="/scenes/new">Create your first scene</SmallButton>
-                </div>
-              </div>
-            </Card>
-          ) : null}
-
-          {scenesArr.map((s) => {
+          {scenes.map((s) => {
             const isOpen = openScenes.has(s.id);
             const stage = s.planning_stage || "intent";
 
@@ -352,7 +362,13 @@ export default function ScenesHome({ session }) {
                 }}
               >
                 <div style={{ display: "grid", gap: 10 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: 12,
+                    }}
+                  >
                     <div>
                       <div style={{ fontWeight: 800 }}>{s.title}</div>
                       {intent && <div style={{ fontSize: 13, opacity: 0.85 }}>{intent}</div>}
@@ -423,7 +439,13 @@ export default function ScenesHome({ session }) {
                             >
                               <div style={{ fontWeight: 850, fontSize: 13 }}>{sec.title}</div>
                               {sec.body ? (
-                                <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.4, opacity: 0.9 }}>
+                                <div
+                                  style={{
+                                    whiteSpace: "pre-wrap",
+                                    lineHeight: 1.4,
+                                    opacity: 0.9,
+                                  }}
+                                >
                                   {sec.body}
                                 </div>
                               ) : null}
