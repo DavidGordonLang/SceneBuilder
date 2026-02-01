@@ -2,25 +2,40 @@ import { supabase } from "./supabaseClient";
 
 const TOOL_PHOTOS_BUCKET = "tool-photos";
 
-/* ---------------- auth ---------------- */
+/* ---------------- auth gate ----------------
+   On cold boot, Supabase can take a moment to hydrate the session.
+   During that window, RLS-backed queries often return [] (not an error).
+   We wait briefly to avoid caching "empty" as if it were real data.
+*/
 
-async function getUserId() {
-  const { data, error } = await supabase.auth.getUser();
-  if (error) throw error;
-  const uid = data?.user?.id;
-  if (!uid) throw new Error("Not signed in.");
-  return uid;
+async function getAuthedUserId({ waitMs = 1200, stepMs = 60 } = {}) {
+  const max = Math.max(0, Number(waitMs) || 0);
+  const step = Math.max(20, Number(stepMs) || 60);
+
+  const t0 = Date.now();
+  while (true) {
+    const { data, error } = await supabase.auth.getUser();
+    if (error) throw error;
+
+    const uid = data?.user?.id;
+    if (uid) return uid;
+
+    if (Date.now() - t0 >= max) break;
+    await new Promise((r) => setTimeout(r, step));
+  }
+
+  // At this point we genuinely don't have a session.
+  throw new Error("Not signed in.");
 }
 
 /* ---------------- vault ---------------- */
 
 /**
  * Fetch Tool Vault (global tools).
- * NOTE: We intentionally gate on auth so we don't get "empty but no error"
- * responses during cold-start before the session is ready (RLS dependent).
+ * We still gate on auth so we don't render "0 in vault" during cold-start auth hydration.
  */
 export async function fetchToolVault() {
-  await getUserId();
+  await getAuthedUserId();
 
   const { data, error } = await supabase
     .from("tools_global")
@@ -39,7 +54,7 @@ export async function fetchToolVault() {
  * NOTE: includes instance_label + photo_path (per owned instance).
  */
 export async function fetchUserTools() {
-  await getUserId();
+  await getAuthedUserId();
 
   const { data, error } = await supabase
     .from("tools_user")
@@ -68,7 +83,7 @@ export async function fetchUserTools() {
  * status: 'owned' | 'craving'
  */
 export async function addGlobalToolToUser(toolGlobalId, status) {
-  await getUserId();
+  await getAuthedUserId();
 
   const { error } = await supabase.from("tools_user").insert({
     tool_global_id: toolGlobalId,
@@ -82,13 +97,9 @@ export async function addGlobalToolToUser(toolGlobalId, status) {
  * Update tool status (e.g. craving → owned).
  */
 export async function updateUserToolStatus(toolUserId, status) {
-  await getUserId();
+  await getAuthedUserId();
 
-  const { error } = await supabase
-    .from("tools_user")
-    .update({ status })
-    .eq("id", toolUserId);
-
+  const { error } = await supabase.from("tools_user").update({ status }).eq("id", toolUserId);
   if (error) throw error;
 }
 
@@ -96,7 +107,7 @@ export async function updateUserToolStatus(toolUserId, status) {
  * Remove a tool from user's drawer (owned or craving).
  */
 export async function deleteUserTool(toolUserId) {
-  await getUserId();
+  await getAuthedUserId();
 
   const { error } = await supabase.from("tools_user").delete().eq("id", toolUserId);
   if (error) throw error;
@@ -106,16 +117,17 @@ export async function deleteUserTool(toolUserId) {
  * Update per-instance details on tools_user (label + photo_path, etc.)
  */
 export async function updateUserToolInstanceDetails(toolUserId, patch) {
-  await getUserId();
+  await getAuthedUserId();
 
   const safePatch = {};
   if (Object.prototype.hasOwnProperty.call(patch, "instance_label"))
-    safePatch.instance_label = patch.instance_label;
+    safePatch.instance_label = patch.instance_label ?? null;
   if (Object.prototype.hasOwnProperty.call(patch, "photo_path"))
-    safePatch.photo_path = patch.photo_path;
-  if (Object.prototype.hasOwnProperty.call(patch, "notes")) safePatch.notes = patch.notes;
+    safePatch.photo_path = patch.photo_path ?? null;
+  if (Object.prototype.hasOwnProperty.call(patch, "notes"))
+    safePatch.notes = patch.notes ?? null;
   if (Object.prototype.hasOwnProperty.call(patch, "tags_override"))
-    safePatch.tags_override = patch.tags_override;
+    safePatch.tags_override = patch.tags_override ?? null;
 
   const { error } = await supabase.from("tools_user").update(safePatch).eq("id", toolUserId);
   if (error) throw error;
@@ -128,7 +140,7 @@ export async function updateUserToolInstanceDetails(toolUserId, patch) {
  * Returns null if photo_path is falsy.
  */
 export async function getToolPhotoSignedUrl(photo_path, expiresInSeconds = 60 * 60) {
-  await getUserId();
+  await getAuthedUserId();
 
   const path = String(photo_path || "").trim();
   if (!path) return null;
@@ -149,17 +161,13 @@ function makeSafeFilename(originalName = "photo") {
 }
 
 /**
- * Upload a tool photo for a specific tools_user row.
- * Storage path format: <user_id>/<tools_user_id>/<filename>
- *
- * Returns: { photo_path, signedUrl }
- * (Does NOT update the tools_user row automatically — call updateUserToolInstanceDetails afterwards.)
+ * Upload a tool photo to storage. Returns { photo_path, signedUrl }.
  */
 export async function uploadToolPhoto(toolUserId, file) {
   if (!toolUserId) throw new Error("Missing toolUserId.");
   if (!file) throw new Error("Missing file.");
 
-  const uid = await getUserId();
+  const uid = await getAuthedUserId();
   const filename = makeSafeFilename(file?.name || "photo");
   const photo_path = `${uid}/${toolUserId}/${filename}`;
 
