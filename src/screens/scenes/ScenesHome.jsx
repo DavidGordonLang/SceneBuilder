@@ -80,6 +80,18 @@ function sectionsFromBlocks(blocks) {
 
 /* ---------------- component ---------------- */
 
+function SkeletonCard() {
+  return (
+    <Card>
+      <div style={{ display: "grid", gap: 10 }}>
+        <div style={{ height: 14, width: "60%", borderRadius: 999, background: "rgba(255,255,255,0.08)" }} />
+        <div style={{ height: 11, width: "85%", borderRadius: 999, background: "rgba(255,255,255,0.06)" }} />
+        <div style={{ height: 11, width: "72%", borderRadius: 999, background: "rgba(255,255,255,0.05)" }} />
+      </div>
+    </Card>
+  );
+}
+
 export default function ScenesHome() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -93,6 +105,8 @@ export default function ScenesHome() {
 
   const [openScenes, setOpenScenes] = useState(() => new Set());
   const [details, setDetails] = useState(() => scenesHomeCache.details || {});
+
+  const showInitialSkeleton = loading && !hasCache && scenes.length === 0;
 
   function persistCache(nextScenes, nextDetails) {
     scenesHomeCache = {
@@ -280,6 +294,14 @@ export default function ScenesHome() {
         )}
 
         <div style={{ display: "grid", gap: 12 }}>
+          {showInitialSkeleton ? (
+            <>
+              <SkeletonCard />
+              <SkeletonCard />
+              <SkeletonCard />
+            </>
+          ) : null}
+
           {scenes.map((s) => {
             const isOpen = openScenes.has(s.id);
             const stage = s.planning_stage || "intent";
