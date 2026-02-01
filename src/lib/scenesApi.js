@@ -1,11 +1,14 @@
 import { supabase } from "./supabaseClient";
+import { perfTime } from "./perf";
 
 async function getUserId() {
-  const { data, error } = await supabase.auth.getUser();
-  if (error) throw error;
-  const uid = data?.user?.id;
-  if (!uid) throw new Error("Not signed in.");
-  return uid;
+  return perfTime("scenes.getUserId", async () => {
+    const { data, error } = await supabase.auth.getUser();
+    if (error) throw error;
+    const uid = data?.user?.id;
+    if (!uid) throw new Error("Not signed in.");
+    return uid;
+  });
 }
 
 /* ---------------- Scene block defaults ---------------- */
@@ -42,91 +45,98 @@ function normalizeBlocks(input) {
 }
 
 export async function ensureDefaultSceneBlocks(sceneId, { seedText = "" } = {}) {
-  // If blocks already exist, do nothing.
-  const { data: existing, error: exErr } = await supabase
-    .from("scene_blocks")
-    .select("id")
-    .eq("scene_id", sceneId)
-    .limit(1);
+  return perfTime("scenes.ensureDefaultSceneBlocks", async () => {
+    // If blocks already exist, do nothing.
+    const { data: existing, error: exErr } = await supabase
+      .from("scene_blocks")
+      .select("id")
+      .eq("scene_id", sceneId)
+      .limit(1);
 
-  // If table doesn’t exist or RLS blocks, surface the error (this is core now)
-  if (exErr) throw exErr;
-  if (existing && existing.length) return 0;
+    // If table doesn’t exist or RLS blocks, surface the error (this is core now)
+    if (exErr) throw exErr;
+    if (existing && existing.length) return 0;
 
-  const rows = DEFAULT_SCENE_BLOCKS.map((d, idx) => ({
-    scene_id: sceneId,
-    sort_order: (idx + 1) * 10,
-    title: d.title,
-    body: "",
-    duration_minutes: null,
-  }));
+    const rows = DEFAULT_SCENE_BLOCKS.map((d, idx) => ({
+      scene_id: sceneId,
+      sort_order: (idx + 1) * 10,
+      title: d.title,
+      body: "",
+      duration_minutes: null,
+    }));
 
-  // If we have seedText (old notes), put it into Planning/Design by default
-  if (seedText && typeof seedText === "string") {
-    const seed = seedText.trim();
-    if (seed) {
-      const targetIdx = DEFAULT_SCENE_BLOCKS.findIndex(
-        (x) => x.key === "planning_design"
-      );
-      const i = targetIdx >= 0 ? targetIdx : 2;
-      rows[i].body = seed;
+    // If we have seedText (old notes), put it into Planning/Design by default
+    if (seedText && typeof seedText === "string") {
+      const seed = seedText.trim();
+      if (seed) {
+        const targetIdx = DEFAULT_SCENE_BLOCKS.findIndex(
+          (x) => x.key === "planning_design"
+        );
+        const i = targetIdx >= 0 ? targetIdx : 2;
+        rows[i].body = seed;
+      }
     }
-  }
 
-  const { error: insErr } = await supabase.from("scene_blocks").insert(rows);
-  if (insErr) throw insErr;
+    const { error: insErr } = await supabase.from("scene_blocks").insert(rows);
+    if (insErr) throw insErr;
 
-  return rows.length;
+    return rows.length;
+  });
 }
 
 export async function replaceSceneBlocks(sceneId, blocks) {
-  const normalized = normalizeBlocks(blocks);
+  return perfTime("scenes.replaceSceneBlocks", async () => {
+    const normalized = normalizeBlocks(blocks);
 
-  // Replace strategy = simple + predictable (no drift).
-  // Delete then insert. (We can optimize later.)
-  const { error: delErr } = await supabase
-    .from("scene_blocks")
-    .delete()
-    .eq("scene_id", sceneId);
-  if (delErr) throw delErr;
+    // Replace strategy = simple + predictable (no drift).
+    // Delete then insert. (We can optimize later.)
+    const { error: delErr } = await supabase
+      .from("scene_blocks")
+      .delete()
+      .eq("scene_id", sceneId);
+    if (delErr) throw delErr;
 
-  if (!normalized.length) return 0;
+    if (!normalized.length) return 0;
 
-  const rows = normalized.map((b) => ({
-    scene_id: sceneId,
-    sort_order: b.sort_order,
-    title: b.title,
-    body: b.body,
-    duration_minutes: b.duration_minutes,
-  }));
+    const rows = normalized.map((b) => ({
+      scene_id: sceneId,
+      sort_order: b.sort_order,
+      title: b.title,
+      body: b.body,
+      duration_minutes: b.duration_minutes,
+    }));
 
-  const { error: insErr } = await supabase.from("scene_blocks").insert(rows);
-  if (insErr) throw insErr;
+    const { error: insErr } = await supabase.from("scene_blocks").insert(rows);
+    if (insErr) throw insErr;
 
-  return rows.length;
+    return rows.length;
+  });
 }
 
 /* ---------------- Core scene queries ---------------- */
 
 export async function fetchScenes() {
-  const uid = await getUserId();
+  return perfTime("scenes.fetchScenes", async () => {
+    const uid = await getUserId();
 
-  const { data, error } = await supabase
-    .from("scenes")
-    .select("*")
-    .eq("user_id", uid)
-    .order("created_at", { ascending: false });
+    const { data, error } = await supabase
+      .from("scenes")
+      .select("*")
+      .eq("user_id", uid)
+      .order("created_at", { ascending: false });
 
-  if (error) throw error;
-  return data ?? [];
+    if (error) throw error;
+    return data ?? [];
+  });
 }
 
 export async function fetchSceneById(sceneId) {
-  // 1) Fetch the scene with relationships that are known-good
-  const { data: scene, error } = await supabase
-    .from("scenes")
-    .select(
-      `
+  return perfTime("scenes.fetchSceneById", async () => {
+    // 1) Fetch the scene with relationships that are known-good
+    const { data: scene, error } = await supabase
+      .from("scenes")
+      .select(
+        `
       *,
       scene_participants(
         participant_id,
@@ -145,42 +155,46 @@ export async function fetchSceneById(sceneId) {
         )
       )
     `
-    )
-    .eq("id", sceneId)
-    .single();
+      )
+      .eq("id", sceneId)
+      .single();
 
-  if (error) throw error;
+    if (error) throw error;
 
-  // 2) Fetch blocks separately (avoid schema-cache relationship issues)
-  const { data: blocks, error: blocksErr } = await supabase
-    .from("scene_blocks")
-    .select(
-      "id,scene_id,sort_order,title,body,duration_minutes,created_at,updated_at"
-    )
-    .eq("scene_id", sceneId)
-    .order("sort_order", { ascending: true });
+    // 2) Fetch blocks separately (avoid schema-cache relationship issues)
+    const { data: blocks, error: blocksErr } = await supabase
+      .from("scene_blocks")
+      .select(
+        "id,scene_id,sort_order,title,body,duration_minutes,created_at,updated_at"
+      )
+      .eq("scene_id", sceneId)
+      .order("sort_order", { ascending: true });
 
-  if (blocksErr) throw blocksErr;
-  scene.scene_blocks = blocks ?? [];
+    if (blocksErr) throw blocksErr;
+    scene.scene_blocks = blocks ?? [];
 
-  return scene;
+    return scene;
+  });
 }
 
 export async function fetchParticipants() {
-  const { data, error } = await supabase
-    .from("participants")
-    .select("*")
-    .order("created_at", { ascending: false });
+  return perfTime("scenes.fetchParticipants", async () => {
+    const { data, error } = await supabase
+      .from("participants")
+      .select("*")
+      .order("created_at", { ascending: false });
 
-  if (error) throw error;
-  return data ?? [];
+    if (error) throw error;
+    return data ?? [];
+  });
 }
 
 export async function fetchOwnedToolsForPicker() {
-  const { data, error } = await supabase
-    .from("tools_user")
-    .select(
-      `
+  return perfTime("scenes.fetchOwnedToolsForPicker", async () => {
+    const { data, error } = await supabase
+      .from("tools_user")
+      .select(
+        `
       id,
       status,
       tool_global_id,
@@ -190,12 +204,13 @@ export async function fetchOwnedToolsForPicker() {
       tags_override,
       tools_global(id, name, icon, tags, safety_level)
     `
-    )
-    .eq("status", "owned")
-    .order("created_at", { ascending: false });
+      )
+      .eq("status", "owned")
+      .order("created_at", { ascending: false });
 
-  if (error) throw error;
-  return data ?? [];
+    if (error) throw error;
+    return data ?? [];
+  });
 }
 
 /**
@@ -214,78 +229,26 @@ export async function createScene({
   toolUserIds,
   blocks,
 }) {
-  const uid = await getUserId();
+  return perfTime("scenes.createScene", async () => {
+    const uid = await getUserId();
 
-  const { data: scene, error: sceneErr } = await supabase
-    .from("scenes")
-    .insert({
-      user_id: uid,
-      title,
-      status: "draft",
-      scheduled_for: scheduled_at || null,
-      emotional_state: intent ? String(intent).trim() : null,
-      emotional_notes: notes ? String(notes).trim() : null,
-      planning_stage: "intent",
-    })
-    .select("*")
-    .single();
+    const { data: scene, error: sceneErr } = await supabase
+      .from("scenes")
+      .insert({
+        user_id: uid,
+        title,
+        status: "draft",
+        scheduled_for: scheduled_at || null,
+        emotional_state: intent ? String(intent).trim() : null,
+        emotional_notes: notes ? String(notes).trim() : null,
+        planning_stage: "intent",
+      })
+      .select("*")
+      .single();
 
-  if (sceneErr) throw sceneErr;
+    if (sceneErr) throw sceneErr;
 
-  const sceneId = scene.id;
-
-  if (Array.isArray(participantIds) && participantIds.length) {
-    const rows = participantIds.map((pid) => ({
-      scene_id: sceneId,
-      participant_id: pid,
-    }));
-    const { error } = await supabase.from("scene_participants").insert(rows);
-    if (error) throw error;
-  }
-
-  if (Array.isArray(toolUserIds) && toolUserIds.length) {
-    const rows = toolUserIds.map((tid) => ({
-      scene_id: sceneId,
-      tool_user_id: tid,
-    }));
-    const { error } = await supabase.from("scene_tools").insert(rows);
-    if (error) throw error;
-  }
-
-  // Primary planning data:
-  // If UI passes blocks, save them; otherwise seed defaults (optionally seeded from notes).
-  if (Array.isArray(blocks) && blocks.length) {
-    await replaceSceneBlocks(sceneId, blocks);
-  } else {
-    await ensureDefaultSceneBlocks(sceneId, { seedText: notes || "" });
-  }
-
-  return scene;
-}
-
-export async function updateScene(
-  sceneId,
-  { title, intent, notes, scheduled_at, participantIds, toolUserIds, blocks }
-) {
-  const { error: upErr } = await supabase
-    .from("scenes")
-    .update({
-      title,
-      scheduled_for: scheduled_at || null,
-      emotional_state: intent ? String(intent).trim() : null,
-      emotional_notes: notes ? String(notes).trim() : null,
-    })
-    .eq("id", sceneId);
-
-  if (upErr) throw upErr;
-
-  // replace participants
-  {
-    const { error: delErr } = await supabase
-      .from("scene_participants")
-      .delete()
-      .eq("scene_id", sceneId);
-    if (delErr) throw delErr;
+    const sceneId = scene.id;
 
     if (Array.isArray(participantIds) && participantIds.length) {
       const rows = participantIds.map((pid) => ({
@@ -295,15 +258,6 @@ export async function updateScene(
       const { error } = await supabase.from("scene_participants").insert(rows);
       if (error) throw error;
     }
-  }
-
-  // replace tools
-  {
-    const { error: delErr } = await supabase
-      .from("scene_tools")
-      .delete()
-      .eq("scene_id", sceneId);
-    if (delErr) throw delErr;
 
     if (Array.isArray(toolUserIds) && toolUserIds.length) {
       const rows = toolUserIds.map((tid) => ({
@@ -313,29 +267,96 @@ export async function updateScene(
       const { error } = await supabase.from("scene_tools").insert(rows);
       if (error) throw error;
     }
-  }
 
-  // replace blocks if provided (UI will provide them once we swap the editor)
-  if (Array.isArray(blocks)) {
-    // If the UI sends an empty array, that’s intentional (though we probably won’t allow it).
-    await replaceSceneBlocks(sceneId, blocks);
-  }
+    // Primary planning data:
+    // If UI passes blocks, save them; otherwise seed defaults (optionally seeded from notes).
+    if (Array.isArray(blocks) && blocks.length) {
+      await replaceSceneBlocks(sceneId, blocks);
+    } else {
+      await ensureDefaultSceneBlocks(sceneId, { seedText: notes || "" });
+    }
 
-  return true;
+    return scene;
+  });
+}
+
+export async function updateScene(
+  sceneId,
+  { title, intent, notes, scheduled_at, participantIds, toolUserIds, blocks }
+) {
+  return perfTime("scenes.updateScene", async () => {
+    const { error: upErr } = await supabase
+      .from("scenes")
+      .update({
+        title,
+        scheduled_for: scheduled_at || null,
+        emotional_state: intent ? String(intent).trim() : null,
+        emotional_notes: notes ? String(notes).trim() : null,
+      })
+      .eq("id", sceneId);
+
+    if (upErr) throw upErr;
+
+    // replace participants
+    {
+      const { error: delErr } = await supabase
+        .from("scene_participants")
+        .delete()
+        .eq("scene_id", sceneId);
+      if (delErr) throw delErr;
+
+      if (Array.isArray(participantIds) && participantIds.length) {
+        const rows = participantIds.map((pid) => ({
+          scene_id: sceneId,
+          participant_id: pid,
+        }));
+        const { error } = await supabase.from("scene_participants").insert(rows);
+        if (error) throw error;
+      }
+    }
+
+    // replace tools
+    {
+      const { error: delErr } = await supabase
+        .from("scene_tools")
+        .delete()
+        .eq("scene_id", sceneId);
+      if (delErr) throw delErr;
+
+      if (Array.isArray(toolUserIds) && toolUserIds.length) {
+        const rows = toolUserIds.map((tid) => ({
+          scene_id: sceneId,
+          tool_user_id: tid,
+        }));
+        const { error } = await supabase.from("scene_tools").insert(rows);
+        if (error) throw error;
+      }
+    }
+
+    // replace blocks if provided (UI will provide them once we swap the editor)
+    if (Array.isArray(blocks)) {
+      // If the UI sends an empty array, that’s intentional (though we probably won’t allow it).
+      await replaceSceneBlocks(sceneId, blocks);
+    }
+
+    return true;
+  });
 }
 
 /**
  * Update planning_stage for a scene (prep/lifecycle progress pill).
  */
 export async function updateScenePlanningStage(sceneId, planningStage) {
-  const next = String(planningStage || "").trim();
-  if (!next) throw new Error("planning_stage is required.");
+  return perfTime("scenes.updateScenePlanningStage", async () => {
+    const next = String(planningStage || "").trim();
+    if (!next) throw new Error("planning_stage is required.");
 
-  const { error } = await supabase
-    .from("scenes")
-    .update({ planning_stage: next })
-    .eq("id", sceneId);
+    const { error } = await supabase
+      .from("scenes")
+      .update({ planning_stage: next })
+      .eq("id", sceneId);
 
-  if (error) throw error;
-  return true;
+    if (error) throw error;
+    return true;
+  });
 }
