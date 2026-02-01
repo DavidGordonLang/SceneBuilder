@@ -9,15 +9,7 @@ import {
   fetchJournalEntries,
   updateJournalEntry,
 } from "../../lib/journalApi";
-
-/* ---------------- module cache to reduce jank ----------------
-   Keeps the last loaded entries across unmount/remount (tab switches).
-   Enables silent refresh without flipping the screen into Loading…
-*/
-let journalHomeCache = {
-  entriesByUserId: {}, // { [userId]: entries[] }
-  tsByUserId: {}, // { [userId]: number }
-};
+import { getCachedJournal, setCachedJournal } from "../../lib/appDataCache";
 
 const ENTRY_TYPES = [
   { value: "reflection", label: "Reflection" },
@@ -252,12 +244,11 @@ export default function JournalHome({ supabase, session }) {
   const location = useLocation();
   const userId = session?.user?.id;
 
-  const cachedForUser = userId ? journalHomeCache.entriesByUserId?.[userId] : null;
-  const hasCache = !!(userId && Array.isArray(cachedForUser));
+  const cached = userId ? getCachedJournal(userId) : null;
+  const hasCache = Array.isArray(cached);
 
-  // Key change: entries is null until first load completes (unknown vs known-empty)
-  const [entries, setEntries] = useState(() => (Array.isArray(cachedForUser) ? cachedForUser : null));
-  const [loading, setLoading] = useState(() => !hasCache);
+  const [entries, setEntries] = useState(() => (hasCache ? cached : null)); // null = unknown
+  const [loading, setLoading] = useState(() => Boolean(userId) && !hasCache);
 
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
@@ -265,66 +256,54 @@ export default function JournalHome({ supabase, session }) {
   const [editing, setEditing] = useState(null);
   const handledEditStateRef = useRef(false);
 
-  // Expand/collapse per entry
   const [openEntryId, setOpenEntryId] = useState(null);
-
-  // Kebab state
   const [menuOpenForId, setMenuOpenForId] = useState(null);
   const menuBoxRef = useRef(null);
 
   const entriesArr = Array.isArray(entries) ? entries : [];
   const showInitialSkeleton = loading && entries === null;
 
-  function persistCache(nextEntries) {
-    if (!userId) return;
-    journalHomeCache.entriesByUserId[userId] = Array.isArray(nextEntries) ? nextEntries : [];
-    journalHomeCache.tsByUserId[userId] = Date.now();
-  }
-
   async function load(opts = {}) {
     if (!userId) return;
-    const silent = !!opts.silent;
 
-    const hasExisting = Array.isArray(entriesArr) && entriesArr.length > 0;
-    if (!silent || !hasExisting) setLoading(true);
+    const silentRequested = !!opts.silent;
+    const hasExisting = entriesArr.length > 0;
+    const silent = silentRequested && hasExisting;
+
+    if (!silent) setLoading(true);
 
     setErr("");
     try {
       const data = await fetchJournalEntries({ supabase, userId, limit: 80 });
       const next = Array.isArray(data) ? data : [];
       setEntries(next);
-      persistCache(next);
+      setCachedJournal(userId, next);
     } catch (e) {
       setErr(e?.message || "Failed to load journal entries.");
-
-      // If this is a silent refresh failure, keep whatever we already have.
-      // If it is first-load (unknown), mark as known-empty to avoid being stuck.
       if (entries === null) {
         setEntries([]);
-        persistCache([]);
+        setCachedJournal(userId, []);
       }
     } finally {
-      if (!silent || !hasExisting) setLoading(false);
+      if (!silent) setLoading(false);
     }
   }
 
   useEffect(() => {
     if (!userId) return;
 
-    // Seed from cache on user change, then refresh silently.
-    const cached = journalHomeCache.entriesByUserId?.[userId];
-    if (Array.isArray(cached)) {
-      setEntries(cached);
+    const persisted = getCachedJournal(userId);
+    if (Array.isArray(persisted)) {
+      setEntries(persisted);
       setLoading(false);
       load({ silent: true });
     } else {
       setEntries(null);
-      load();
+      load({ silent: false });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
-  // Handle "return from entry view -> open editor" flow (legacy support).
   useEffect(() => {
     const editId = location?.state?.editId;
     if (!editId || handledEditStateRef.current) return;
@@ -334,7 +313,7 @@ export default function JournalHome({ supabase, session }) {
     (async () => {
       let list = entriesArr;
       if (!list || list.length === 0) {
-        await load();
+        await load({ silent: false });
         list = entriesArr;
       }
 
@@ -346,7 +325,6 @@ export default function JournalHome({ supabase, session }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location?.state?.editId]);
 
-  // Close kebab on outside click, but do NOT collapse card.
   useEffect(() => {
     function onDocClick(e) {
       if (!menuOpenForId) return;
@@ -377,7 +355,7 @@ export default function JournalHome({ supabase, session }) {
       byDay.set(k, arr);
     }
 
-    const groups = Array.from(byDay.entries())
+    return Array.from(byDay.entries())
       .map(([dayKey, items]) => {
         const ts = Number(dayKey);
         const label = dayHeadingLabel(ts);
@@ -388,12 +366,9 @@ export default function JournalHome({ supabase, session }) {
               new Date(b.updated_at || b.created_at).getTime() -
               new Date(a.updated_at || a.created_at).getTime()
           );
-
         return { dayKey, label, items: sorted };
       })
       .sort((a, b) => Number(b.dayKey) - Number(a.dayKey));
-
-    return groups;
   }, [filtered]);
 
   function handleCardToggle(entryId) {
@@ -416,7 +391,7 @@ export default function JournalHome({ supabase, session }) {
         });
         const next = (entriesArr || []).map((e) => (e.id === editing.id ? updated : e));
         setEntries(next);
-        persistCache(next);
+        setCachedJournal(userId, next);
         showToast("Updated.");
       } else {
         const created = await createJournalEntry({
@@ -426,7 +401,7 @@ export default function JournalHome({ supabase, session }) {
         });
         const next = [created, ...(entriesArr || [])];
         setEntries(next);
-        persistCache(next);
+        setCachedJournal(userId, next);
         showToast("Saved.");
       }
 
@@ -450,7 +425,7 @@ export default function JournalHome({ supabase, session }) {
       await deleteJournalEntry({ supabase, userId, id });
       const next = (entriesArr || []).filter((e) => e.id !== id);
       setEntries(next);
-      persistCache(next);
+      setCachedJournal(userId, next);
 
       setMenuOpenForId(null);
       if (openEntryId === id) setOpenEntryId(null);
@@ -468,7 +443,6 @@ export default function JournalHome({ supabase, session }) {
   return (
     <div>
       <Page style={{ display: "grid", gap: 14 }}>
-        {/* Contextual actions row */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
           <div style={{ display: "flex", gap: 10 }}>
             <SmallButton onClick={() => setEditing({ mode: "new" })} disabled={saving}>
@@ -510,7 +484,6 @@ export default function JournalHome({ supabase, session }) {
           />
         ) : null}
 
-        {/* Timeline */}
         <div style={{ display: "grid", gap: 14 }}>
           {showInitialSkeleton ? (
             <>
@@ -525,9 +498,7 @@ export default function JournalHome({ supabase, session }) {
               <div style={{ opacity: 0.85, lineHeight: 1.4 }}>
                 No entries yet.
                 <div style={{ marginTop: 10 }}>
-                  <SmallButton onClick={() => setEditing({ mode: "new" })}>
-                    Create your first entry
-                  </SmallButton>
+                  <SmallButton onClick={() => setEditing({ mode: "new" })}>Create your first entry</SmallButton>
                 </div>
               </div>
             </Card>
@@ -535,15 +506,7 @@ export default function JournalHome({ supabase, session }) {
 
           {grouped.map((group) => (
             <div key={group.dayKey} style={{ display: "grid", gap: 10 }}>
-              <div
-                style={{
-                  padding: "4px 2px",
-                  fontSize: 12,
-                  fontWeight: 900,
-                  letterSpacing: 0.2,
-                  opacity: 0.75,
-                }}
-              >
+              <div style={{ padding: "4px 2px", fontSize: 12, fontWeight: 900, letterSpacing: 0.2, opacity: 0.75 }}>
                 {group.label}
               </div>
 
