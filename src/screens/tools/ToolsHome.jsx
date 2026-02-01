@@ -54,6 +54,8 @@ export default function ToolsHome() {
     loading,
     busy,
     err,
+    drawerKnown,
+    vaultKnown,
     vault,
     owned,
     craving,
@@ -83,10 +85,12 @@ export default function ToolsHome() {
 
   const infoText = useMemo(() => {
     if (tab === "drawer") {
+      if (!drawerKnown) return "Loading drawer…";
       return loading ? "Loading drawer…" : `${owned.length} owned • ${craving.length} craving`;
     }
+    if (!vaultKnown) return "Loading vault…";
     return loading ? "Loading vault…" : `${vault.length} in vault`;
-  }, [tab, loading, owned.length, craving.length, vault.length]);
+  }, [tab, loading, drawerKnown, vaultKnown, owned.length, craving.length, vault.length]);
 
   function getDraftLabelValue(tu) {
     return draftLabel?.[tu.id] !== undefined ? draftLabel[tu.id] : tu.instance_label || "";
@@ -143,7 +147,7 @@ export default function ToolsHome() {
             <Section
               title="Owned tools"
               subtitle={
-                loading
+                !drawerKnown || loading
                   ? "Loading owned tools…"
                   : owned.length
                   ? null
@@ -234,7 +238,7 @@ export default function ToolsHome() {
                     );
                   })}
                 </div>
-              ) : loading ? (
+              ) : !drawerKnown || loading ? (
                 <div style={{ display: "grid", gap: 10 }}>
                   <SkeletonRow />
                   <SkeletonRow />
@@ -246,7 +250,7 @@ export default function ToolsHome() {
             <Section
               title="Craving drawer"
               subtitle={
-                loading
+                !drawerKnown || loading
                   ? "Loading craving drawer…"
                   : craving.length
                   ? null
@@ -337,7 +341,7 @@ export default function ToolsHome() {
                     );
                   })}
                 </div>
-              ) : loading ? (
+              ) : !drawerKnown || loading ? (
                 <div style={{ display: "grid", gap: 10 }}>
                   <SkeletonRow />
                   <SkeletonRow />
@@ -362,7 +366,7 @@ export default function ToolsHome() {
             </div>
 
             <div style={{ display: "grid", gap: 10 }}>
-              {loading && vault.length === 0 ? (
+              {!vaultKnown || (loading && vault.length === 0) ? (
                 <>
                   <SkeletonRow />
                   <SkeletonRow />
