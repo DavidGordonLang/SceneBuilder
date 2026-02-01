@@ -545,7 +545,7 @@ export default function JournalHome({ supabase, session }) {
                                 <Chip>{typeLabel}</Chip>
                                 <div style={{ fontWeight: 900 }}>{title}</div>
                               </div>
-                              {preview ? <div style={{ opacity: 0.8, lineHeight: 1.35 }}>{preview}</div> : null}
+                              {!isOpen && preview ? <div style={{ opacity: 0.8, lineHeight: 1.35 }}>{preview}</div> : null}
                             </div>
 
                             <button
