@@ -9,7 +9,15 @@ import {
   fetchJournalEntries,
   updateJournalEntry,
 } from "../../lib/journalApi";
-import { getCachedJournal, setCachedJournal } from "../../lib/appDataCache";
+
+/* ---------------- module cache to reduce jank ----------------
+   Keeps the last loaded entries across unmount/remount (tab switches).
+   Enables silent refresh without flipping the screen into Loading…
+*/
+let journalHomeCache = {
+  entriesByUserId: {}, // { [userId]: entries[] }
+  tsByUserId: {}, // { [userId]: number }
+};
 
 const ENTRY_TYPES = [
   { value: "reflection", label: "Reflection" },
@@ -184,7 +192,7 @@ function KebabMenu({ open, onEdit, onDelete }) {
   const boxStyle = {
     position: "absolute",
     right: 10,
-    top: 42,
+    top: 36,
     minWidth: 170,
     borderRadius: 12,
     border: "1px solid rgba(255,255,255,0.12)",
@@ -244,14 +252,13 @@ export default function JournalHome({ supabase, session }) {
   const location = useLocation();
   const userId = session?.user?.id;
 
-  const cached = userId ? getCachedJournal(userId) : null;
-  const hasCache = Array.isArray(cached);
+  const cachedForUser = userId ? journalHomeCache.entriesByUserId?.[userId] : null;
+  const hasCache = !!(userId && Array.isArray(cachedForUser));
 
-  const [entries, setEntries] = useState(() => (hasCache ? cached : null)); // null = unknown
-  const [loading, setLoading] = useState(() => Boolean(userId) && !hasCache);
-
+  const [loading, setLoading] = useState(() => !hasCache);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
+  const [entries, setEntries] = useState(() => (Array.isArray(cachedForUser) ? cachedForUser : []));
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState(null);
   const handledEditStateRef = useRef(false);
@@ -260,46 +267,46 @@ export default function JournalHome({ supabase, session }) {
   const [menuOpenForId, setMenuOpenForId] = useState(null);
   const menuBoxRef = useRef(null);
 
-  const entriesArr = Array.isArray(entries) ? entries : [];
-  const showInitialSkeleton = loading && entries === null;
+  const showInitialSkeleton = loading && !hasCache && entries.length === 0;
+
+  function persistCache(nextEntries) {
+    if (!userId) return;
+    journalHomeCache.entriesByUserId[userId] = Array.isArray(nextEntries) ? nextEntries : [];
+    journalHomeCache.tsByUserId[userId] = Date.now();
+  }
 
   async function load(opts = {}) {
     if (!userId) return;
+    const silent = !!opts.silent;
 
-    const silentRequested = !!opts.silent;
-    const hasExisting = entriesArr.length > 0;
-    const silent = silentRequested && hasExisting;
-
-    if (!silent) setLoading(true);
+    const hasExisting = Array.isArray(entries) && entries.length > 0;
+    if (!silent || !hasExisting) setLoading(true);
 
     setErr("");
     try {
       const data = await fetchJournalEntries({ supabase, userId, limit: 80 });
       const next = Array.isArray(data) ? data : [];
       setEntries(next);
-      setCachedJournal(userId, next);
+      persistCache(next);
     } catch (e) {
       setErr(e?.message || "Failed to load journal entries.");
-      if (entries === null) {
-        setEntries([]);
-        setCachedJournal(userId, []);
-      }
+      setEntries([]);
+      persistCache([]);
     } finally {
-      if (!silent) setLoading(false);
+      if (!silent || !hasExisting) setLoading(false);
     }
   }
 
   useEffect(() => {
     if (!userId) return;
 
-    const persisted = getCachedJournal(userId);
-    if (Array.isArray(persisted)) {
-      setEntries(persisted);
+    const cached = journalHomeCache.entriesByUserId?.[userId];
+    if (Array.isArray(cached)) {
+      setEntries(cached);
       setLoading(false);
       load({ silent: true });
     } else {
-      setEntries(null);
-      load({ silent: false });
+      load();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
@@ -311,10 +318,10 @@ export default function JournalHome({ supabase, session }) {
     handledEditStateRef.current = true;
 
     (async () => {
-      let list = entriesArr;
+      let list = entries;
       if (!list || list.length === 0) {
-        await load({ silent: false });
-        list = entriesArr;
+        await load();
+        list = entries;
       }
 
       const found = (list || []).find((e) => e.id === editId);
@@ -337,13 +344,13 @@ export default function JournalHome({ supabase, session }) {
 
   const filtered = useMemo(() => {
     const q = String(search || "").trim().toLowerCase();
-    if (!q) return entriesArr;
+    if (!q) return entries;
 
-    return (entriesArr || []).filter((e) => {
+    return (entries || []).filter((e) => {
       const hay = `${e.title || ""}\n${e.body || ""}`.toLowerCase();
       return hay.includes(q);
     });
-  }, [entriesArr, search]);
+  }, [entries, search]);
 
   const grouped = useMemo(() => {
     const byDay = new Map();
@@ -366,6 +373,7 @@ export default function JournalHome({ supabase, session }) {
               new Date(b.updated_at || b.created_at).getTime() -
               new Date(a.updated_at || a.created_at).getTime()
           );
+
         return { dayKey, label, items: sorted };
       })
       .sort((a, b) => Number(b.dayKey) - Number(a.dayKey));
@@ -389,9 +397,9 @@ export default function JournalHome({ supabase, session }) {
           id: editing.id,
           ...payload,
         });
-        const next = (entriesArr || []).map((e) => (e.id === editing.id ? updated : e));
+        const next = (entries || []).map((e) => (e.id === editing.id ? updated : e));
         setEntries(next);
-        setCachedJournal(userId, next);
+        persistCache(next);
         showToast("Updated.");
       } else {
         const created = await createJournalEntry({
@@ -399,9 +407,9 @@ export default function JournalHome({ supabase, session }) {
           userId,
           ...payload,
         });
-        const next = [created, ...(entriesArr || [])];
+        const next = [created, ...(entries || [])];
         setEntries(next);
-        setCachedJournal(userId, next);
+        persistCache(next);
         showToast("Saved.");
       }
 
@@ -423,9 +431,9 @@ export default function JournalHome({ supabase, session }) {
 
     try {
       await deleteJournalEntry({ supabase, userId, id });
-      const next = (entriesArr || []).filter((e) => e.id !== id);
+      const next = (entries || []).filter((e) => e.id !== id);
       setEntries(next);
-      setCachedJournal(userId, next);
+      persistCache(next);
 
       setMenuOpenForId(null);
       if (openEntryId === id) setOpenEntryId(null);
@@ -438,8 +446,6 @@ export default function JournalHome({ supabase, session }) {
     }
   }
 
-  const isKnownEmpty = entries !== null && !loading && filtered.length === 0;
-
   return (
     <div>
       <Page style={{ display: "grid", gap: 14 }}>
@@ -450,7 +456,7 @@ export default function JournalHome({ supabase, session }) {
             </SmallButton>
           </div>
           <div style={{ fontSize: 12, opacity: 0.7 }}>
-            {loading ? "Loading…" : `${entriesArr.length} entries`}
+            {loading ? "Loading…" : `${entries.length} entries`}
           </div>
         </div>
 
@@ -493,7 +499,7 @@ export default function JournalHome({ supabase, session }) {
             </>
           ) : null}
 
-          {isKnownEmpty ? (
+          {!loading && filtered.length === 0 ? (
             <Card>
               <div style={{ opacity: 0.85, lineHeight: 1.4 }}>
                 No entries yet.
@@ -506,7 +512,15 @@ export default function JournalHome({ supabase, session }) {
 
           {grouped.map((group) => (
             <div key={group.dayKey} style={{ display: "grid", gap: 10 }}>
-              <div style={{ padding: "4px 2px", fontSize: 12, fontWeight: 900, letterSpacing: 0.2, opacity: 0.75 }}>
+              <div
+                style={{
+                  padding: "4px 2px",
+                  fontSize: 12,
+                  fontWeight: 900,
+                  letterSpacing: 0.2,
+                  opacity: 0.75,
+                }}
+              >
                 {group.label}
               </div>
 
@@ -516,15 +530,17 @@ export default function JournalHome({ supabase, session }) {
                     ENTRY_TYPES.find((t) => t.value === e.entry_type)?.label || e.entry_type || "Entry";
                   const title = e.title?.trim() ? e.title : "Untitled";
 
+                  const body = String(e.body || "");
+                  const hasBody = !!body.trim();
+
                   const preview =
-                    e.body && e.body.trim()
-                      ? e.body.length > 160
-                        ? `${e.body.slice(0, 160)}…`
-                        : e.body
-                      : "";
+                    hasBody && body.length > 180 ? `${body.slice(0, 180)}…` : hasBody ? body : "";
 
                   const isOpen = openEntryId === e.id;
                   const menuOpen = menuOpenForId === e.id;
+
+                  // Key change: ONE text block only (no divider added), so opening doesn't "shift"
+                  const textToShow = isOpen ? body : preview;
 
                   return (
                     <div
@@ -539,65 +555,60 @@ export default function JournalHome({ supabase, session }) {
                     >
                       <Card>
                         <div style={{ display: "grid", gap: 10 }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
-                            <div style={{ display: "grid", gap: 6 }}>
-                              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                                <Chip>{typeLabel}</Chip>
-                                <div style={{ fontWeight: 900 }}>{title}</div>
-                              </div>
-                              {!isOpen && preview ? <div style={{ opacity: 0.8, lineHeight: 1.35 }}>{preview}</div> : null}
+                          <div style={{ display: "grid", gap: 6, paddingRight: 26 }}>
+                            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                              <Chip>{typeLabel}</Chip>
+                              <div style={{ fontWeight: 900 }}>{title}</div>
                             </div>
 
-                            <button
-                              type="button"
-                              aria-label="More"
-                              onClick={(ev) => {
-                                ev.stopPropagation();
-                                setMenuOpenForId((prev) => (prev === e.id ? null : e.id));
-                              }}
-                              style={{
-                                width: 34,
-                                height: 34,
-                                borderRadius: 12,
-                                border: "1px solid rgba(255,255,255,0.12)",
-                                background: "rgba(255,255,255,0.04)",
-                                color: "#f3f3f7",
-                                cursor: "pointer",
-                                fontSize: 18,
-                                lineHeight: "34px",
-                                textAlign: "center",
-                                padding: 0,
-                              }}
-                            >
-                              ⋯
-                            </button>
-
-                            <div ref={menuBoxRef}>
-                              <KebabMenu
-                                open={menuOpen}
-                                onEdit={() => {
-                                  setMenuOpenForId(null);
-                                  setEditing(e);
-                                  setOpenEntryId(null);
+                            {textToShow ? (
+                              <div
+                                style={{
+                                  opacity: 0.9,
+                                  lineHeight: 1.45,
+                                  whiteSpace: "pre-wrap",
                                 }}
-                                onDelete={() => handleDelete(e.id)}
-                              />
-                            </div>
+                              >
+                                {textToShow}
+                              </div>
+                            ) : null}
                           </div>
 
-                          {isOpen ? (
-                            <div
-                              style={{
-                                paddingTop: 10,
-                                borderTop: "1px solid rgba(255,255,255,0.08)",
-                                whiteSpace: "pre-wrap",
-                                lineHeight: 1.45,
-                                opacity: 0.92,
+                          {/* Kebab: always top-right, no circle, no layout effect */}
+                          <button
+                            type="button"
+                            aria-label="More"
+                            onClick={(ev) => {
+                              ev.stopPropagation();
+                              setMenuOpenForId((prev) => (prev === e.id ? null : e.id));
+                            }}
+                            style={{
+                              position: "absolute",
+                              top: 10,
+                              right: 10,
+                              border: "none",
+                              background: "transparent",
+                              color: "rgba(243,243,247,0.85)",
+                              cursor: "pointer",
+                              fontSize: 18,
+                              lineHeight: "18px",
+                              padding: 6,
+                            }}
+                          >
+                            ⋯
+                          </button>
+
+                          <div ref={menuBoxRef}>
+                            <KebabMenu
+                              open={menuOpen}
+                              onEdit={() => {
+                                setMenuOpenForId(null);
+                                setEditing(e);
+                                setOpenEntryId(null);
                               }}
-                            >
-                              {e.body || ""}
-                            </div>
-                          ) : null}
+                              onDelete={() => handleDelete(e.id)}
+                            />
+                          </div>
                         </div>
                       </Card>
                     </div>
