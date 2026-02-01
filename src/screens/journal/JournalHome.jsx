@@ -255,11 +255,12 @@ export default function JournalHome({ supabase, session }) {
   const cachedForUser = userId ? journalHomeCache.entriesByUserId?.[userId] : null;
   const hasCache = !!(userId && Array.isArray(cachedForUser));
 
-  // ✅ state must come before derived flags (fixes TDZ error)
+  // Key change: entries is null until first load completes (unknown vs known-empty)
+  const [entries, setEntries] = useState(() => (Array.isArray(cachedForUser) ? cachedForUser : null));
   const [loading, setLoading] = useState(() => !hasCache);
+
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
-  const [entries, setEntries] = useState(() => (Array.isArray(cachedForUser) ? cachedForUser : []));
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState(null);
   const handledEditStateRef = useRef(false);
@@ -271,7 +272,8 @@ export default function JournalHome({ supabase, session }) {
   const [menuOpenForId, setMenuOpenForId] = useState(null);
   const menuBoxRef = useRef(null);
 
-  const showInitialSkeleton = loading && !hasCache && entries.length === 0;
+  const entriesArr = Array.isArray(entries) ? entries : [];
+  const showInitialSkeleton = loading && entries === null;
 
   function persistCache(nextEntries) {
     if (!userId) return;
@@ -283,7 +285,7 @@ export default function JournalHome({ supabase, session }) {
     if (!userId) return;
     const silent = !!opts.silent;
 
-    const hasExisting = Array.isArray(entries) && entries.length > 0;
+    const hasExisting = Array.isArray(entriesArr) && entriesArr.length > 0;
     if (!silent || !hasExisting) setLoading(true);
 
     setErr("");
@@ -294,8 +296,13 @@ export default function JournalHome({ supabase, session }) {
       persistCache(next);
     } catch (e) {
       setErr(e?.message || "Failed to load journal entries.");
-      setEntries([]);
-      persistCache([]);
+
+      // If this is a silent refresh failure, keep whatever we already have.
+      // If it is first-load (unknown), mark as known-empty to avoid being stuck.
+      if (entries === null) {
+        setEntries([]);
+        persistCache([]);
+      }
     } finally {
       if (!silent || !hasExisting) setLoading(false);
     }
@@ -311,6 +318,7 @@ export default function JournalHome({ supabase, session }) {
       setLoading(false);
       load({ silent: true });
     } else {
+      setEntries(null);
       load();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -324,13 +332,13 @@ export default function JournalHome({ supabase, session }) {
     handledEditStateRef.current = true;
 
     (async () => {
-      let list = entries;
+      let list = entriesArr;
       if (!list || list.length === 0) {
         await load();
-        list = entries;
+        list = entriesArr;
       }
 
-      let found = (list || []).find((e) => e.id === editId);
+      const found = (list || []).find((e) => e.id === editId);
       if (!found) return;
 
       setEditing(found);
@@ -351,13 +359,13 @@ export default function JournalHome({ supabase, session }) {
 
   const filtered = useMemo(() => {
     const q = String(search || "").trim().toLowerCase();
-    if (!q) return entries;
+    if (!q) return entriesArr;
 
-    return (entries || []).filter((e) => {
+    return (entriesArr || []).filter((e) => {
       const hay = `${e.title || ""}\n${e.body || ""}`.toLowerCase();
       return hay.includes(q);
     });
-  }, [entries, search]);
+  }, [entriesArr, search]);
 
   const grouped = useMemo(() => {
     const byDay = new Map();
@@ -406,7 +414,7 @@ export default function JournalHome({ supabase, session }) {
           id: editing.id,
           ...payload,
         });
-        const next = (entries || []).map((e) => (e.id === editing.id ? updated : e));
+        const next = (entriesArr || []).map((e) => (e.id === editing.id ? updated : e));
         setEntries(next);
         persistCache(next);
         showToast("Updated.");
@@ -416,7 +424,7 @@ export default function JournalHome({ supabase, session }) {
           userId,
           ...payload,
         });
-        const next = [created, ...(entries || [])];
+        const next = [created, ...(entriesArr || [])];
         setEntries(next);
         persistCache(next);
         showToast("Saved.");
@@ -440,7 +448,7 @@ export default function JournalHome({ supabase, session }) {
 
     try {
       await deleteJournalEntry({ supabase, userId, id });
-      const next = (entries || []).filter((e) => e.id !== id);
+      const next = (entriesArr || []).filter((e) => e.id !== id);
       setEntries(next);
       persistCache(next);
 
@@ -455,6 +463,8 @@ export default function JournalHome({ supabase, session }) {
     }
   }
 
+  const isKnownEmpty = entries !== null && !loading && filtered.length === 0;
+
   return (
     <div>
       <Page style={{ display: "grid", gap: 14 }}>
@@ -466,7 +476,7 @@ export default function JournalHome({ supabase, session }) {
             </SmallButton>
           </div>
           <div style={{ fontSize: 12, opacity: 0.7 }}>
-            {loading ? "Loading…" : `${entries.length} entries`}
+            {loading ? "Loading…" : `${entriesArr.length} entries`}
           </div>
         </div>
 
@@ -510,7 +520,7 @@ export default function JournalHome({ supabase, session }) {
             </>
           ) : null}
 
-          {!loading && filtered.length === 0 ? (
+          {isKnownEmpty ? (
             <Card>
               <div style={{ opacity: 0.85, lineHeight: 1.4 }}>
                 No entries yet.
