@@ -188,7 +188,7 @@ function EntryEditor({ initial, saving, onCancel, onSave }) {
   );
 }
 
-function KebabMenu({ open, onClose, onEdit, onDelete }) {
+function KebabMenu({ open, onEdit, onDelete }) {
   const boxStyle = {
     position: "absolute",
     right: 10,
@@ -253,11 +253,10 @@ export default function JournalHome({ supabase, session }) {
   const userId = session?.user?.id;
 
   const cachedForUser = userId ? journalHomeCache.entriesByUserId?.[userId] : null;
+  const hasCache = !!(userId && Array.isArray(cachedForUser));
 
-  const hasCache = userId && Array.isArray(cachedForUser);
-  const showInitialSkeleton = loading && !hasCache;
-
-  const [loading, setLoading] = useState(() => !(userId && Array.isArray(cachedForUser)));
+  // ✅ state must come before derived flags (fixes TDZ error)
+  const [loading, setLoading] = useState(() => !hasCache);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
   const [entries, setEntries] = useState(() => (Array.isArray(cachedForUser) ? cachedForUser : []));
@@ -271,6 +270,8 @@ export default function JournalHome({ supabase, session }) {
   // Kebab state
   const [menuOpenForId, setMenuOpenForId] = useState(null);
   const menuBoxRef = useRef(null);
+
+  const showInitialSkeleton = loading && !hasCache && entries.length === 0;
 
   function persistCache(nextEntries) {
     if (!userId) return;
@@ -374,7 +375,11 @@ export default function JournalHome({ supabase, session }) {
         const label = dayHeadingLabel(ts);
         const sorted = (items || [])
           .slice()
-          .sort((a, b) => new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime());
+          .sort(
+            (a, b) =>
+              new Date(b.updated_at || b.created_at).getTime() -
+              new Date(a.updated_at || a.created_at).getTime()
+          );
 
         return { dayKey, label, items: sorted };
       })
@@ -460,7 +465,9 @@ export default function JournalHome({ supabase, session }) {
               New entry
             </SmallButton>
           </div>
-          <div style={{ fontSize: 12, opacity: 0.7 }}>{loading ? "Loading…" : `${entries.length} entries`}</div>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>
+            {loading ? "Loading…" : `${entries.length} entries`}
+          </div>
         </div>
 
         {err ? (
@@ -508,7 +515,9 @@ export default function JournalHome({ supabase, session }) {
               <div style={{ opacity: 0.85, lineHeight: 1.4 }}>
                 No entries yet.
                 <div style={{ marginTop: 10 }}>
-                  <SmallButton onClick={() => setEditing({ mode: "new" })}>Create your first entry</SmallButton>
+                  <SmallButton onClick={() => setEditing({ mode: "new" })}>
+                    Create your first entry
+                  </SmallButton>
                 </div>
               </div>
             </Card>
@@ -593,7 +602,6 @@ export default function JournalHome({ supabase, session }) {
                             <div ref={menuBoxRef}>
                               <KebabMenu
                                 open={menuOpen}
-                                onClose={() => setMenuOpenForId(null)}
                                 onEdit={() => {
                                   setMenuOpenForId(null);
                                   setEditing(e);
