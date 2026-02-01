@@ -9,13 +9,13 @@ import {
   pickToolLabel,
 } from "../../lib/sceneHelpers";
 import { useLocation, useNavigate } from "react-router-dom";
+import { getCachedScenes, setCachedScenes } from "../../lib/appDataCache";
 
-/* ---------------- module cache to reduce jank ----------------
-   - Keeps list + per-scene details across unmount/remount (tab switches)
-   - Enables silent refresh without flipping the whole screen into Loading…
+/* ---------------- module cache (details only) ----------------
+   Keep per-scene details across tab switches (in-memory only).
+   List is now owned by appDataCache (persisted).
 */
 let scenesHomeCache = {
-  scenes: null, // array
   details: null, // map { [sceneId]: { status, data, error } }
   ts: 0,
 };
@@ -92,65 +92,68 @@ function SkeletonCard() {
   );
 }
 
-export default function ScenesHome() {
+export default function ScenesHome({ session }) {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const hasCache = Array.isArray(scenesHomeCache.scenes);
+  const userId = session?.user?.id;
+  const cached = userId ? getCachedScenes(userId) : null;
+  const hasCache = Array.isArray(cached);
 
-  // Key change: scenes is null until first fetch completes (unknown vs known-empty)
-  const [scenes, setScenes] = useState(() => (hasCache ? scenesHomeCache.scenes : null));
-  const [loading, setLoading] = useState(() => !hasCache);
-
+  const [loading, setLoading] = useState(() => Boolean(userId) && !hasCache);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [scenes, setScenes] = useState(() => (hasCache ? cached : null));
 
   const [openScenes, setOpenScenes] = useState(() => new Set());
   const [details, setDetails] = useState(() => scenesHomeCache.details || {});
 
   const showInitialSkeleton = loading && scenes === null;
 
-  function persistCache(nextScenes, nextDetails) {
+  function persistDetails(nextDetails) {
     scenesHomeCache = {
-      scenes: Array.isArray(nextScenes) ? nextScenes : scenesHomeCache.scenes,
       details: nextDetails ? nextDetails : scenesHomeCache.details,
       ts: Date.now(),
     };
   }
 
   async function reload(opts = {}) {
-    const silent = !!opts.silent;
+    const silentRequested = !!opts.silent;
     const hasExisting = Array.isArray(scenes) && scenes.length > 0;
+    const silent = silentRequested && hasExisting;
 
-    if (!silent || !hasExisting) setLoading(true);
+    if (!silent) setLoading(true);
 
     setErr("");
     try {
       const data = await fetchScenes();
       const nextScenes = Array.isArray(data) ? data : [];
       setScenes(nextScenes);
-      persistCache(nextScenes, details);
+      if (userId) setCachedScenes(userId, nextScenes);
     } catch (e) {
       setErr(e?.message || "Failed to load scenes.");
-      // Mark as known-empty so we don't stick in "unknown" forever
-      setScenes([]);
-      persistCache([], details);
+      // If we were in unknown state, mark as known-empty so we don't hang.
+      if (scenes === null) setScenes([]);
     } finally {
-      if (!silent || !hasExisting) setLoading(false);
+      if (!silent) setLoading(false);
     }
   }
 
   useEffect(() => {
-    let alive = true;
-    (async () => {
-      if (!alive) return;
-      await reload({ silent: hasCache });
-    })();
-    return () => {
-      alive = false;
-    };
+    if (!userId) return;
+
+    // Rehydrate immediately from persisted cache on mount (hard refresh safe)
+    const persisted = getCachedScenes(userId);
+    if (Array.isArray(persisted)) {
+      setScenes(persisted);
+      setLoading(false);
+      reload({ silent: true });
+    } else {
+      setScenes(null);
+      reload({ silent: false });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [userId]);
 
   async function ensureDetails(sceneId) {
     const existingLocal = details?.[sceneId];
@@ -160,7 +163,7 @@ export default function ScenesHome() {
     if (existingCached?.status === "ready") {
       setDetails((prev) => {
         const next = { ...prev, [sceneId]: existingCached };
-        persistCache(Array.isArray(scenes) ? scenes : scenesHomeCache.scenes, next);
+        persistDetails(next);
         return next;
       });
       return;
@@ -169,7 +172,7 @@ export default function ScenesHome() {
 
     setDetails((prev) => {
       const next = { ...prev, [sceneId]: { status: "loading" } };
-      persistCache(Array.isArray(scenes) ? scenes : scenesHomeCache.scenes, next);
+      persistDetails(next);
       return next;
     });
 
@@ -177,7 +180,7 @@ export default function ScenesHome() {
       const full = await fetchSceneById(sceneId);
       setDetails((prev) => {
         const next = { ...prev, [sceneId]: { status: "ready", data: full } };
-        persistCache(Array.isArray(scenes) ? scenes : scenesHomeCache.scenes, next);
+        persistDetails(next);
         return next;
       });
     } catch (e) {
@@ -189,7 +192,7 @@ export default function ScenesHome() {
             error: e?.message || "Failed to load scene details.",
           },
         };
-        persistCache(Array.isArray(scenes) ? scenes : scenesHomeCache.scenes, next);
+        persistDetails(next);
         return next;
       });
     }
@@ -218,9 +221,9 @@ export default function ScenesHome() {
     try {
       await updateScenePlanningStage(scene.id, next);
       setScenes((prev) => {
-        const prevArr = Array.isArray(prev) ? prev : [];
-        const nextScenes = prevArr.map((s) => (s.id === scene.id ? { ...s, planning_stage: next } : s));
-        persistCache(nextScenes, details);
+        const arr = Array.isArray(prev) ? prev : [];
+        const nextScenes = arr.map((s) => (s.id === scene.id ? { ...s, planning_stage: next } : s));
+        if (userId) setCachedScenes(userId, nextScenes);
         return nextScenes;
       });
     } catch (err) {
@@ -251,7 +254,7 @@ export default function ScenesHome() {
       setDetails((prev) => {
         const next = { ...prev };
         delete next[sceneId];
-        persistCache(Array.isArray(scenes) ? scenes : scenesHomeCache.scenes, next);
+        persistDetails(next);
         return next;
       });
 
@@ -264,7 +267,7 @@ export default function ScenesHome() {
   }
 
   const scenesArr = Array.isArray(scenes) ? scenes : [];
-  const isKnownEmpty = Array.isArray(scenes) && scenes.length === 0 && !loading;
+  const isKnownEmpty = scenes !== null && !loading && scenesArr.length === 0;
 
   return (
     <div>
@@ -313,15 +316,10 @@ export default function ScenesHome() {
 
           {isKnownEmpty ? (
             <Card>
-              <div style={{ display: "grid", gap: 8 }}>
-                <div style={{ fontWeight: 850 }}>No scenes yet</div>
-                <div style={{ fontSize: 13, opacity: 0.75, lineHeight: 1.4 }}>
-                  Create your first scene plan to start building your library.
-                </div>
-                <div>
-                  <SmallButton asLink to="/scenes/new">
-                    + New scene
-                  </SmallButton>
+              <div style={{ opacity: 0.85, lineHeight: 1.4 }}>
+                No scenes yet.
+                <div style={{ marginTop: 10 }}>
+                  <SmallButton asLink to="/scenes/new">Create your first scene</SmallButton>
                 </div>
               </div>
             </Card>
@@ -354,13 +352,7 @@ export default function ScenesHome() {
                 }}
               >
                 <div style={{ display: "grid", gap: 10 }}>
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      gap: 12,
-                    }}
-                  >
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
                     <div>
                       <div style={{ fontWeight: 800 }}>{s.title}</div>
                       {intent && <div style={{ fontSize: 13, opacity: 0.85 }}>{intent}</div>}
@@ -431,13 +423,7 @@ export default function ScenesHome() {
                             >
                               <div style={{ fontWeight: 850, fontSize: 13 }}>{sec.title}</div>
                               {sec.body ? (
-                                <div
-                                  style={{
-                                    whiteSpace: "pre-wrap",
-                                    lineHeight: 1.4,
-                                    opacity: 0.9,
-                                  }}
-                                >
+                                <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.4, opacity: 0.9 }}>
                                   {sec.body}
                                 </div>
                               ) : null}
