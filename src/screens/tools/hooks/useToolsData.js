@@ -1,5 +1,3 @@
-// src/screens/tools/hooks/useToolsData.js
-
 import { useEffect, useMemo, useState } from "react";
 import {
   addGlobalToolToUser,
@@ -11,16 +9,7 @@ import {
   updateUserToolStatus,
   uploadToolPhoto,
 } from "../../../lib/toolsApi";
-
-/* ---------------- module cache to reduce loading flash ----------------
-   - Keeps vault + userTools across unmount/remount (tab switches)
-   - Allows "silent refresh" without briefly showing empty-state UI
-*/
-let toolsCache = {
-  vault: null, // array
-  userTools: null, // array
-  ts: 0,
-};
+import { getCachedTools, setCachedTools } from "../../../lib/appDataCache";
 
 function groupKeyForToolUser(tu) {
   if (tu?.tool_global_id) return `g:${tu.tool_global_id}`;
@@ -38,100 +27,70 @@ function groupIconForToolUser(tu) {
   return g?.icon || tu?.custom_icon || "🧰";
 }
 
-export function useToolsData() {
-  const hasCache =
-    Array.isArray(toolsCache.vault) && Array.isArray(toolsCache.userTools);
+export function useToolsData({ session } = {}) {
+  const userId = session?.user?.id;
+
+  const cached = userId ? getCachedTools(userId) : null;
+  const hasCache = !!(cached && Array.isArray(cached.vault) && Array.isArray(cached.userTools));
 
   const [tab, setTab] = useState("drawer"); // drawer | vault
-
-  // Key change: null means "unknown/not loaded yet"
-  const [vault, setVault] = useState(() => (hasCache ? toolsCache.vault : null));
-  const [userTools, setUserTools] = useState(() => (hasCache ? toolsCache.userTools : null));
-
-  // loading should represent "first load pending" (unless we have cache)
-  const [loading, setLoading] = useState(() => !hasCache);
-
+  const [loading, setLoading] = useState(() => Boolean(userId) && !hasCache);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+
+  const [vault, setVault] = useState(() => (hasCache ? cached.vault : null));
+  const [userTools, setUserTools] = useState(() => (hasCache ? cached.userTools : null));
+
+  const vaultArr = Array.isArray(vault) ? vault : [];
+  const userToolsArr = Array.isArray(userTools) ? userTools : [];
 
   // Per-instance UI state
   const [draftLabel, setDraftLabel] = useState({}); // { [tools_user_id]: string }
   const [photoUrlById, setPhotoUrlById] = useState({}); // { [tools_user_id]: signedUrl }
   const [photoPathById, setPhotoPathById] = useState({}); // { [tools_user_id]: photo_path last loaded }
 
-  const drawerKnown = userTools !== null;
-  const vaultKnown = vault !== null;
-
-  function persistCache(nextVault, nextUserTools) {
-    toolsCache = {
-      vault: Array.isArray(nextVault) ? nextVault : toolsCache.vault,
-      userTools: Array.isArray(nextUserTools) ? nextUserTools : toolsCache.userTools,
-      ts: Date.now(),
-    };
-  }
-
   async function reload(opts = {}) {
-    const silent = !!opts.silent;
+    const silentRequested = !!opts.silent;
+    const hasExisting = vaultArr.length > 0 || userToolsArr.length > 0;
+    const silent = silentRequested && hasExisting;
 
-    // If we already have known data, don't flip the whole screen into loading on a silent refresh.
-    const hasKnownData = drawerKnown && vaultKnown;
-
-    if (!silent || !hasKnownData) setLoading(true);
+    if (!silent) setLoading(true);
 
     setErr("");
     try {
       const [v, ut] = await Promise.all([fetchToolVault(), fetchUserTools()]);
-      const nextV = Array.isArray(v) ? v : [];
-      const nextUT = Array.isArray(ut) ? ut : [];
-
-      setVault(nextV);
-      setUserTools(nextUT);
-      persistCache(nextV, nextUT);
+      setVault(v);
+      setUserTools(ut);
+      if (userId) setCachedTools(userId, v, ut);
     } catch (e) {
       setErr(e?.message || "Failed to load tools.");
-
-      // On first load failure, mark as known-empty so we don't remain in "unknown" forever.
-      // On silent refresh failure, keep existing data (no regressions / no flash).
-      if (!hasKnownData) {
-        setVault([]);
-        setUserTools([]);
-        persistCache([], []);
-      }
+      if (vault === null) setVault([]);
+      if (userTools === null) setUserTools([]);
     } finally {
-      if (!silent || !hasKnownData) setLoading(false);
+      if (!silent) setLoading(false);
     }
   }
 
   useEffect(() => {
-    let alive = true;
-    (async () => {
-      if (!alive) return;
+    if (!userId) return;
 
-      // If we have cache, don't show Loading/empty-state flash.
-      // Still do a silent refresh to keep data accurate.
-      await reload({ silent: hasCache });
-
-      if (!alive) return;
-
-      // If we had cache, ensure loading is false immediately (we're showing cached data)
-      if (hasCache) setLoading(false);
-    })();
-
-    return () => {
-      alive = false;
-    };
+    // Rehydrate immediately from persisted cache (hard refresh safe)
+    const persisted = getCachedTools(userId);
+    if (persisted && Array.isArray(persisted.vault) && Array.isArray(persisted.userTools)) {
+      setVault(persisted.vault);
+      setUserTools(persisted.userTools);
+      setLoading(false);
+      reload({ silent: true });
+    } else {
+      setVault(null);
+      setUserTools(null);
+      reload({ silent: false });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [userId]);
 
-  const owned = useMemo(() => {
-    const arr = Array.isArray(userTools) ? userTools : [];
-    return arr.filter((t) => t.status === "owned");
-  }, [userTools]);
-
-  const craving = useMemo(() => {
-    const arr = Array.isArray(userTools) ? userTools : [];
-    return arr.filter((t) => t.status === "craving");
-  }, [userTools]);
+  const owned = useMemo(() => userToolsArr.filter((t) => t.status === "owned"), [userToolsArr]);
+  const craving = useMemo(() => userToolsArr.filter((t) => t.status === "craving"), [userToolsArr]);
 
   const ownedGlobalIds = useMemo(() => {
     const s = new Set();
@@ -250,7 +209,6 @@ export function useToolsData() {
       setPhotoPathById((prev) => ({ ...prev, [toolUserId]: path }));
       setPhotoUrlById((prev) => ({ ...prev, [toolUserId]: signedUrl }));
     } catch (e) {
-      // non-fatal
       console.warn("Failed to load signed tool photo URL:", e);
     }
   }
@@ -274,10 +232,19 @@ export function useToolsData() {
     setErr("");
     setBusy(true);
     try {
-      const { photo_path, signedUrl } = await uploadToolPhoto(toolUserId, file);
-      await updateUserToolInstanceDetails(toolUserId, { photo_path });
-      setPhotoPathById((prev) => ({ ...prev, [toolUserId]: photo_path }));
-      setPhotoUrlById((prev) => ({ ...prev, [toolUserId]: signedUrl || null }));
+      const path = await uploadToolPhoto(toolUserId, file);
+      await updateUserToolInstanceDetails(toolUserId, { photo_path: path });
+
+      // We'll refresh, but also prime local state so image can show immediately
+      setPhotoPathById((prev) => ({ ...prev, [toolUserId]: path }));
+
+      try {
+        const signedUrl = await getToolPhotoSignedUrl(path);
+        setPhotoUrlById((prev) => ({ ...prev, [toolUserId]: signedUrl || null }));
+      } catch {
+        // non-fatal
+      }
+
       await reload({ silent: true });
     } catch (e) {
       setErr(e?.message || "Could not upload photo.");
@@ -287,20 +254,14 @@ export function useToolsData() {
   }
 
   return {
-    // view state
     tab,
     setTab,
     loading,
     busy,
     err,
 
-    // known/unknown flags (useful for UI gating)
-    drawerKnown,
-    vaultKnown,
-
-    // data
-    vault: Array.isArray(vault) ? vault : [],
-    userTools: Array.isArray(userTools) ? userTools : [],
+    vault: vaultArr,
+    userTools: userToolsArr,
     owned,
     craving,
     ownedGroups,
@@ -308,13 +269,11 @@ export function useToolsData() {
     ownedGlobalIds,
     cravingGlobalIds,
 
-    // instance ui state
     draftLabel,
     setDraftLabel,
     photoUrlById,
     photoPathById,
 
-    // actions
     reload,
     addTo,
     addAnotherInstance,
