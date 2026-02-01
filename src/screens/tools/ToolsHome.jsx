@@ -31,7 +31,14 @@ function SkeletonRow({ lines = 2 }) {
         gap: 8,
       }}
     >
-      <div style={{ height: 12, width: "55%", borderRadius: 999, background: "rgba(255,255,255,0.08)" }} />
+      <div
+        style={{
+          height: 12,
+          width: "55%",
+          borderRadius: 999,
+          background: "rgba(255,255,255,0.08)",
+        }}
+      />
       {Array.from({ length: Math.max(1, lines) }).map((_, i) => (
         <div
           key={i}
@@ -47,7 +54,7 @@ function SkeletonRow({ lines = 2 }) {
   );
 }
 
-export default function ToolsHome() {
+export default function ToolsHome({ session }) {
   const {
     tab,
     setTab,
@@ -73,7 +80,7 @@ export default function ToolsHome() {
     ensureSignedPhotoUrl,
     saveLabel,
     handleUpload,
-  } = useToolsData();
+  } = useToolsData({ session });
 
   // Group open state (multiple open per section)
   const [openOwned, setOpenOwned] = useState(() => new Set());
@@ -86,14 +93,26 @@ export default function ToolsHome() {
   const infoText = useMemo(() => {
     if (tab === "drawer") {
       if (!drawerKnown) return "Loading drawer…";
-      return loading ? "Loading drawer…" : `${owned.length} owned • ${craving.length} craving`;
+      return loading
+        ? "Loading drawer…"
+        : `${owned.length} owned • ${craving.length} craving`;
     }
     if (!vaultKnown) return "Loading vault…";
     return loading ? "Loading vault…" : `${vault.length} in vault`;
-  }, [tab, loading, drawerKnown, vaultKnown, owned.length, craving.length, vault.length]);
+  }, [
+    tab,
+    loading,
+    drawerKnown,
+    vaultKnown,
+    owned.length,
+    craving.length,
+    vault.length,
+  ]);
 
   function getDraftLabelValue(tu) {
-    return draftLabel?.[tu.id] !== undefined ? draftLabel[tu.id] : tu.instance_label || "";
+    return draftLabel?.[tu.id] !== undefined
+      ? draftLabel[tu.id]
+      : tu.instance_label || "";
   }
 
   function onDraftLabelChange(toolUserId, value) {
@@ -113,7 +132,14 @@ export default function ToolsHome() {
             flexWrap: "wrap",
           }}
         >
-          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <div
+            style={{
+              display: "flex",
+              gap: 10,
+              alignItems: "center",
+              flexWrap: "wrap",
+            }}
+          >
             <Segmented
               value={tab}
               onChange={(next) => setTab(next)}
@@ -167,12 +193,20 @@ export default function ToolsHome() {
                         onToggle={() => {
                           setOpenOwned((prev) => toggleInSet(prev, g.key));
                           if (!open) {
-                            for (const tu of g.items) ensureSignedPhotoUrl(tu.id, tu.photo_path);
+                            for (const tu of g.items)
+                              ensureSignedPhotoUrl(tu.id, tu.photo_path);
                           }
                         }}
                         expandedContent={
                           <div style={{ display: "grid", gap: 12 }}>
-                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                            <div
+                              style={{
+                                display: "flex",
+                                gap: 8,
+                                flexWrap: "wrap",
+                                alignItems: "center",
+                              }}
+                            >
                               <button
                                 type="button"
                                 disabled={busy || !g.tool_global_id}
@@ -219,7 +253,11 @@ export default function ToolsHome() {
                                   status="owned"
                                   busy={busy}
                                   isOpen={openInstances.has(tu.id)}
-                                  onToggleOpen={() => setOpenInstances((prev) => toggleInSet(prev, tu.id))}
+                                  onToggleOpen={() =>
+                                    setOpenInstances((prev) =>
+                                      toggleInSet(prev, tu.id)
+                                    )
+                                  }
                                   draftLabelValue={getDraftLabelValue(tu)}
                                   onDraftLabelChange={onDraftLabelChange}
                                   onSaveLabel={saveLabel}
@@ -270,12 +308,20 @@ export default function ToolsHome() {
                         onToggle={() => {
                           setOpenCraving((prev) => toggleInSet(prev, g.key));
                           if (!open) {
-                            for (const tu of g.items) ensureSignedPhotoUrl(tu.id, tu.photo_path);
+                            for (const tu of g.items)
+                              ensureSignedPhotoUrl(tu.id, tu.photo_path);
                           }
                         }}
                         expandedContent={
                           <div style={{ display: "grid", gap: 12 }}>
-                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                            <div
+                              style={{
+                                display: "flex",
+                                gap: 8,
+                                flexWrap: "wrap",
+                                alignItems: "center",
+                              }}
+                            >
                               <button
                                 type="button"
                                 disabled={busy || !g.tool_global_id}
@@ -322,7 +368,11 @@ export default function ToolsHome() {
                                   status="craving"
                                   busy={busy}
                                   isOpen={openInstances.has(tu.id)}
-                                  onToggleOpen={() => setOpenInstances((prev) => toggleInSet(prev, tu.id))}
+                                  onToggleOpen={() =>
+                                    setOpenInstances((prev) =>
+                                      toggleInSet(prev, tu.id)
+                                    )
+                                  }
                                   draftLabelValue={getDraftLabelValue(tu)}
                                   onDraftLabelChange={onDraftLabelChange}
                                   onSaveLabel={saveLabel}
@@ -440,7 +490,8 @@ export default function ToolsHome() {
                         </div>
 
                         <div style={{ opacity: 0.75 }}>
-                          Vault items will later show richer details and let you create your own owned instances (with photos).
+                          Vault items will later show richer details and let you
+                          create your own owned instances (with photos).
                         </div>
                       </div>
                     }
