@@ -4,7 +4,7 @@ const TOOL_PHOTOS_BUCKET = "tool-photos";
 
 /* ---------------- auth gate ----------------
    On cold boot, Supabase can take a moment to hydrate the session.
-   During that window, RLS-backed queries often return [] (not an error).
+   During that window, RLS-backed queries can return [] (not an error).
    We wait briefly to avoid caching "empty" as if it were real data.
 */
 
@@ -24,15 +24,11 @@ async function getAuthedUserId({ waitMs = 1200, stepMs = 60 } = {}) {
     await new Promise((r) => setTimeout(r, step));
   }
 
-  // At this point we genuinely don't have a session.
   throw new Error("Not signed in.");
 }
 
-/* ---------------- vault ---------------- */
-
 /**
  * Fetch Tool Vault (global tools).
- * We still gate on auth so we don't render "0 in vault" during cold-start auth hydration.
  */
 export async function fetchToolVault() {
   await getAuthedUserId();
@@ -47,11 +43,9 @@ export async function fetchToolVault() {
   return data ?? [];
 }
 
-/* ---------------- user tools ---------------- */
-
 /**
  * Fetch user's tools (owned + craving + custom).
- * NOTE: includes instance_label + photo_path (per owned instance).
+ * NOTE: now includes instance_label + photo_path (per owned instance).
  */
 export async function fetchUserTools() {
   await getAuthedUserId();
@@ -133,24 +127,21 @@ export async function updateUserToolInstanceDetails(toolUserId, patch) {
   if (error) throw error;
 }
 
-/* ---------------- photos ---------------- */
-
 /**
- * Get a signed URL for a private tool photo.
- * Returns null if photo_path is falsy.
+ * Get a signed URL for a tool photo path.
  */
 export async function getToolPhotoSignedUrl(photo_path, expiresInSeconds = 60 * 60) {
   await getAuthedUserId();
 
   const path = String(photo_path || "").trim();
-  if (!path) return null;
+  if (!path) return "";
 
   const { data, error } = await supabase.storage
     .from(TOOL_PHOTOS_BUCKET)
     .createSignedUrl(path, expiresInSeconds);
 
   if (error) throw error;
-  return data?.signedUrl || null;
+  return data?.signedUrl || "";
 }
 
 function makeSafeFilename(originalName = "photo") {
@@ -161,7 +152,8 @@ function makeSafeFilename(originalName = "photo") {
 }
 
 /**
- * Upload a tool photo to storage. Returns { photo_path, signedUrl }.
+ * Upload a tool photo to storage.
+ * IMPORTANT: returns the stored `photo_path` STRING (hook expects a string).
  */
 export async function uploadToolPhoto(toolUserId, file) {
   if (!toolUserId) throw new Error("Missing toolUserId.");
@@ -181,6 +173,5 @@ export async function uploadToolPhoto(toolUserId, file) {
 
   if (uploadError) throw uploadError;
 
-  const signedUrl = await getToolPhotoSignedUrl(photo_path);
-  return { photo_path, signedUrl };
+  return photo_path;
 }
