@@ -31,14 +31,7 @@ function SkeletonRow({ lines = 2 }) {
         gap: 8,
       }}
     >
-      <div
-        style={{
-          height: 12,
-          width: "55%",
-          borderRadius: 999,
-          background: "rgba(255,255,255,0.08)",
-        }}
-      />
+      <div style={{ height: 12, width: "55%", borderRadius: 999, background: "rgba(255,255,255,0.08)" }} />
       {Array.from({ length: Math.max(1, lines) }).map((_, i) => (
         <div
           key={i}
@@ -54,7 +47,7 @@ function SkeletonRow({ lines = 2 }) {
   );
 }
 
-export default function ToolsHome() {
+export default function ToolsHome({ session }) {
   const {
     tab,
     setTab,
@@ -78,7 +71,7 @@ export default function ToolsHome() {
     ensureSignedPhotoUrl,
     saveLabel,
     handleUpload,
-  } = useToolsData();
+  } = useToolsData({ session });
 
   // Group open state (multiple open per section)
   const [openOwned, setOpenOwned] = useState(() => new Set());
@@ -439,7 +432,8 @@ export default function ToolsHome() {
                         </div>
 
                         <div style={{ opacity: 0.75 }}>
-                          Vault items will later show richer details and let you create your own owned instances (with photos).
+                          Vault items will later show richer details and let you create your own owned instances (with
+                          photos).
                         </div>
                       </div>
                     }
