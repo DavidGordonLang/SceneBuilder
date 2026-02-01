@@ -14,9 +14,10 @@ let profileCacheByUserId = {
  */
 export function useProfile({ supabase, userId }) {
   const cached = userId ? profileCacheByUserId[userId]?.profile : null;
+  const hasCachedAtInit = Boolean(cached);
 
   const [profile, setProfile] = useState(() => cached ?? null);
-  const [loading, setLoading] = useState(() => Boolean(userId) && !cached);
+  const [loading, setLoading] = useState(() => Boolean(userId) && !hasCachedAtInit);
   const [error, setError] = useState("");
 
   const writeCache = useCallback((uid, nextProfile) => {
@@ -28,7 +29,11 @@ export function useProfile({ supabase, userId }) {
     async (opts = {}) => {
       if (!supabase || !userId) return;
 
-      const silent = !!opts.silent;
+      const silentRequested = !!opts.silent;
+      const hasCachedNow = !!profileCacheByUserId?.[userId]?.profile;
+
+      // Silent refresh only makes sense if we already have cached data.
+      const silent = silentRequested && hasCachedNow;
 
       // If we're doing a silent refresh, don't flip the whole UI into "loading".
       if (!silent) setLoading(true);
@@ -56,7 +61,7 @@ export function useProfile({ supabase, userId }) {
         }
       } finally {
         if (!silent) setLoading(false);
-        else setLoading(false);
+        // If silent, we deliberately keep loading as-is (it should already be false in cached flows).
       }
     },
     [supabase, userId, writeCache]
@@ -73,7 +78,11 @@ export function useProfile({ supabase, userId }) {
         updated_at: new Date().toISOString(),
       };
 
-      const { data, error: uErr } = await supabase.from("profiles").upsert(payload).select().single();
+      const { data, error: uErr } = await supabase
+        .from("profiles")
+        .upsert(payload)
+        .select()
+        .single();
       if (uErr) throw uErr;
 
       const next = data ?? payload;
