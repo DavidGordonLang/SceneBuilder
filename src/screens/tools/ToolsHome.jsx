@@ -54,15 +54,13 @@ function SkeletonRow({ lines = 2 }) {
   );
 }
 
-export default function ToolsHome({ session }) {
+export default function ToolsHome() {
   const {
     tab,
     setTab,
     loading,
     busy,
     err,
-    drawerKnown,
-    vaultKnown,
     vault,
     owned,
     craving,
@@ -80,7 +78,7 @@ export default function ToolsHome({ session }) {
     ensureSignedPhotoUrl,
     saveLabel,
     handleUpload,
-  } = useToolsData({ session });
+  } = useToolsData();
 
   // Group open state (multiple open per section)
   const [openOwned, setOpenOwned] = useState(() => new Set());
@@ -92,27 +90,13 @@ export default function ToolsHome({ session }) {
 
   const infoText = useMemo(() => {
     if (tab === "drawer") {
-      if (!drawerKnown) return "Loading drawer…";
-      return loading
-        ? "Loading drawer…"
-        : `${owned.length} owned • ${craving.length} craving`;
+      return loading ? "Loading drawer…" : `${owned.length} owned • ${craving.length} craving`;
     }
-    if (!vaultKnown) return "Loading vault…";
     return loading ? "Loading vault…" : `${vault.length} in vault`;
-  }, [
-    tab,
-    loading,
-    drawerKnown,
-    vaultKnown,
-    owned.length,
-    craving.length,
-    vault.length,
-  ]);
+  }, [tab, loading, owned.length, craving.length, vault.length]);
 
   function getDraftLabelValue(tu) {
-    return draftLabel?.[tu.id] !== undefined
-      ? draftLabel[tu.id]
-      : tu.instance_label || "";
+    return draftLabel?.[tu.id] !== undefined ? draftLabel[tu.id] : tu.instance_label || "";
   }
 
   function onDraftLabelChange(toolUserId, value) {
@@ -132,14 +116,7 @@ export default function ToolsHome({ session }) {
             flexWrap: "wrap",
           }}
         >
-          <div
-            style={{
-              display: "flex",
-              gap: 10,
-              alignItems: "center",
-              flexWrap: "wrap",
-            }}
-          >
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <Segmented
               value={tab}
               onChange={(next) => setTab(next)}
@@ -173,7 +150,7 @@ export default function ToolsHome({ session }) {
             <Section
               title="Owned tools"
               subtitle={
-                !drawerKnown || loading
+                loading
                   ? "Loading owned tools…"
                   : owned.length
                   ? null
@@ -193,20 +170,12 @@ export default function ToolsHome({ session }) {
                         onToggle={() => {
                           setOpenOwned((prev) => toggleInSet(prev, g.key));
                           if (!open) {
-                            for (const tu of g.items)
-                              ensureSignedPhotoUrl(tu.id, tu.photo_path);
+                            for (const tu of g.items) ensureSignedPhotoUrl(tu.id, tu.photo_path);
                           }
                         }}
                         expandedContent={
                           <div style={{ display: "grid", gap: 12 }}>
-                            <div
-                              style={{
-                                display: "flex",
-                                gap: 8,
-                                flexWrap: "wrap",
-                                alignItems: "center",
-                              }}
-                            >
+                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                               <button
                                 type="button"
                                 disabled={busy || !g.tool_global_id}
@@ -239,9 +208,7 @@ export default function ToolsHome({ session }) {
                               </button>
 
                               {g.isCustom ? (
-                                <div style={{ fontSize: 12, opacity: 0.65 }}>
-                                  (Custom tool grouping is temporary)
-                                </div>
+                                <div style={{ fontSize: 12, opacity: 0.65 }}>(Custom tool grouping is temporary)</div>
                               ) : null}
                             </div>
 
@@ -253,11 +220,7 @@ export default function ToolsHome({ session }) {
                                   status="owned"
                                   busy={busy}
                                   isOpen={openInstances.has(tu.id)}
-                                  onToggleOpen={() =>
-                                    setOpenInstances((prev) =>
-                                      toggleInSet(prev, tu.id)
-                                    )
-                                  }
+                                  onToggleOpen={() => setOpenInstances((prev) => toggleInSet(prev, tu.id))}
                                   draftLabelValue={getDraftLabelValue(tu)}
                                   onDraftLabelChange={onDraftLabelChange}
                                   onSaveLabel={saveLabel}
@@ -276,7 +239,7 @@ export default function ToolsHome({ session }) {
                     );
                   })}
                 </div>
-              ) : !drawerKnown || loading ? (
+              ) : loading ? (
                 <div style={{ display: "grid", gap: 10 }}>
                   <SkeletonRow />
                   <SkeletonRow />
@@ -288,7 +251,7 @@ export default function ToolsHome({ session }) {
             <Section
               title="Craving drawer"
               subtitle={
-                !drawerKnown || loading
+                loading
                   ? "Loading craving drawer…"
                   : craving.length
                   ? null
@@ -308,20 +271,12 @@ export default function ToolsHome({ session }) {
                         onToggle={() => {
                           setOpenCraving((prev) => toggleInSet(prev, g.key));
                           if (!open) {
-                            for (const tu of g.items)
-                              ensureSignedPhotoUrl(tu.id, tu.photo_path);
+                            for (const tu of g.items) ensureSignedPhotoUrl(tu.id, tu.photo_path);
                           }
                         }}
                         expandedContent={
                           <div style={{ display: "grid", gap: 12 }}>
-                            <div
-                              style={{
-                                display: "flex",
-                                gap: 8,
-                                flexWrap: "wrap",
-                                alignItems: "center",
-                              }}
-                            >
+                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                               <button
                                 type="button"
                                 disabled={busy || !g.tool_global_id}
@@ -354,9 +309,7 @@ export default function ToolsHome({ session }) {
                               </button>
 
                               {g.isCustom ? (
-                                <div style={{ fontSize: 12, opacity: 0.65 }}>
-                                  (Custom tool grouping is temporary)
-                                </div>
+                                <div style={{ fontSize: 12, opacity: 0.65 }}>(Custom tool grouping is temporary)</div>
                               ) : null}
                             </div>
 
@@ -368,11 +321,7 @@ export default function ToolsHome({ session }) {
                                   status="craving"
                                   busy={busy}
                                   isOpen={openInstances.has(tu.id)}
-                                  onToggleOpen={() =>
-                                    setOpenInstances((prev) =>
-                                      toggleInSet(prev, tu.id)
-                                    )
-                                  }
+                                  onToggleOpen={() => setOpenInstances((prev) => toggleInSet(prev, tu.id))}
                                   draftLabelValue={getDraftLabelValue(tu)}
                                   onDraftLabelChange={onDraftLabelChange}
                                   onSaveLabel={saveLabel}
@@ -391,7 +340,7 @@ export default function ToolsHome({ session }) {
                     );
                   })}
                 </div>
-              ) : !drawerKnown || loading ? (
+              ) : loading ? (
                 <div style={{ display: "grid", gap: 10 }}>
                   <SkeletonRow />
                   <SkeletonRow />
@@ -416,7 +365,7 @@ export default function ToolsHome({ session }) {
             </div>
 
             <div style={{ display: "grid", gap: 10 }}>
-              {!vaultKnown || (loading && vault.length === 0) ? (
+              {loading && vault.length === 0 ? (
                 <>
                   <SkeletonRow />
                   <SkeletonRow />
@@ -490,8 +439,7 @@ export default function ToolsHome({ session }) {
                         </div>
 
                         <div style={{ opacity: 0.75 }}>
-                          Vault items will later show richer details and let you
-                          create your own owned instances (with photos).
+                          Vault items will later show richer details and let you create your own owned instances (with photos).
                         </div>
                       </div>
                     }
