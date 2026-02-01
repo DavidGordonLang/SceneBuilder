@@ -79,6 +79,19 @@ function TextArea(props) {
   );
 }
 
+function SkeletonText({ width = "70%", height = 12 }) {
+  return (
+    <div
+      style={{
+        width,
+        height,
+        borderRadius: 999,
+        background: "rgba(255,255,255,0.07)",
+      }}
+    />
+  );
+}
+
 export default function ProfileScreen({ session, supabase }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -247,6 +260,7 @@ export default function ProfileScreen({ session, supabase }) {
   }
 
   const busy = loading || uploading || busySave;
+  const showSkeleton = loading && !profile;
 
   // Onboarding label: avoid "Not complete" flash by not showing until profile is loaded.
   const onboardingLabel = profile
@@ -402,12 +416,25 @@ export default function ProfileScreen({ session, supabase }) {
           <div style={{ display: "grid", gap: 10, opacity: 0.9 }}>
             <div>
               <div style={{ fontSize: 12, opacity: 0.7, fontWeight: 700 }}>Display name</div>
-              <div style={{ marginTop: 4 }}>{profile?.display_name || "—"}</div>
+              {showSkeleton ? (
+                <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
+                  <SkeletonText width="55%" />
+                </div>
+              ) : (
+                <div style={{ marginTop: 4 }}>{profile?.display_name || "—"}</div>
+              )}
             </div>
 
             <div>
               <div style={{ fontSize: 12, opacity: 0.7, fontWeight: 700 }}>Bio</div>
-              <div style={{ marginTop: 4, opacity: 0.9 }}>{profile?.bio || "—"}</div>
+              {showSkeleton ? (
+                <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
+                  <SkeletonText width="88%" height={10} />
+                  <SkeletonText width="76%" height={10} />
+                </div>
+              ) : (
+                <div style={{ marginTop: 4, opacity: 0.9 }}>{profile?.bio || "—"}</div>
+              )}
             </div>
           </div>
         )}
