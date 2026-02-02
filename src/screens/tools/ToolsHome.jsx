@@ -132,20 +132,74 @@ function ChipButton({ active, children, onClick, title }) {
   );
 }
 
-function TierCard({ title, subtitle }) {
+/* ---------------- Vault offers UI (starter / mid / premium) ---------------- */
+
+function TierBlock({ title, regionsMap }) {
+  const regions = regionsMap ? Array.from(regionsMap.entries()) : [];
+
   return (
-    <div
-      style={{
-        padding: 12,
-        borderRadius: 14,
-        border: "1px solid rgba(255,255,255,0.10)",
-        background: "rgba(255,255,255,0.03)",
-        display: "grid",
-        gap: 6,
-      }}
-    >
-      <div style={{ fontWeight: 900 }}>{title}</div>
-      <div style={{ fontSize: 13, opacity: 0.78, lineHeight: 1.35 }}>{subtitle}</div>
+    <div style={{ display: "grid", gap: 10 }}>
+      <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: 0.2, opacity: 0.78 }}>{title}</div>
+
+      {regions.length === 0 ? (
+        <div style={{ opacity: 0.7, fontSize: 13, lineHeight: 1.4 }}>No curated links yet.</div>
+      ) : (
+        <div style={{ display: "grid", gap: 10 }}>
+          {regions.map(([region, items]) => (
+            <div key={region} style={{ display: "grid", gap: 8 }}>
+              <div style={{ fontSize: 12, opacity: 0.65, fontWeight: 800 }}>{region}</div>
+
+              <div style={{ display: "grid", gap: 8 }}>
+                {(items || []).map((o) => (
+                  <div
+                    key={o.id}
+                    style={{
+                      padding: 10,
+                      borderRadius: 12,
+                      border: "1px solid rgba(255,255,255,0.10)",
+                      background: "rgba(255,255,255,0.03)",
+                      display: "grid",
+                      gap: 6,
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+                      <div style={{ display: "grid", gap: 2, minWidth: 0 }}>
+                        <div style={{ fontWeight: 900, lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {o.title}
+                        </div>
+                        <div style={{ fontSize: 12, opacity: 0.7 }}>
+                          {o.retailer}
+                          {o.price_hint ? ` • ${o.price_hint}` : ""}
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (o.url) window.open(o.url, "_blank", "noopener,noreferrer");
+                        }}
+                        style={{
+                          padding: "10px 12px",
+                          borderRadius: 12,
+                          border: "1px solid rgba(255,255,255,0.18)",
+                          background: "rgba(255,255,255,0.06)",
+                          color: "#f3f3f7",
+                          fontWeight: 800,
+                          cursor: "pointer",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        Open
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -164,6 +218,7 @@ export default function ToolsHome({ session }) {
     cravingGroups,
     ownedGlobalIds,
     cravingGlobalIds,
+    offersByToolId,
     draftLabel,
     setDraftLabel,
     photoUrlById,
@@ -304,7 +359,11 @@ export default function ToolsHome({ session }) {
             <Section
               title="Owned tools"
               subtitle={
-                loading ? "Loading owned tools…" : owned.length ? null : "No owned tools yet. Add some from the Vault."
+                loading
+                  ? "Loading owned tools…"
+                  : owned.length
+                  ? null
+                  : "No owned tools yet. Add some from the Vault."
               }
             >
               {owned.length ? (
@@ -338,7 +397,11 @@ export default function ToolsHome({ session }) {
                                     return next;
                                   });
                                 }}
-                                title={g.tool_global_id ? "Add another owned instance" : "Custom tools can't add instances yet"}
+                                title={
+                                  g.tool_global_id
+                                    ? "Add another owned instance"
+                                    : "Custom tools can't add instances yet"
+                                }
                                 style={{
                                   padding: "10px 12px",
                                   borderRadius: 12,
@@ -396,7 +459,13 @@ export default function ToolsHome({ session }) {
 
             <Section
               title="Craving drawer"
-              subtitle={loading ? "Loading craving drawer…" : craving.length ? null : "Nothing in craving yet. Add items from the Vault."}
+              subtitle={
+                loading
+                  ? "Loading craving drawer…"
+                  : craving.length
+                  ? null
+                  : "Nothing in craving yet. Add items from the Vault."
+              }
             >
               {craving.length ? (
                 <div style={{ display: "grid", gap: 10 }}>
@@ -429,7 +498,11 @@ export default function ToolsHome({ session }) {
                                     return next;
                                   });
                                 }}
-                                title={g.tool_global_id ? "Add another craving instance" : "Custom tools can't add instances yet"}
+                                title={
+                                  g.tool_global_id
+                                    ? "Add another craving instance"
+                                    : "Custom tools can't add instances yet"
+                                }
                                 style={{
                                   padding: "10px 12px",
                                   borderRadius: 12,
@@ -514,7 +587,9 @@ export default function ToolsHome({ session }) {
                     title={c.key === "all" ? "Show all tools" : `${c.label} (${count})`}
                   >
                     {c.label}
-                    <span style={{ opacity: 0.7, marginLeft: 6, fontWeight: 900 }}>{count}</span>
+                    <span style={{ opacity: 0.7, marginLeft: 6, fontWeight: 900 }}>
+                      {count}
+                    </span>
                   </ChipButton>
                 );
               })}
@@ -560,6 +635,8 @@ export default function ToolsHome({ session }) {
                 const inOwned = ownedGlobalIds.has(t.id);
                 const inCraving = cravingGlobalIds.has(t.id);
                 const open = has(openVault, t.id);
+
+                const tiers = offersByToolId?.get(t.id) || null;
 
                 const catKey = displayCategoryKey(t);
                 const catLabel =
@@ -632,20 +709,11 @@ export default function ToolsHome({ session }) {
                           </button>
                         </div>
 
-                        {/* Tiers (placeholder UI) */}
-                        <div style={{ display: "grid", gap: 10 }}>
-                          <TierCard
-                            title="Starter"
-                            subtitle="Affordable, beginner-friendly picks. Links coming soon."
-                          />
-                          <TierCard
-                            title="Standard"
-                            subtitle="Reliable daily workhorse options. Links coming soon."
-                          />
-                          <TierCard
-                            title="Premium"
-                            subtitle="High-end or specialist gear. Links coming soon."
-                          />
+                        {/* Tiers (live offers) */}
+                        <div style={{ display: "grid", gap: 12 }}>
+                          <TierBlock title="Starter" regionsMap={tiers?.starter || null} />
+                          <TierBlock title="Standard" regionsMap={tiers?.mid || null} />
+                          <TierBlock title="Premium" regionsMap={tiers?.premium || null} />
                         </div>
 
                         <div style={{ opacity: 0.75, lineHeight: 1.35, fontSize: 13 }}>
