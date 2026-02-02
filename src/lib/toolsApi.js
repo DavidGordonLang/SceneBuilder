@@ -4,7 +4,7 @@ const TOOL_PHOTOS_BUCKET = "tool-photos";
 
 /* ---------------- auth gate ----------------
    On cold boot, Supabase can take a moment to hydrate the session.
-   During that window, RLS-backed queries can return [] (not an error).
+   During that window, RLS-backed queries often return [] (not an error).
    We wait briefly to avoid caching "empty" as if it were real data.
 */
 
@@ -24,11 +24,15 @@ async function getAuthedUserId({ waitMs = 1200, stepMs = 60 } = {}) {
     await new Promise((r) => setTimeout(r, step));
   }
 
+  // At this point we genuinely don't have a session.
   throw new Error("Not signed in.");
 }
 
+/* ---------------- vault ---------------- */
+
 /**
  * Fetch Tool Vault (global tools).
+ * We still gate on auth so we don't render "0 in vault" during cold-start auth hydration.
  */
 export async function fetchToolVault() {
   await getAuthedUserId();
@@ -44,8 +48,44 @@ export async function fetchToolVault() {
 }
 
 /**
+ * Fetch curated affiliate offers for the vault.
+ * RLS should allow authenticated SELECT of is_active = true only.
+ */
+export async function fetchToolOffers() {
+  await getAuthedUserId();
+
+  const { data, error } = await supabase
+    .from("tools_global_offers")
+    .select(
+      [
+        "id",
+        "tool_global_id",
+        "tier",
+        "region",
+        "retailer",
+        "title",
+        "url",
+        "price_hint",
+        "currency",
+        "sort_order",
+        "is_active",
+        "created_at",
+        "updated_at",
+      ].join(", ")
+    )
+    .eq("is_active", true)
+    .order("sort_order", { ascending: true })
+    .order("created_at", { ascending: true });
+
+  if (error) throw error;
+  return data ?? [];
+}
+
+/* ---------------- user tools ---------------- */
+
+/**
  * Fetch user's tools (owned + craving + custom).
- * NOTE: now includes instance_label + photo_path (per owned instance).
+ * NOTE: includes instance_label + photo_path (per owned instance).
  */
 export async function fetchUserTools() {
   await getAuthedUserId();
@@ -127,21 +167,24 @@ export async function updateUserToolInstanceDetails(toolUserId, patch) {
   if (error) throw error;
 }
 
+/* ---------------- photos ---------------- */
+
 /**
- * Get a signed URL for a tool photo path.
+ * Get a signed URL for a private tool photo.
+ * Returns null if photo_path is falsy.
  */
 export async function getToolPhotoSignedUrl(photo_path, expiresInSeconds = 60 * 60) {
   await getAuthedUserId();
 
   const path = String(photo_path || "").trim();
-  if (!path) return "";
+  if (!path) return null;
 
   const { data, error } = await supabase.storage
     .from(TOOL_PHOTOS_BUCKET)
     .createSignedUrl(path, expiresInSeconds);
 
   if (error) throw error;
-  return data?.signedUrl || "";
+  return data?.signedUrl || null;
 }
 
 function makeSafeFilename(originalName = "photo") {
@@ -152,8 +195,7 @@ function makeSafeFilename(originalName = "photo") {
 }
 
 /**
- * Upload a tool photo to storage.
- * IMPORTANT: returns the stored `photo_path` STRING (hook expects a string).
+ * Upload a tool photo to storage. Returns { photo_path, signedUrl }.
  */
 export async function uploadToolPhoto(toolUserId, file) {
   if (!toolUserId) throw new Error("Missing toolUserId.");
@@ -173,5 +215,6 @@ export async function uploadToolPhoto(toolUserId, file) {
 
   if (uploadError) throw uploadError;
 
-  return photo_path;
+  const signedUrl = await getToolPhotoSignedUrl(photo_path);
+  return { photo_path, signedUrl };
 }
