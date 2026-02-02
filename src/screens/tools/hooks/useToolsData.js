@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   addGlobalToolToUser,
   deleteUserTool,
+  fetchToolOffers,
   fetchToolVault,
   fetchUserTools,
   getToolPhotoSignedUrl,
@@ -41,6 +42,9 @@ export function useToolsData({ session } = {}) {
   const [vault, setVault] = useState(() => (hasCache ? cached.vault : null));
   const [userTools, setUserTools] = useState(() => (hasCache ? cached.userTools : null));
 
+  // Offers are new; keep separate (we can add caching later if needed)
+  const [offers, setOffers] = useState([]);
+
   const vaultArr = Array.isArray(vault) ? vault : [];
   const userToolsArr = Array.isArray(userTools) ? userTools : [];
 
@@ -58,14 +62,16 @@ export function useToolsData({ session } = {}) {
 
     setErr("");
     try {
-      const [v, ut] = await Promise.all([fetchToolVault(), fetchUserTools()]);
+      const [v, ut, off] = await Promise.all([fetchToolVault(), fetchUserTools(), fetchToolOffers()]);
       setVault(v);
       setUserTools(ut);
+      setOffers(Array.isArray(off) ? off : []);
       if (userId) setCachedTools(userId, v, ut);
     } catch (e) {
       setErr(e?.message || "Failed to load tools.");
       if (vault === null) setVault([]);
       if (userTools === null) setUserTools([]);
+      setOffers([]);
     } finally {
       if (!silent) setLoading(false);
     }
@@ -84,6 +90,7 @@ export function useToolsData({ session } = {}) {
     } else {
       setVault(null);
       setUserTools(null);
+      setOffers([]);
       reload({ silent: false });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -141,6 +148,41 @@ export function useToolsData({ session } = {}) {
     arr.sort((a, b) => String(a.name).localeCompare(String(b.name)));
     return arr;
   }, [craving]);
+
+  // tool_global_id -> { starter: {region: []}, mid: {region: []}, premium: {region: []} }
+  const offersByToolId = useMemo(() => {
+    const out = new Map();
+    for (const o of Array.isArray(offers) ? offers : []) {
+      const toolId = o?.tool_global_id;
+      if (!toolId) continue;
+
+      const tier = String(o?.tier || "").toLowerCase();
+      if (tier !== "starter" && tier !== "mid" && tier !== "premium") continue;
+
+      const region = String(o?.region || "Global").trim() || "Global";
+
+      if (!out.has(toolId)) out.set(toolId, { starter: new Map(), mid: new Map(), premium: new Map() });
+      const buckets = out.get(toolId)[tier];
+
+      if (!buckets.has(region)) buckets.set(region, []);
+      buckets.get(region).push(o);
+    }
+
+    // sort offers inside each region by sort_order then title
+    for (const [, tiers] of out.entries()) {
+      for (const tierName of ["starter", "mid", "premium"]) {
+        const regionMap = tiers[tierName];
+        for (const [region, list] of regionMap.entries()) {
+          const sorted = (list || [])
+            .slice()
+            .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || String(a.title || "").localeCompare(String(b.title || "")));
+          regionMap.set(region, sorted);
+        }
+      }
+    }
+
+    return out;
+  }, [offers]);
 
   async function addTo(status, toolGlobalId) {
     setErr("");
@@ -232,18 +274,12 @@ export function useToolsData({ session } = {}) {
     setErr("");
     setBusy(true);
     try {
-      const path = await uploadToolPhoto(toolUserId, file);
-      await updateUserToolInstanceDetails(toolUserId, { photo_path: path });
+      const { photo_path, signedUrl } = await uploadToolPhoto(toolUserId, file);
+      await updateUserToolInstanceDetails(toolUserId, { photo_path });
 
-      // We'll refresh, but also prime local state so image can show immediately
-      setPhotoPathById((prev) => ({ ...prev, [toolUserId]: path }));
-
-      try {
-        const signedUrl = await getToolPhotoSignedUrl(path);
-        setPhotoUrlById((prev) => ({ ...prev, [toolUserId]: signedUrl || null }));
-      } catch {
-        // non-fatal
-      }
+      // Prime local state so image can show immediately
+      setPhotoPathById((prev) => ({ ...prev, [toolUserId]: photo_path }));
+      if (signedUrl) setPhotoUrlById((prev) => ({ ...prev, [toolUserId]: signedUrl || null }));
 
       await reload({ silent: true });
     } catch (e) {
@@ -268,6 +304,8 @@ export function useToolsData({ session } = {}) {
     cravingGroups,
     ownedGlobalIds,
     cravingGlobalIds,
+
+    offersByToolId,
 
     draftLabel,
     setDraftLabel,
