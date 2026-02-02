@@ -47,6 +47,109 @@ function SkeletonRow({ lines = 2 }) {
   );
 }
 
+/* ---------------- vault category model (Option 1) ---------------- */
+
+const VAULT_CATEGORIES = [
+  { key: "all", label: "All", matchAnyTags: null },
+  { key: "impact", label: "Impact", matchAnyTags: ["impact"] },
+  { key: "sensation", label: "Sensation", matchAnyTags: ["sensation", "sensory"] },
+  { key: "restraints", label: "Restraints", matchAnyTags: ["restraint"] },
+  { key: "temperature", label: "Temperature", matchAnyTags: ["temperature"] },
+  { key: "aftercare", label: "Aftercare", matchAnyTags: ["aftercare"] },
+  { key: "control", label: "D/s & Control", matchAnyTags: ["control", "protocol"] },
+  { key: "ritual", label: "Ritual & Atmosphere", matchAnyTags: ["ritual", "ambience"] },
+  // Note: Medical is intentionally not shown until you start tagging items for it.
+  // We'll add it as: { key:"medical", label:"Medical", matchAnyTags:["medical"] }
+];
+
+const CATEGORY_PRIORITY = [
+  "impact",
+  "restraints",
+  "temperature",
+  "sensation",
+  "aftercare",
+  "control",
+  "ritual",
+];
+
+function toolTagsArray(t) {
+  if (!t) return [];
+  const raw = t.tags;
+  if (Array.isArray(raw)) return raw.map((x) => String(x || "").trim()).filter(Boolean);
+  // defensive fallback if tags ever becomes a string
+  if (typeof raw === "string") {
+    return raw
+      .split(",")
+      .map((x) => x.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function matchesCategory(tool, cat) {
+  if (!cat || cat.key === "all") return true;
+  const tags = toolTagsArray(tool);
+  const set = new Set(tags);
+  const any = cat.matchAnyTags || [];
+  for (const t of any) if (set.has(t)) return true;
+  return false;
+}
+
+function displayCategoryKey(tool) {
+  const tags = toolTagsArray(tool);
+  const set = new Set(tags);
+  for (const key of CATEGORY_PRIORITY) {
+    const cat = VAULT_CATEGORIES.find((c) => c.key === key);
+    if (!cat) continue;
+    const any = cat.matchAnyTags || [];
+    for (const t of any) {
+      if (set.has(t)) return key;
+    }
+  }
+  return null;
+}
+
+function ChipButton({ active, children, onClick, title }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      style={{
+        padding: "8px 12px",
+        borderRadius: 999,
+        border: active ? "1px solid rgba(255,255,255,0.22)" : "1px solid rgba(255,255,255,0.12)",
+        background: active ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.04)",
+        color: "#f3f3f7",
+        fontWeight: 850,
+        fontSize: 12,
+        cursor: "pointer",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function TierCard({ title, subtitle }) {
+  return (
+    <div
+      style={{
+        padding: 12,
+        borderRadius: 14,
+        border: "1px solid rgba(255,255,255,0.10)",
+        background: "rgba(255,255,255,0.03)",
+        display: "grid",
+        gap: 6,
+      }}
+    >
+      <div style={{ fontWeight: 900 }}>{title}</div>
+      <div style={{ fontSize: 13, opacity: 0.78, lineHeight: 1.35 }}>{subtitle}</div>
+    </div>
+  );
+}
+
 export default function ToolsHome({ session }) {
   const {
     tab,
@@ -81,6 +184,10 @@ export default function ToolsHome({ session }) {
   // Per-instance expand/collapse
   const [openInstances, setOpenInstances] = useState(() => new Set());
 
+  // Vault UI controls
+  const [vaultCategory, setVaultCategory] = useState("all");
+  const [vaultSearch, setVaultSearch] = useState("");
+
   const infoText = useMemo(() => {
     if (tab === "drawer") {
       return loading ? "Loading drawer…" : `${owned.length} owned • ${craving.length} craving`;
@@ -94,6 +201,60 @@ export default function ToolsHome({ session }) {
 
   function onDraftLabelChange(toolUserId, value) {
     setDraftLabel((prev) => ({ ...prev, [toolUserId]: value }));
+  }
+
+  const vaultCategoryCounts = useMemo(() => {
+    const counts = {};
+    for (const c of VAULT_CATEGORIES) counts[c.key] = 0;
+
+    for (const t of vault || []) {
+      for (const c of VAULT_CATEGORIES) {
+        if (c.key === "all") continue;
+        if (matchesCategory(t, c)) counts[c.key] = (counts[c.key] || 0) + 1;
+      }
+    }
+    counts.all = (vault || []).length;
+    return counts;
+  }, [vault]);
+
+  const visibleVaultCategories = useMemo(() => {
+    return VAULT_CATEGORIES.filter((c) => c.key === "all" || (vaultCategoryCounts?.[c.key] || 0) > 0);
+  }, [vaultCategoryCounts]);
+
+  const filteredVault = useMemo(() => {
+    const cat = VAULT_CATEGORIES.find((c) => c.key === vaultCategory) || VAULT_CATEGORIES[0];
+    const q = String(vaultSearch || "").trim().toLowerCase();
+
+    return (vault || []).filter((t) => {
+      if (!matchesCategory(t, cat)) return false;
+      if (!q) return true;
+
+      const name = String(t?.name || "").toLowerCase();
+      if (name.includes(q)) return true;
+
+      const tags = toolTagsArray(t).join(" ").toLowerCase();
+      return tags.includes(q);
+    });
+  }, [vault, vaultCategory, vaultSearch]);
+
+  function VaultSearchInput() {
+    return (
+      <input
+        value={vaultSearch}
+        onChange={(e) => setVaultSearch(e.target.value)}
+        placeholder="Search vault…"
+        style={{
+          width: "100%",
+          padding: "10px 12px",
+          borderRadius: 12,
+          border: "1px solid rgba(255,255,255,0.12)",
+          background: "rgba(255,255,255,0.04)",
+          color: "#f3f3f7",
+          outline: "none",
+          fontSize: 14,
+        }}
+      />
+    );
   }
 
   return (
@@ -143,11 +304,7 @@ export default function ToolsHome({ session }) {
             <Section
               title="Owned tools"
               subtitle={
-                loading
-                  ? "Loading owned tools…"
-                  : owned.length
-                  ? null
-                  : "No owned tools yet. Add some from the Vault."
+                loading ? "Loading owned tools…" : owned.length ? null : "No owned tools yet. Add some from the Vault."
               }
             >
               {owned.length ? (
@@ -181,11 +338,7 @@ export default function ToolsHome({ session }) {
                                     return next;
                                   });
                                 }}
-                                title={
-                                  g.tool_global_id
-                                    ? "Add another owned instance"
-                                    : "Custom tools can't add instances yet"
-                                }
+                                title={g.tool_global_id ? "Add another owned instance" : "Custom tools can't add instances yet"}
                                 style={{
                                   padding: "10px 12px",
                                   borderRadius: 12,
@@ -243,13 +396,7 @@ export default function ToolsHome({ session }) {
 
             <Section
               title="Craving drawer"
-              subtitle={
-                loading
-                  ? "Loading craving drawer…"
-                  : craving.length
-                  ? null
-                  : "Nothing in craving yet. Add items from the Vault."
-              }
+              subtitle={loading ? "Loading craving drawer…" : craving.length ? null : "Nothing in craving yet. Add items from the Vault."}
             >
               {craving.length ? (
                 <div style={{ display: "grid", gap: 10 }}>
@@ -282,11 +429,7 @@ export default function ToolsHome({ session }) {
                                     return next;
                                   });
                                 }}
-                                title={
-                                  g.tool_global_id
-                                    ? "Add another craving instance"
-                                    : "Custom tools can't add instances yet"
-                                }
+                                title={g.tool_global_id ? "Add another craving instance" : "Custom tools can't add instances yet"}
                                 style={{
                                   padding: "10px 12px",
                                   borderRadius: 12,
@@ -357,6 +500,38 @@ export default function ToolsHome({ session }) {
               Tool Vault. Add items to Owned or Craving.
             </div>
 
+            {/* Category chips */}
+            <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 2 }}>
+              {visibleVaultCategories.map((c) => {
+                const active = vaultCategory === c.key;
+                const count = vaultCategoryCounts?.[c.key] ?? 0;
+
+                return (
+                  <ChipButton
+                    key={c.key}
+                    active={active}
+                    onClick={() => setVaultCategory(c.key)}
+                    title={c.key === "all" ? "Show all tools" : `${c.label} (${count})`}
+                  >
+                    {c.label}
+                    <span style={{ opacity: 0.7, marginLeft: 6, fontWeight: 900 }}>{count}</span>
+                  </ChipButton>
+                );
+              })}
+            </div>
+
+            {/* Search */}
+            <div
+              style={{
+                padding: 12,
+                borderRadius: 14,
+                border: "1px solid rgba(255,255,255,0.10)",
+                background: "rgba(255,255,255,0.03)",
+              }}
+            >
+              <VaultSearchInput />
+            </div>
+
             <div style={{ display: "grid", gap: 10 }}>
               {loading && vault.length === 0 ? (
                 <>
@@ -366,19 +541,45 @@ export default function ToolsHome({ session }) {
                 </>
               ) : null}
 
-              {vault.map((t) => {
+              {!loading && filteredVault.length === 0 ? (
+                <div
+                  style={{
+                    padding: 12,
+                    borderRadius: 14,
+                    border: "1px solid rgba(255,255,255,0.10)",
+                    background: "rgba(255,255,255,0.03)",
+                    opacity: 0.85,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  No tools found.
+                </div>
+              ) : null}
+
+              {filteredVault.map((t) => {
                 const inOwned = ownedGlobalIds.has(t.id);
                 const inCraving = cravingGlobalIds.has(t.id);
                 const open = has(openVault, t.id);
 
+                const catKey = displayCategoryKey(t);
+                const catLabel =
+                  catKey && VAULT_CATEGORIES.find((c) => c.key === catKey)?.label
+                    ? VAULT_CATEGORIES.find((c) => c.key === catKey).label
+                    : null;
+
                 return (
                   <ToolRow
                     key={t.id}
-                    tool={{ name: t.name, icon: t.icon || "🧰" }}
+                    tool={{
+                      name: t.name,
+                      icon: t.icon || "🧰",
+                      meta: catLabel ? catLabel : undefined,
+                    }}
                     open={open}
                     onToggle={() => setOpenVault((prev) => toggleInSet(prev, t.id))}
                     expandedContent={
-                      <div style={{ display: "grid", gap: 10 }}>
+                      <div style={{ display: "grid", gap: 12 }}>
+                        {/* Quick actions */}
                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                           <button
                             type="button"
@@ -431,9 +632,24 @@ export default function ToolsHome({ session }) {
                           </button>
                         </div>
 
-                        <div style={{ opacity: 0.75 }}>
-                          Vault items will later show richer details and let you create your own owned instances (with
-                          photos).
+                        {/* Tiers (placeholder UI) */}
+                        <div style={{ display: "grid", gap: 10 }}>
+                          <TierCard
+                            title="Starter"
+                            subtitle="Affordable, beginner-friendly picks. Links coming soon."
+                          />
+                          <TierCard
+                            title="Standard"
+                            subtitle="Reliable daily workhorse options. Links coming soon."
+                          />
+                          <TierCard
+                            title="Premium"
+                            subtitle="High-end or specialist gear. Links coming soon."
+                          />
+                        </div>
+
+                        <div style={{ opacity: 0.75, lineHeight: 1.35, fontSize: 13 }}>
+                          Add to <b>Owned</b> to track your specific item(s), labels and photos.
                         </div>
                       </div>
                     }
