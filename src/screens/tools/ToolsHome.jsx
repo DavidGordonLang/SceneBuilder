@@ -47,92 +47,22 @@ function SkeletonRow({ lines = 2 }) {
   );
 }
 
-/* ---------------- vault category model (consolidated chips) ----------------
-   IMPORTANT:
-   - These are *UI chips* (browse buckets), not the raw tag universe.
-   - Each chip matches ANY of the tags in matchAnyTags.
-*/
+/* ---------------- vault category model (Option 1) ---------------- */
 
 const VAULT_CATEGORIES = [
   { key: "all", label: "All", matchAnyTags: null },
-
   { key: "impact", label: "Impact", matchAnyTags: ["impact"] },
-
-  // merged: restraint + control/protocol
-  { key: "restraints_control", label: "Restraints & Control", matchAnyTags: ["restraint", "control", "protocol"] },
-
-  // merged: sensation + sensory + temperature
-  { key: "sensation_temp", label: "Sensation & Temperature", matchAnyTags: ["sensation", "sensory", "temperature"] },
-
-  // merged: penetration + vibrator + anal
-  { key: "toys", label: "Penetration & Toys", matchAnyTags: ["penetration", "vibrator", "anal"] },
-
-  // merged: medical + edgeplay + electro + cbt
-  { key: "medical_edge", label: "Medical & Edgeplay", matchAnyTags: ["medical", "edgeplay", "electro", "cbt"] },
-
-  // merged: safety + aftercare
-  { key: "safety_aftercare", label: "Safety & Aftercare", matchAnyTags: ["safety", "aftercare"] },
-
-  // merged: ritual + ambience
-  { key: "ritual_atmosphere", label: "Ritual & Atmosphere", matchAnyTags: ["ritual", "ambience"] },
-
-  // merged: setup + documentation
-  { key: "setup_practical", label: "Setup & Practical", matchAnyTags: ["setup", "documentation"] },
+  { key: "sensation", label: "Sensation", matchAnyTags: ["sensation", "sensory"] },
+  { key: "restraints", label: "Restraints", matchAnyTags: ["restraint"] },
+  { key: "temperature", label: "Temperature", matchAnyTags: ["temperature"] },
+  { key: "aftercare", label: "Aftercare", matchAnyTags: ["aftercare"] },
+  { key: "control", label: "D/s & Control", matchAnyTags: ["control", "protocol"] },
+  { key: "ritual", label: "Ritual & Atmosphere", matchAnyTags: ["ritual", "ambience"] },
+  // Medical intentionally not shown until you want it:
+  // { key: "medical", label: "Medical", matchAnyTags: ["medical"] }
 ];
 
-/*
-  CATEGORY_PRIORITY is for the small "meta" label displayed on each vault row.
-  This is NOT the chip list; it’s the precedence order for selecting a single label.
-
-  We keep it tag-based (not chip-based) because tools have tag arrays like ["vibrator","penetration"] etc.
-*/
-const CATEGORY_PRIORITY = [
-  "impact",
-  "restraint",
-  "control",
-  "protocol",
-  "sensation",
-  "sensory",
-  "temperature",
-  "penetration",
-  "vibrator",
-  "anal",
-  "medical",
-  "electro",
-  "cbt",
-  "edgeplay",
-  "safety",
-  "aftercare",
-  "ritual",
-  "ambience",
-  "setup",
-  "documentation",
-];
-
-// This is the mapping from a *tag* (priority list) to a user-facing label.
-// If a tag isn't in this map, it won't show as the meta label.
-const TAG_LABEL = {
-  impact: "Impact",
-  restraint: "Restraints",
-  control: "Control",
-  protocol: "Protocol",
-  sensation: "Sensation",
-  sensory: "Sensation",
-  temperature: "Temperature",
-  penetration: "Penetration",
-  vibrator: "Vibrators",
-  anal: "Anal",
-  medical: "Medical",
-  electro: "Electro",
-  cbt: "CBT",
-  edgeplay: "Edgeplay",
-  safety: "Safety",
-  aftercare: "Aftercare",
-  ritual: "Ritual",
-  ambience: "Atmosphere",
-  setup: "Setup",
-  documentation: "Docs",
-};
+const CATEGORY_PRIORITY = ["impact", "restraints", "temperature", "sensation", "aftercare", "control", "ritual"];
 
 function toolTagsArray(t) {
   if (!t) return [];
@@ -156,12 +86,21 @@ function matchesCategory(tool, cat) {
   return false;
 }
 
-// returns a *tag* (not chip) for meta label selection
-function displayCategoryTag(tool) {
+/**
+ * Used only for the little meta label on each vault row.
+ * Picks the "best" single category label based on priority order.
+ */
+function displayCategoryKey(tool) {
   const tags = toolTagsArray(tool);
   const set = new Set(tags);
+
   for (const key of CATEGORY_PRIORITY) {
-    if (set.has(key)) return key;
+    const cat = VAULT_CATEGORIES.find((c) => c.key === key);
+    if (!cat) continue;
+    const any = cat.matchAnyTags || [];
+    for (const t of any) {
+      if (set.has(t)) return key;
+    }
   }
   return null;
 }
@@ -301,15 +240,11 @@ export default function ToolsHome({ session }) {
     handleUpload,
   } = useToolsData({ session });
 
-  // Group open state (multiple open per section)
   const [openOwned, setOpenOwned] = useState(() => new Set());
   const [openCraving, setOpenCraving] = useState(() => new Set());
   const [openVault, setOpenVault] = useState(() => new Set());
-
-  // Per-instance expand/collapse
   const [openInstances, setOpenInstances] = useState(() => new Set());
 
-  // Vault UI controls
   const [vaultCategory, setVaultCategory] = useState("all");
   const [vaultSearch, setVaultSearch] = useState("");
 
@@ -476,9 +411,7 @@ export default function ToolsHome({ session }) {
                                 + Add another
                               </button>
 
-                              {g.isCustom ? (
-                                <div style={{ fontSize: 12, opacity: 0.65 }}>(Custom tool grouping is temporary)</div>
-                              ) : null}
+                              {g.isCustom ? <div style={{ fontSize: 12, opacity: 0.65 }}>(Custom tool grouping is temporary)</div> : null}
                             </div>
 
                             <div style={{ display: "grid", gap: 10 }}>
@@ -567,9 +500,7 @@ export default function ToolsHome({ session }) {
                                 + Add another
                               </button>
 
-                              {g.isCustom ? (
-                                <div style={{ fontSize: 12, opacity: 0.65 }}>(Custom tool grouping is temporary)</div>
-                              ) : null}
+                              {g.isCustom ? <div style={{ fontSize: 12, opacity: 0.65 }}>(Custom tool grouping is temporary)</div> : null}
                             </div>
 
                             <div style={{ display: "grid", gap: 10 }}>
