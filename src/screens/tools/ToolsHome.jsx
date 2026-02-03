@@ -47,28 +47,97 @@ function SkeletonRow({ lines = 2 }) {
   );
 }
 
-/* ---------------- vault category model (Option 1) ---------------- */
+/* ---------------- vault category model (consolidated chips) ----------------
+   IMPORTANT:
+   - These are *UI chips* (browse buckets), not the raw tag universe.
+   - Each chip matches ANY of the tags in matchAnyTags.
+*/
 
 const VAULT_CATEGORIES = [
   { key: "all", label: "All", matchAnyTags: null },
+
   { key: "impact", label: "Impact", matchAnyTags: ["impact"] },
-  { key: "sensation", label: "Sensation", matchAnyTags: ["sensation", "sensory"] },
-  { key: "restraints", label: "Restraints", matchAnyTags: ["restraint"] },
-  { key: "temperature", label: "Temperature", matchAnyTags: ["temperature"] },
-  { key: "aftercare", label: "Aftercare", matchAnyTags: ["aftercare"] },
-  { key: "control", label: "D/s & Control", matchAnyTags: ["control", "protocol"] },
-  { key: "ritual", label: "Ritual & Atmosphere", matchAnyTags: ["ritual", "ambience"] },
-  // Note: Medical is intentionally not shown until you start tagging items for it.
-  // We'll add it as: { key:"medical", label:"Medical", matchAnyTags:["medical"] }
+
+  // merged: restraint + control/protocol
+  { key: "restraints_control", label: "Restraints & Control", matchAnyTags: ["restraint", "control", "protocol"] },
+
+  // merged: sensation + sensory + temperature
+  { key: "sensation_temp", label: "Sensation & Temperature", matchAnyTags: ["sensation", "sensory", "temperature"] },
+
+  // merged: penetration + vibrator + anal
+  { key: "toys", label: "Penetration & Toys", matchAnyTags: ["penetration", "vibrator", "anal"] },
+
+  // merged: medical + edgeplay + electro + cbt
+  { key: "medical_edge", label: "Medical & Edgeplay", matchAnyTags: ["medical", "edgeplay", "electro", "cbt"] },
+
+  // merged: safety + aftercare
+  { key: "safety_aftercare", label: "Safety & Aftercare", matchAnyTags: ["safety", "aftercare"] },
+
+  // merged: ritual + ambience
+  { key: "ritual_atmosphere", label: "Ritual & Atmosphere", matchAnyTags: ["ritual", "ambience"] },
+
+  // merged: setup + documentation
+  { key: "setup_practical", label: "Setup & Practical", matchAnyTags: ["setup", "documentation"] },
 ];
 
-const CATEGORY_PRIORITY = ["impact", "restraints", "temperature", "sensation", "aftercare", "control", "ritual"];
+/*
+  CATEGORY_PRIORITY is for the small "meta" label displayed on each vault row.
+  This is NOT the chip list; it’s the precedence order for selecting a single label.
+
+  We keep it tag-based (not chip-based) because tools have tag arrays like ["vibrator","penetration"] etc.
+*/
+const CATEGORY_PRIORITY = [
+  "impact",
+  "restraint",
+  "control",
+  "protocol",
+  "sensation",
+  "sensory",
+  "temperature",
+  "penetration",
+  "vibrator",
+  "anal",
+  "medical",
+  "electro",
+  "cbt",
+  "edgeplay",
+  "safety",
+  "aftercare",
+  "ritual",
+  "ambience",
+  "setup",
+  "documentation",
+];
+
+// This is the mapping from a *tag* (priority list) to a user-facing label.
+// If a tag isn't in this map, it won't show as the meta label.
+const TAG_LABEL = {
+  impact: "Impact",
+  restraint: "Restraints",
+  control: "Control",
+  protocol: "Protocol",
+  sensation: "Sensation",
+  sensory: "Sensation",
+  temperature: "Temperature",
+  penetration: "Penetration",
+  vibrator: "Vibrators",
+  anal: "Anal",
+  medical: "Medical",
+  electro: "Electro",
+  cbt: "CBT",
+  edgeplay: "Edgeplay",
+  safety: "Safety",
+  aftercare: "Aftercare",
+  ritual: "Ritual",
+  ambience: "Atmosphere",
+  setup: "Setup",
+  documentation: "Docs",
+};
 
 function toolTagsArray(t) {
   if (!t) return [];
   const raw = t.tags;
   if (Array.isArray(raw)) return raw.map((x) => String(x || "").trim()).filter(Boolean);
-  // defensive fallback if tags ever becomes a string
   if (typeof raw === "string") {
     return raw
       .split(",")
@@ -87,16 +156,12 @@ function matchesCategory(tool, cat) {
   return false;
 }
 
-function displayCategoryKey(tool) {
+// returns a *tag* (not chip) for meta label selection
+function displayCategoryTag(tool) {
   const tags = toolTagsArray(tool);
   const set = new Set(tags);
   for (const key of CATEGORY_PRIORITY) {
-    const cat = VAULT_CATEGORIES.find((c) => c.key === key);
-    if (!cat) continue;
-    const any = cat.matchAnyTags || [];
-    for (const t of any) {
-      if (set.has(t)) return key;
-    }
+    if (set.has(key)) return key;
   }
   return null;
 }
@@ -137,11 +202,7 @@ function regionsMapHasOffers(regionsMap) {
 
 function tiersHaveAnyOffers(tiers) {
   if (!tiers) return false;
-  return (
-    regionsMapHasOffers(tiers.starter) ||
-    regionsMapHasOffers(tiers.mid) ||
-    regionsMapHasOffers(tiers.premium)
-  );
+  return regionsMapHasOffers(tiers.starter) || regionsMapHasOffers(tiers.mid) || regionsMapHasOffers(tiers.premium);
 }
 
 // Only renders if there are offers inside this tier.
@@ -367,9 +428,7 @@ export default function ToolsHome({ session }) {
           <div style={{ display: "grid", gap: 16 }}>
             <Section
               title="Owned tools"
-              subtitle={
-                loading ? "Loading owned tools…" : owned.length ? null : "No owned tools yet. Add some from the Vault."
-              }
+              subtitle={loading ? "Loading owned tools…" : owned.length ? null : "No owned tools yet. Add some from the Vault."}
             >
               {owned.length ? (
                 <div style={{ display: "grid", gap: 10 }}>
@@ -655,9 +714,7 @@ export default function ToolsHome({ session }) {
                               e.stopPropagation();
                               addTo("craving", t.id);
                             }}
-                            title={
-                              inOwned ? "Already in Owned" : inCraving ? "Already in Craving" : "Add to Craving Drawer"
-                            }
+                            title={inOwned ? "Already in Owned" : inCraving ? "Already in Craving" : "Add to Craving Drawer"}
                             style={{
                               padding: "10px 12px",
                               borderRadius: 12,
