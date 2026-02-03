@@ -48,21 +48,66 @@ function SkeletonRow({ lines = 2 }) {
 }
 
 /* ---------------- vault category model (Option 1) ---------------- */
+/**
+ * These chips are purely UI grouping.
+ * They appear only if there are tools in the vault with matching tags.
+ *
+ * Your DB tags (from your counts) include:
+ * impact, restraint, temperature, sensation/sensory,
+ * aftercare, control, protocol, ritual, ambience,
+ * medical, safety, penetration, vibrator, anal,
+ * electro, cbt, edgeplay, setup, documentation
+ */
 
 const VAULT_CATEGORIES = [
   { key: "all", label: "All", matchAnyTags: null },
+
+  // Core play
   { key: "impact", label: "Impact", matchAnyTags: ["impact"] },
   { key: "sensation", label: "Sensation", matchAnyTags: ["sensation", "sensory"] },
   { key: "restraints", label: "Restraints", matchAnyTags: ["restraint"] },
   { key: "temperature", label: "Temperature", matchAnyTags: ["temperature"] },
+
+  // Sex toys / insertion
+  { key: "penetration", label: "Penetration", matchAnyTags: ["penetration"] },
+  { key: "vibrator", label: "Vibrators", matchAnyTags: ["vibrator"] },
+  { key: "anal", label: "Anal", matchAnyTags: ["anal"] },
+
+  // Care & safety
   { key: "aftercare", label: "Aftercare", matchAnyTags: ["aftercare"] },
+  { key: "safety", label: "Safety & Care", matchAnyTags: ["safety", "documentation"] },
+
+  // Power exchange / structure
   { key: "control", label: "D/s & Control", matchAnyTags: ["control", "protocol"] },
   { key: "ritual", label: "Ritual & Atmosphere", matchAnyTags: ["ritual", "ambience"] },
-  // Medical intentionally not shown until you want it:
-  // { key: "medical", label: "Medical", matchAnyTags: ["medical"] }
+  { key: "setup", label: "Setup", matchAnyTags: ["setup"] },
+
+  // Advanced / specialist
+  { key: "medical", label: "Medical", matchAnyTags: ["medical"] },
+  { key: "electro", label: "Electro", matchAnyTags: ["electro"] },
+  { key: "cbt", label: "CBT", matchAnyTags: ["cbt"] },
+  { key: "edgeplay", label: "Edgeplay", matchAnyTags: ["edgeplay"] },
 ];
 
-const CATEGORY_PRIORITY = ["impact", "restraints", "temperature", "sensation", "aftercare", "control", "ritual"];
+const CATEGORY_PRIORITY = [
+  // Prefer showing core + common browsing paths first
+  "impact",
+  "restraints",
+  "sensation",
+  "temperature",
+  "penetration",
+  "vibrator",
+  "anal",
+  "aftercare",
+  "safety",
+  "control",
+  "ritual",
+  "setup",
+  "medical",
+  "electro",
+  "cbt",
+  "edgeplay",
+];
 
 function toolTagsArray(t) {
   if (!t) return [];
@@ -86,14 +131,9 @@ function matchesCategory(tool, cat) {
   return false;
 }
 
-/**
- * Used only for the little meta label on each vault row.
- * Picks the "best" single category label based on priority order.
- */
 function displayCategoryKey(tool) {
   const tags = toolTagsArray(tool);
   const set = new Set(tags);
-
   for (const key of CATEGORY_PRIORITY) {
     const cat = VAULT_CATEGORIES.find((c) => c.key === key);
     if (!cat) continue;
@@ -144,7 +184,6 @@ function tiersHaveAnyOffers(tiers) {
   return regionsMapHasOffers(tiers.starter) || regionsMapHasOffers(tiers.mid) || regionsMapHasOffers(tiers.premium);
 }
 
-// Only renders if there are offers inside this tier.
 function TierBlock({ title, regionsMap }) {
   if (!regionsMapHasOffers(regionsMap)) return null;
 
@@ -320,7 +359,6 @@ export default function ToolsHome({ session }) {
   return (
     <div>
       <Page style={{ display: "grid", gap: 14 }}>
-        {/* Actions row */}
         <div
           style={{
             display: "flex",
@@ -554,7 +592,6 @@ export default function ToolsHome({ session }) {
               Tool Vault. Add items to Owned or Craving.
             </div>
 
-            {/* Category chips */}
             <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 2 }}>
               {visibleVaultCategories.map((c) => {
                 const active = vaultCategory === c.key;
@@ -574,7 +611,6 @@ export default function ToolsHome({ session }) {
               })}
             </div>
 
-            {/* Search */}
             <div
               style={{
                 padding: 12,
@@ -636,7 +672,6 @@ export default function ToolsHome({ session }) {
                     onToggle={() => setOpenVault((prev) => toggleInSet(prev, t.id))}
                     expandedContent={
                       <div style={{ display: "grid", gap: 12 }}>
-                        {/* Quick actions */}
                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                           <button
                             type="button"
@@ -683,7 +718,6 @@ export default function ToolsHome({ session }) {
                           </button>
                         </div>
 
-                        {/* Tiers (only render if there are offers) */}
                         {showOffers ? (
                           <div style={{ display: "grid", gap: 12 }}>
                             <TierBlock title="Starter" regionsMap={tiers?.starter || null} />
