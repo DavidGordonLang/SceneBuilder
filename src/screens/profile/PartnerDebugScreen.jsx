@@ -16,6 +16,11 @@ import {
   unagreeToNegotiation,
   unlockNegotiation,
   updateNegotiationDraft,
+
+  // NEW: unlock requests
+  requestNegotiationUnlock,
+  fetchNegotiationUnlockRequests,
+  resolveNegotiationUnlockRequest,
 } from "../../lib/sceneCollabApi";
 import { useToast } from "../../ui/ToastContext.jsx";
 
@@ -157,6 +162,11 @@ export default function PartnerDebugScreen({ supabase, session }) {
   const [agreements, setAgreements] = useState([]);
   const [nameMap, setNameMap] = useState({}); // user_id -> display_name
   const [requiredAgree, setRequiredAgree] = useState([]); // list of user_ids required for lock
+
+  // NEW: unlock request state
+  const [unlockRequestReason, setUnlockRequestReason] = useState("Please unlock so I can propose a change.");
+  const [unlockRequests, setUnlockRequests] = useState([]);
+  const [resolveUnlockReason, setResolveUnlockReason] = useState("Unlock requested by participant");
 
   const [blockKey, setBlockKey] = useState("planning");
   const [blockSuggestionText, setBlockSuggestionText] = useState("");
@@ -461,6 +471,96 @@ export default function PartnerDebugScreen({ supabase, session }) {
     }
   }
 
+  // ----------------------------
+  // Unlock requests (new)
+  // ----------------------------
+  async function doRequestUnlock() {
+    setBusy(true);
+    try {
+      const id = requireSceneId();
+      const reason = String(unlockRequestReason || "").trim();
+      if (!reason) throw new Error("Add a reason first.");
+      const res = await requestNegotiationUnlock(id, reason, { supabase });
+      appendLog({ requestNegotiationUnlock: res });
+      notify("Unlock request sent.");
+      await doFetchUnlockRequests();
+    } catch (e) {
+      appendLog({ error: e?.message || String(e) });
+      notify(e?.message || "Failed to request unlock.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function doFetchUnlockRequests() {
+    setBusy(true);
+    try {
+      const id = requireSceneId();
+      const rows = await fetchNegotiationUnlockRequests(id, { supabase });
+      setUnlockRequests(rows);
+
+      const ids = (rows || []).map((r) => r.requested_by_user_id).filter(Boolean);
+      await hydrateNames(ids);
+
+      appendLog({ fetchNegotiationUnlockRequests: { scene_id: id, rows } });
+      notify("Unlock requests fetched.");
+    } catch (e) {
+      appendLog({ error: e?.message || String(e) });
+      notify(e?.message || "Failed to fetch unlock requests.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function doOwnerUnlockFromRequest(reqId) {
+    setBusy(true);
+    try {
+      const id = requireSceneId();
+      if (!reqId) throw new Error("Missing request id.");
+      const res = await resolveNegotiationUnlockRequest(
+        reqId,
+        { action: "unlock", unlockReason: resolveUnlockReason },
+        { supabase }
+      );
+
+      appendLog({ resolveNegotiationUnlockRequest_unlock: res });
+      notify("Unlocked from request (version bumped).");
+
+      // Refresh negotiation + agreements + requests
+      const n = await fetchNegotiation(id, { supabase });
+      setNeg(n);
+      setDraftText(n?.draft_text ?? "");
+      setAgreements([]);
+      await doFetchUnlockRequests();
+    } catch (e) {
+      appendLog({ error: e?.message || String(e) });
+      notify(e?.message || "Failed to unlock from request.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function doOwnerDismissRequest(reqId) {
+    setBusy(true);
+    try {
+      requireSceneId();
+      if (!reqId) throw new Error("Missing request id.");
+
+      const res = await resolveNegotiationUnlockRequest(reqId, { action: "dismiss" }, { supabase });
+      appendLog({ resolveNegotiationUnlockRequest_dismiss: res });
+      notify("Request dismissed.");
+      await doFetchUnlockRequests();
+    } catch (e) {
+      appendLog({ error: e?.message || String(e) });
+      notify(e?.message || "Failed to dismiss request.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // ----------------------------
+  // Suggestions
+  // ----------------------------
   async function doCreateBlockSuggestion() {
     setBusy(true);
     try {
@@ -797,6 +897,97 @@ export default function PartnerDebugScreen({ supabase, session }) {
                   ))}
                 </div>
               ) : null}
+            </div>
+
+            {/* NEW: Unlock requests */}
+            <div style={{ display: "grid", gap: 10 }}>
+              <div style={{ fontWeight: 850, opacity: 0.9 }}>Unlock requests</div>
+
+              <div
+                style={{
+                  padding: 10,
+                  borderRadius: 12,
+                  border: "1px solid rgba(255,255,255,0.10)",
+                  background: "rgba(0,0,0,0.20)",
+                  display: "grid",
+                  gap: 10,
+                }}
+              >
+                <div style={{ fontSize: 12, opacity: 0.8, lineHeight: 1.35 }}>
+                  Participants can request an unlock when negotiation is <b>locked</b>. Owner can dismiss or unlock from
+                  a request (which bumps version).
+                </div>
+
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                  <TextInput
+                    value={unlockRequestReason}
+                    onChange={setUnlockRequestReason}
+                    placeholder="Reason for unlock request…"
+                  />
+                  <Button onClick={doRequestUnlock} disabled={busy || !sceneId.trim()}>
+                    Request unlock (participant)
+                  </Button>
+                  <Button onClick={doFetchUnlockRequests} disabled={busy || !sceneId.trim()}>
+                    Fetch unlock requests
+                  </Button>
+                </div>
+
+                {unlockRequests.length ? (
+                  <div style={{ display: "grid", gap: 8 }}>
+                    {unlockRequests.map((r) => {
+                      const who = displayNameFor(r.requested_by_user_id);
+                      const created = r.created_at ? new Date(r.created_at).toLocaleString() : "—";
+                      const resolved = r.resolved_at ? new Date(r.resolved_at).toLocaleString() : "—";
+
+                      return (
+                        <div
+                          key={r.id}
+                          style={{
+                            padding: 10,
+                            borderRadius: 12,
+                            border: "1px solid rgba(255,255,255,0.10)",
+                            background: "rgba(0,0,0,0.18)",
+                            fontSize: 12,
+                            lineHeight: 1.35,
+                          }}
+                        >
+                          <div style={{ fontWeight: 900 }}>
+                            {r.status} • {shortId(r.id)} • v{r.negotiation_version ?? "—"}
+                          </div>
+                          <div style={{ opacity: 0.8, marginTop: 4 }}>
+                            by: <b>{who}</b> • created: {created}
+                          </div>
+                          <div style={{ opacity: 0.75 }}>resolved: {resolved}</div>
+                          {r.reason ? (
+                            <div style={{ marginTop: 8, opacity: 0.9, whiteSpace: "pre-wrap" }}>{r.reason}</div>
+                          ) : null}
+
+                          <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+                            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                              <TextInput
+                                value={resolveUnlockReason}
+                                onChange={setResolveUnlockReason}
+                                placeholder="Owner unlock reason (stored on negotiation)…"
+                              />
+                              <Button onClick={() => doOwnerUnlockFromRequest(r.id)} disabled={busy} tone="danger">
+                                Unlock from request (owner)
+                              </Button>
+                              <Button onClick={() => doOwnerDismissRequest(r.id)} disabled={busy}>
+                                Dismiss request (owner)
+                              </Button>
+                            </div>
+                            <div style={{ fontSize: 12, opacity: 0.65 }}>
+                              Note: only owner will succeed; participants will see an RLS error in the log.
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 12, opacity: 0.7 }}>No unlock requests loaded.</div>
+                )}
+              </div>
             </div>
 
             <div style={{ display: "grid", gap: 8 }}>
