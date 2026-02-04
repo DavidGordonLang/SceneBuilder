@@ -1,5 +1,22 @@
 import React, { useMemo, useState } from "react";
 import { createPartnerInvite, fetchPartnerLinks, redeemPartnerInvite } from "../../lib/partnersApi";
+import {
+  agreeToNegotiation,
+  createBlockSuggestion,
+  createToolSuggestionByUserTool,
+  createToolSuggestionByVault,
+  ensureNegotiation,
+  fetchBlockSuggestions,
+  fetchNegotiation,
+  fetchNegotiationAgreements,
+  fetchToolSuggestions,
+  lockNegotiation,
+  setBlockSuggestionStatus,
+  setToolSuggestionStatus,
+  unagreeToNegotiation,
+  unlockNegotiation,
+  updateNegotiationDraft,
+} from "../../lib/sceneCollabApi";
 import { useToast } from "../../ui/ToastContext.jsx";
 
 function Card({ children }) {
@@ -50,6 +67,52 @@ function Button({ children, onClick, disabled, tone = "default" }) {
   );
 }
 
+function TextInput({ value, onChange, placeholder, mono = false }) {
+  return (
+    <input
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      style={{
+        height: 42,
+        minWidth: 220,
+        flex: "1 1 260px",
+        borderRadius: 12,
+        border: "1px solid rgba(255,255,255,0.14)",
+        background: "rgba(0,0,0,0.25)",
+        color: "#f3f3f7",
+        padding: "0 12px",
+        outline: "none",
+        fontWeight: 700,
+        fontFamily: mono ? "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" : undefined,
+      }}
+    />
+  );
+}
+
+function TextArea({ value, onChange, placeholder }) {
+  return (
+    <textarea
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      rows={5}
+      style={{
+        width: "100%",
+        borderRadius: 12,
+        border: "1px solid rgba(255,255,255,0.14)",
+        background: "rgba(0,0,0,0.25)",
+        color: "#f3f3f7",
+        padding: 12,
+        outline: "none",
+        fontWeight: 650,
+        lineHeight: 1.35,
+        resize: "vertical",
+      }}
+    />
+  );
+}
+
 export default function PartnerDebugScreen({ supabase, session }) {
   const toast = useToast();
 
@@ -67,12 +130,28 @@ export default function PartnerDebugScreen({ supabase, session }) {
   const [links, setLinks] = useState([]);
   const [log, setLog] = useState("");
 
+  // Collab state
+  const [sceneId, setSceneId] = useState("");
+  const [neg, setNeg] = useState(null);
+  const [draftText, setDraftText] = useState("");
+  const [unlockReason, setUnlockReason] = useState("Change requested / renegotiate");
+  const [agreements, setAgreements] = useState([]);
+  const [blockKey, setBlockKey] = useState("planning");
+  const [blockSuggestionText, setBlockSuggestionText] = useState("");
+  const [toolUserId, setToolUserId] = useState("");
+  const [toolGlobalId, setToolGlobalId] = useState("");
+  const [toolNote, setToolNote] = useState("");
+  const [blockSuggestions, setBlockSuggestions] = useState([]);
+  const [toolSuggestions, setToolSuggestions] = useState([]);
+
   function appendLog(obj) {
-    const line =
-      typeof obj === "string" ? obj : JSON.stringify(obj, null, 2);
+    const line = typeof obj === "string" ? obj : JSON.stringify(obj, null, 2);
     setLog((prev) => (prev ? `${prev}\n\n${line}` : line));
   }
 
+  // ----------------------------
+  // Partners (existing)
+  // ----------------------------
   async function doCreateInvite() {
     setBusy(true);
     try {
@@ -84,7 +163,7 @@ export default function PartnerDebugScreen({ supabase, session }) {
         await navigator.clipboard.writeText(res.code);
         toast?.push?.("Code copied to clipboard.");
       } catch {
-        // clipboard can fail in some contexts; ignore
+        // ignore
       }
     } catch (e) {
       appendLog({ error: e?.message || String(e) });
@@ -129,14 +208,315 @@ export default function PartnerDebugScreen({ supabase, session }) {
     }
   }
 
+  // ----------------------------
+  // Collab (new)
+  // ----------------------------
+
+  function requireSceneId() {
+    const id = String(sceneId || "").trim();
+    if (!id) throw new Error("Paste a scene_id first.");
+    return id;
+  }
+
+  async function doEnsureNegotiation() {
+    setBusy(true);
+    try {
+      const id = requireSceneId();
+      const res = await ensureNegotiation(id, { supabase });
+      setNeg(res);
+      setDraftText(res?.draft_text ?? "");
+      appendLog({ ensureNegotiation: res });
+      toast?.push?.("Negotiation ensured.");
+    } catch (e) {
+      appendLog({ error: e?.message || String(e) });
+      toast?.push?.(e?.message || "Failed to ensure negotiation.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function doFetchNegotiation() {
+    setBusy(true);
+    try {
+      const id = requireSceneId();
+      const res = await fetchNegotiation(id, { supabase });
+      setNeg(res);
+      setDraftText(res?.draft_text ?? "");
+      appendLog({ fetchNegotiation: res });
+      toast?.push?.("Negotiation fetched.");
+    } catch (e) {
+      appendLog({ error: e?.message || String(e) });
+      toast?.push?.(e?.message || "Failed to fetch negotiation.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function doUpdateDraft() {
+    setBusy(true);
+    try {
+      const id = requireSceneId();
+      // app rule: don’t edit while locked (we enforce in UI too)
+      if (neg?.status === "locked") throw new Error("Negotiation is locked. Owner must unlock first.");
+      const res = await updateNegotiationDraft(id, draftText, { supabase });
+      setNeg(res);
+      appendLog({ updateNegotiationDraft: res });
+      toast?.push?.("Draft updated.");
+    } catch (e) {
+      appendLog({ error: e?.message || String(e) });
+      toast?.push?.(e?.message || "Failed to update draft.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function doFetchAgreements() {
+    setBusy(true);
+    try {
+      const id = requireSceneId();
+      const n = neg || (await fetchNegotiation(id, { supabase }));
+      if (!n) throw new Error("No negotiation row found.");
+      const res = await fetchNegotiationAgreements(id, n.version, { supabase });
+      setAgreements(res);
+      appendLog({ fetchNegotiationAgreements: { scene_id: id, version: n.version, rows: res } });
+      toast?.push?.("Agreements fetched.");
+    } catch (e) {
+      appendLog({ error: e?.message || String(e) });
+      toast?.push?.(e?.message || "Failed to fetch agreements.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function doAgree() {
+    setBusy(true);
+    try {
+      const id = requireSceneId();
+      const n = neg || (await fetchNegotiation(id, { supabase }));
+      if (!n) throw new Error("No negotiation row found.");
+      if (n.status === "locked") throw new Error("Negotiation is locked. No need to agree.");
+      const res = await agreeToNegotiation(id, n.version, { supabase });
+      appendLog({ agreeToNegotiation: res });
+      toast?.push?.("Agreed.");
+      await doFetchAgreements();
+    } catch (e) {
+      appendLog({ error: e?.message || String(e) });
+      toast?.push?.(e?.message || "Failed to agree.");
+      setBusy(false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function doUnagree() {
+    setBusy(true);
+    try {
+      const id = requireSceneId();
+      const n = neg || (await fetchNegotiation(id, { supabase }));
+      if (!n) throw new Error("No negotiation row found.");
+      if (n.status === "locked") throw new Error("Negotiation is locked. Owner must unlock first.");
+      await unagreeToNegotiation(id, n.version, { supabase });
+      appendLog({ unagreeToNegotiation: { scene_id: id, version: n.version, user_id: me.id } });
+      toast?.push?.("Un-agreed.");
+      await doFetchAgreements();
+    } catch (e) {
+      appendLog({ error: e?.message || String(e) });
+      toast?.push?.(e?.message || "Failed to un-agree.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function doLock() {
+    setBusy(true);
+    try {
+      const id = requireSceneId();
+      const n = neg || (await fetchNegotiation(id, { supabase }));
+      if (!n) throw new Error("No negotiation row found.");
+      if (n.status === "locked") throw new Error("Already locked.");
+
+      // IMPORTANT: we are not verifying “all required parties agreed” yet.
+      // That check needs participant list (scene_shares) + agreements comparison.
+      // For debug, we allow manual lock so we can test status transitions.
+      const lockedText = String(n.draft_text ?? "");
+      const res = await lockNegotiation(id, { lockedText, lockedByUserId: me.id }, { supabase });
+      setNeg(res);
+      appendLog({ lockNegotiation: res });
+      toast?.push?.("Locked.");
+    } catch (e) {
+      appendLog({ error: e?.message || String(e) });
+      toast?.push?.(e?.message || "Failed to lock.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function doUnlock() {
+    setBusy(true);
+    try {
+      const id = requireSceneId();
+      const res = await unlockNegotiation(
+        id,
+        { unlockReason, unlockedByUserId: me.id },
+        { supabase }
+      );
+      setNeg(res);
+      setDraftText(res?.draft_text ?? "");
+      appendLog({ unlockNegotiation: res });
+      toast?.push?.("Unlocked (version bumped; agreements reset).");
+      setAgreements([]);
+    } catch (e) {
+      appendLog({ error: e?.message || String(e) });
+      toast?.push?.(e?.message || "Failed to unlock.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function doCreateBlockSuggestion() {
+    setBusy(true);
+    try {
+      const id = requireSceneId();
+      const txt = String(blockSuggestionText || "").trim();
+      if (!txt) throw new Error("Write a suggested text first.");
+      const res = await createBlockSuggestion(id, blockKey, txt, { supabase });
+      appendLog({ createBlockSuggestion: res });
+      toast?.push?.("Block suggestion created.");
+      setBlockSuggestionText("");
+    } catch (e) {
+      appendLog({ error: e?.message || String(e) });
+      toast?.push?.(e?.message || "Failed to create block suggestion.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function doCreateToolSuggestionUserTool() {
+    setBusy(true);
+    try {
+      const id = requireSceneId();
+      const tuid = String(toolUserId || "").trim();
+      if (!tuid) throw new Error("Paste tools_user_id first.");
+      const res = await createToolSuggestionByUserTool(id, tuid, toolNote, { supabase });
+      appendLog({ createToolSuggestionByUserTool: res });
+      toast?.push?.("Tool suggestion created (tools_user).");
+      setToolUserId("");
+      setToolNote("");
+    } catch (e) {
+      appendLog({ error: e?.message || String(e) });
+      toast?.push?.(e?.message || "Failed to create tool suggestion.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function doCreateToolSuggestionVault() {
+    setBusy(true);
+    try {
+      const id = requireSceneId();
+      const gid = String(toolGlobalId || "").trim();
+      if (!gid) throw new Error("Paste tools_global_id first.");
+      const res = await createToolSuggestionByVault(id, gid, toolNote, { supabase });
+      appendLog({ createToolSuggestionByVault: res });
+      toast?.push?.("Tool suggestion created (vault).");
+      setToolGlobalId("");
+      setToolNote("");
+    } catch (e) {
+      appendLog({ error: e?.message || String(e) });
+      toast?.push?.(e?.message || "Failed to create tool suggestion.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function doFetchSuggestions() {
+    setBusy(true);
+    try {
+      const id = requireSceneId();
+      const [bs, ts] = await Promise.all([
+        fetchBlockSuggestions(id, { supabase }),
+        fetchToolSuggestions(id, { supabase }),
+      ]);
+      setBlockSuggestions(bs);
+      setToolSuggestions(ts);
+      appendLog({ fetchSuggestions: { block: bs, tool: ts } });
+      toast?.push?.("Suggestions fetched.");
+    } catch (e) {
+      appendLog({ error: e?.message || String(e) });
+      toast?.push?.(e?.message || "Failed to fetch suggestions.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function doAcceptBlockSuggestion(sugId) {
+    setBusy(true);
+    try {
+      const res = await setBlockSuggestionStatus(sugId, "accepted", { supabase });
+      appendLog({ setBlockSuggestionStatus: res });
+      toast?.push?.("Block suggestion accepted.");
+      await doFetchSuggestions();
+    } catch (e) {
+      appendLog({ error: e?.message || String(e) });
+      toast?.push?.(e?.message || "Failed to accept.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function doRejectBlockSuggestion(sugId) {
+    setBusy(true);
+    try {
+      const res = await setBlockSuggestionStatus(sugId, "rejected", { supabase });
+      appendLog({ setBlockSuggestionStatus: res });
+      toast?.push?.("Block suggestion rejected.");
+      await doFetchSuggestions();
+    } catch (e) {
+      appendLog({ error: e?.message || String(e) });
+      toast?.push?.(e?.message || "Failed to reject.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function doAcceptToolSuggestion(sugId) {
+    setBusy(true);
+    try {
+      const res = await setToolSuggestionStatus(sugId, "accepted", { supabase });
+      appendLog({ setToolSuggestionStatus: res });
+      toast?.push?.("Tool suggestion accepted.");
+      await doFetchSuggestions();
+    } catch (e) {
+      appendLog({ error: e?.message || String(e) });
+      toast?.push?.(e?.message || "Failed to accept.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function doRejectToolSuggestion(sugId) {
+    setBusy(true);
+    try {
+      const res = await setToolSuggestionStatus(sugId, "rejected", { supabase });
+      appendLog({ setToolSuggestionStatus: res });
+      toast?.push?.("Tool suggestion rejected.");
+      await doFetchSuggestions();
+    } catch (e) {
+      appendLog({ error: e?.message || String(e) });
+      toast?.push?.(e?.message || "Failed to reject.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div style={{ padding: 12 }}>
       <div style={{ maxWidth: 720, margin: "0 auto", display: "grid", gap: 12 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
           <div>
-            <div style={{ fontWeight: 950, fontSize: 16 }}>Partner Debug</div>
+            <div style={{ fontWeight: 950, fontSize: 16 }}>Debug</div>
             <div style={{ opacity: 0.7, fontSize: 12 }}>
-              Hidden testing screen for partner invite/linking RPCs.
+              Hidden testing screen for partner linking + scene collaboration plumbing.
             </div>
           </div>
           <div style={{ opacity: 0.7, fontSize: 12, textAlign: "right" }}>
@@ -147,8 +527,13 @@ export default function PartnerDebugScreen({ supabase, session }) {
           </div>
         </div>
 
+        {/* ---------------------------------
+            Partner linking (existing)
+           --------------------------------- */}
         <Card>
-          <div style={{ fontWeight: 900, marginBottom: 10 }}>1) Create invite</div>
+          <div style={{ fontWeight: 900, marginBottom: 10 }}>Partner Linking</div>
+
+          <div style={{ fontWeight: 850, marginBottom: 8, opacity: 0.9 }}>1) Create invite</div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
             <Button onClick={doCreateInvite} disabled={busy}>
               {busy ? "Working…" : "Create invite code"}
@@ -175,39 +560,22 @@ export default function PartnerDebugScreen({ supabase, session }) {
               <div style={{ opacity: 0.7, fontSize: 13 }}>No invite created yet.</div>
             )}
           </div>
-        </Card>
 
-        <Card>
-          <div style={{ fontWeight: 900, marginBottom: 10 }}>2) Redeem invite (as partner account)</div>
+          <div style={{ height: 10 }} />
+
+          <div style={{ fontWeight: 850, marginBottom: 8, opacity: 0.9 }}>
+            2) Redeem invite (as partner account)
+          </div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-            <input
-              value={redeemCode}
-              onChange={(e) => setRedeemCode(e.target.value)}
-              placeholder="Paste code here"
-              style={{
-                height: 42,
-                minWidth: 220,
-                flex: "1 1 260px",
-                borderRadius: 12,
-                border: "1px solid rgba(255,255,255,0.14)",
-                background: "rgba(0,0,0,0.25)",
-                color: "#f3f3f7",
-                padding: "0 12px",
-                outline: "none",
-                fontWeight: 700,
-              }}
-            />
+            <TextInput value={redeemCode} onChange={setRedeemCode} placeholder="Paste code here" mono />
             <Button onClick={doRedeem} disabled={busy || !redeemCode.trim()}>
               Redeem code
             </Button>
           </div>
-          <div style={{ marginTop: 8, opacity: 0.7, fontSize: 12, lineHeight: 1.35 }}>
-            Redeem should create/accept a <code style={{ opacity: 0.9 }}>partner_links</code> row server-side.
-          </div>
-        </Card>
 
-        <Card>
-          <div style={{ fontWeight: 900, marginBottom: 10 }}>3) Fetch links</div>
+          <div style={{ height: 10 }} />
+
+          <div style={{ fontWeight: 850, marginBottom: 8, opacity: 0.9 }}>3) Fetch links</div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
             <Button onClick={doFetchLinks} disabled={busy}>
               Fetch partner links
@@ -235,7 +603,10 @@ export default function PartnerDebugScreen({ supabase, session }) {
                     {l.status} • {l.id?.slice(0, 8)}…
                   </div>
                   <div style={{ opacity: 0.85 }}>
-                    user_id: <span style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" }}>{l.user_id}</span>
+                    user_id:{" "}
+                    <span style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" }}>
+                      {l.user_id}
+                    </span>
                   </div>
                   <div style={{ opacity: 0.85 }}>
                     partner_user_id:{" "}
@@ -251,6 +622,269 @@ export default function PartnerDebugScreen({ supabase, session }) {
               ))}
             </div>
           ) : null}
+        </Card>
+
+        {/* ---------------------------------
+            Collab Debug (new)
+           --------------------------------- */}
+        <Card>
+          <div style={{ fontWeight: 900, marginBottom: 10 }}>Collab Debug</div>
+
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+            <TextInput value={sceneId} onChange={setSceneId} placeholder="Paste scene_id here" mono />
+            <Button onClick={doEnsureNegotiation} disabled={busy || !sceneId.trim()}>
+              Ensure negotiation
+            </Button>
+            <Button onClick={doFetchNegotiation} disabled={busy || !sceneId.trim()}>
+              Fetch negotiation
+            </Button>
+          </div>
+
+          <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
+            <div
+              style={{
+                padding: 10,
+                borderRadius: 12,
+                border: "1px solid rgba(255,255,255,0.10)",
+                background: "rgba(0,0,0,0.20)",
+                fontSize: 12,
+                lineHeight: 1.35,
+              }}
+            >
+              <div style={{ fontWeight: 900 }}>Negotiation status</div>
+              <div style={{ opacity: 0.85 }}>
+                status: <b>{neg?.status || "—"}</b> • version: <b>{neg?.version ?? "—"}</b>
+              </div>
+              <div style={{ opacity: 0.75 }}>
+                locked_at: {neg?.locked_at ? new Date(neg.locked_at).toLocaleString() : "—"} • unlocked_at:{" "}
+                {neg?.unlocked_at ? new Date(neg.unlocked_at).toLocaleString() : "—"}
+              </div>
+            </div>
+
+            <div>
+              <div style={{ fontWeight: 850, marginBottom: 6, opacity: 0.9 }}>Draft (editable in draft state)</div>
+              <TextArea value={draftText} onChange={setDraftText} placeholder="Negotiation draft…" />
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
+                <Button onClick={doUpdateDraft} disabled={busy || !sceneId.trim()}>
+                  Save draft
+                </Button>
+                <Button onClick={doAgree} disabled={busy || !sceneId.trim()}>
+                  Agree (me)
+                </Button>
+                <Button onClick={doUnagree} disabled={busy || !sceneId.trim()}>
+                  Un-agree (me)
+                </Button>
+                <Button onClick={doFetchAgreements} disabled={busy || !sceneId.trim()}>
+                  Fetch agreements
+                </Button>
+              </div>
+
+              {agreements.length ? (
+                <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+                  <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 800 }}>
+                    Agreements (current version)
+                  </div>
+                  {agreements.map((a) => (
+                    <div
+                      key={a.id}
+                      style={{
+                        padding: 10,
+                        borderRadius: 12,
+                        border: "1px solid rgba(255,255,255,0.10)",
+                        background: "rgba(0,0,0,0.20)",
+                        fontSize: 12,
+                        lineHeight: 1.35,
+                      }}
+                    >
+                      <div style={{ fontWeight: 850 }}>
+                        {a.user_id?.slice(0, 8)}… • {a.version}
+                      </div>
+                      <div style={{ opacity: 0.75 }}>
+                        agreed_at: {a.agreed_at ? new Date(a.agreed_at).toLocaleString() : "—"}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+
+            <div style={{ display: "grid", gap: 8 }}>
+              <div style={{ fontWeight: 850, opacity: 0.9 }}>Owner actions</div>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <Button onClick={doLock} disabled={busy || !sceneId.trim()}>
+                  Lock (owner)
+                </Button>
+                <TextInput value={unlockReason} onChange={setUnlockReason} placeholder="Unlock reason…" />
+                <Button onClick={doUnlock} disabled={busy || !sceneId.trim()} tone="danger">
+                  Unlock (owner)
+                </Button>
+              </div>
+              <div style={{ fontSize: 12, opacity: 0.7, lineHeight: 1.35 }}>
+                Unlock bumps version. That resets consent because agreements are per-version.
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gap: 10 }}>
+              <div style={{ fontWeight: 850, opacity: 0.9 }}>Suggestions</div>
+
+              <div
+                style={{
+                  padding: 10,
+                  borderRadius: 12,
+                  border: "1px solid rgba(255,255,255,0.10)",
+                  background: "rgba(0,0,0,0.20)",
+                  display: "grid",
+                  gap: 10,
+                }}
+              >
+                <div style={{ fontWeight: 850, opacity: 0.9 }}>Block suggestion</div>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                  <TextInput value={blockKey} onChange={setBlockKey} placeholder="block_key (e.g. aftercare)" />
+                  <Button onClick={doCreateBlockSuggestion} disabled={busy || !sceneId.trim()}>
+                    Create
+                  </Button>
+                </div>
+                <TextArea value={blockSuggestionText} onChange={setBlockSuggestionText} placeholder="Suggested text…" />
+              </div>
+
+              <div
+                style={{
+                  padding: 10,
+                  borderRadius: 12,
+                  border: "1px solid rgba(255,255,255,0.10)",
+                  background: "rgba(0,0,0,0.20)",
+                  display: "grid",
+                  gap: 10,
+                }}
+              >
+                <div style={{ fontWeight: 850, opacity: 0.9 }}>Tool suggestion</div>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                  <TextInput value={toolUserId} onChange={setToolUserId} placeholder="tools_user_id (instance)" mono />
+                  <Button onClick={doCreateToolSuggestionUserTool} disabled={busy || !sceneId.trim()}>
+                    Suggest instance
+                  </Button>
+                </div>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                  <TextInput value={toolGlobalId} onChange={setToolGlobalId} placeholder="tools_global_id (vault)" mono />
+                  <Button onClick={doCreateToolSuggestionVault} disabled={busy || !sceneId.trim()}>
+                    Suggest vault item
+                  </Button>
+                </div>
+                <TextInput value={toolNote} onChange={setToolNote} placeholder="Note / reason (optional)" />
+              </div>
+
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                <Button onClick={doFetchSuggestions} disabled={busy || !sceneId.trim()}>
+                  Fetch suggestions
+                </Button>
+                <div style={{ fontSize: 12, opacity: 0.7 }}>
+                  block: {blockSuggestions.length} • tool: {toolSuggestions.length}
+                </div>
+              </div>
+
+              {(blockSuggestions.length || toolSuggestions.length) ? (
+                <div style={{ display: "grid", gap: 10 }}>
+                  {blockSuggestions.length ? (
+                    <div style={{ display: "grid", gap: 8 }}>
+                      <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 800 }}>Block suggestions</div>
+                      {blockSuggestions.map((s) => (
+                        <div
+                          key={s.id}
+                          style={{
+                            padding: 10,
+                            borderRadius: 12,
+                            border: "1px solid rgba(255,255,255,0.10)",
+                            background: "rgba(0,0,0,0.20)",
+                            fontSize: 12,
+                            lineHeight: 1.35,
+                          }}
+                        >
+                          <div style={{ fontWeight: 900 }}>
+                            {s.status} • {s.block_key} • {s.id.slice(0, 8)}…
+                          </div>
+                          <div style={{ opacity: 0.75 }}>
+                            by: {s.suggested_by_user_id?.slice(0, 8)}… • {new Date(s.created_at).toLocaleString()}
+                          </div>
+                          <div style={{ marginTop: 8, opacity: 0.9, whiteSpace: "pre-wrap" }}>{s.suggested_text}</div>
+
+                          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
+                            <Button
+                              onClick={() => doAcceptBlockSuggestion(s.id)}
+                              disabled={busy}
+                            >
+                              Accept (owner)
+                            </Button>
+                            <Button
+                              onClick={() => doRejectBlockSuggestion(s.id)}
+                              disabled={busy}
+                              tone="danger"
+                            >
+                              Reject (owner)
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  {toolSuggestions.length ? (
+                    <div style={{ display: "grid", gap: 8 }}>
+                      <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 800 }}>Tool suggestions</div>
+                      {toolSuggestions.map((s) => (
+                        <div
+                          key={s.id}
+                          style={{
+                            padding: 10,
+                            borderRadius: 12,
+                            border: "1px solid rgba(255,255,255,0.10)",
+                            background: "rgba(0,0,0,0.20)",
+                            fontSize: 12,
+                            lineHeight: 1.35,
+                          }}
+                        >
+                          <div style={{ fontWeight: 900 }}>
+                            {s.status} • {s.id.slice(0, 8)}…
+                          </div>
+                          <div style={{ opacity: 0.85 }}>
+                            tools_user_id:{" "}
+                            <span style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" }}>
+                              {s.tools_user_id || "—"}
+                            </span>
+                          </div>
+                          <div style={{ opacity: 0.85 }}>
+                            tools_global_id:{" "}
+                            <span style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" }}>
+                              {s.tools_global_id || "—"}
+                            </span>
+                          </div>
+                          {s.note ? <div style={{ opacity: 0.85, marginTop: 6 }}>note: {s.note}</div> : null}
+                          <div style={{ opacity: 0.75, marginTop: 6 }}>
+                            by: {s.suggested_by_user_id?.slice(0, 8)}… • {new Date(s.created_at).toLocaleString()}
+                          </div>
+
+                          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
+                            <Button
+                              onClick={() => doAcceptToolSuggestion(s.id)}
+                              disabled={busy}
+                            >
+                              Accept (owner)
+                            </Button>
+                            <Button
+                              onClick={() => doRejectToolSuggestion(s.id)}
+                              disabled={busy}
+                              tone="danger"
+                            >
+                              Reject (owner)
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          </div>
         </Card>
 
         <Card>
@@ -270,7 +904,7 @@ export default function PartnerDebugScreen({ supabase, session }) {
         </Card>
 
         <div style={{ opacity: 0.65, fontSize: 12, lineHeight: 1.35 }}>
-          Note: this route is intentionally not linked in UI. Remove it once partner linking is proven.
+          Note: this route is intentionally not linked in UI. Remove it once partner linking + collab plumbing is proven.
         </div>
       </div>
     </div>
