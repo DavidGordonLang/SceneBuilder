@@ -120,6 +120,13 @@ function shortId(id) {
 
 export default function PartnerDebugScreen({ supabase, session }) {
   const toast = useToast();
+  const notify = (message, opts) => {
+    try {
+      toast?.showToast?.(message, opts);
+    } catch {
+      // fail silent in debug only
+    }
+  };
 
   const me = useMemo(() => {
     const u = session?.user || null;
@@ -173,7 +180,6 @@ export default function PartnerDebugScreen({ supabase, session }) {
     const ids = Array.from(new Set((userIds || []).filter(Boolean)));
     if (!ids.length) return;
 
-    // Only fetch what we don't already have
     const missing = ids.filter((id) => !nameMap[id]);
     if (!missing.length) return;
 
@@ -188,7 +194,6 @@ export default function PartnerDebugScreen({ supabase, session }) {
     for (const row of data || []) {
       next[row.id] = row.display_name || shortId(row.id);
     }
-    // ensure any still-missing get shortId fallback
     for (const id of missing) {
       if (!next[id]) next[id] = shortId(id);
     }
@@ -196,9 +201,7 @@ export default function PartnerDebugScreen({ supabase, session }) {
     setNameMap(next);
   }
 
-  // Required agree set = owner + all contributors in scene_shares for scene
   async function fetchRequiredAgreeSet(scene_id) {
-    // Owner
     const { data: sceneRow, error: sceneErr } = await supabase
       .from("scenes")
       .select("id, user_id")
@@ -208,7 +211,6 @@ export default function PartnerDebugScreen({ supabase, session }) {
 
     const ownerId = sceneRow?.user_id;
 
-    // Contributors
     const { data: shares, error: shErr } = await supabase
       .from("scene_shares")
       .select("shared_with_user_id, role")
@@ -235,16 +237,16 @@ export default function PartnerDebugScreen({ supabase, session }) {
       const res = await createPartnerInvite({ supabase });
       setInvite(res);
       appendLog({ createPartnerInvite: res });
-      toast?.push?.("Invite code created.");
+      notify("Invite code created.");
       try {
         await navigator.clipboard.writeText(res.code);
-        toast?.push?.("Code copied to clipboard.");
+        notify("Code copied to clipboard.");
       } catch {
         // ignore
       }
     } catch (e) {
       appendLog({ error: e?.message || String(e) });
-      toast?.push?.(e?.message || "Failed to create invite.");
+      notify(e?.message || "Failed to create invite.");
     } finally {
       setBusy(false);
     }
@@ -253,18 +255,18 @@ export default function PartnerDebugScreen({ supabase, session }) {
   async function doRedeem() {
     const code = String(redeemCode || "").trim();
     if (!code) {
-      toast?.push?.("Paste an invite code first.");
+      notify("Paste an invite code first.");
       return;
     }
     setBusy(true);
     try {
       const res = await redeemPartnerInvite(code, { supabase });
       appendLog({ redeemPartnerInvite: res });
-      toast?.push?.("Invite redeemed.");
+      notify("Invite redeemed.");
       setRedeemCode("");
     } catch (e) {
       appendLog({ error: e?.message || String(e) });
-      toast?.push?.(e?.message || "Failed to redeem invite.");
+      notify(e?.message || "Failed to redeem invite.");
     } finally {
       setBusy(false);
     }
@@ -276,10 +278,10 @@ export default function PartnerDebugScreen({ supabase, session }) {
       const res = await fetchPartnerLinks({ supabase });
       setLinks(res);
       appendLog({ fetchPartnerLinks: res });
-      toast?.push?.("Fetched partner links.");
+      notify("Fetched partner links.");
     } catch (e) {
       appendLog({ error: e?.message || String(e) });
-      toast?.push?.(e?.message || "Failed to fetch links.");
+      notify(e?.message || "Failed to fetch links.");
     } finally {
       setBusy(false);
     }
@@ -288,7 +290,6 @@ export default function PartnerDebugScreen({ supabase, session }) {
   // ----------------------------
   // Collab (new)
   // ----------------------------
-
   function requireSceneId() {
     const id = String(sceneId || "").trim();
     if (!id) throw new Error("Paste a scene_id first.");
@@ -303,10 +304,10 @@ export default function PartnerDebugScreen({ supabase, session }) {
       setNeg(res);
       setDraftText(res?.draft_text ?? "");
       appendLog({ ensureNegotiation: res });
-      toast?.push?.("Negotiation ensured.");
+      notify("Negotiation ensured.");
     } catch (e) {
       appendLog({ error: e?.message || String(e) });
-      toast?.push?.(e?.message || "Failed to ensure negotiation.");
+      notify(e?.message || "Failed to ensure negotiation.");
     } finally {
       setBusy(false);
     }
@@ -320,10 +321,10 @@ export default function PartnerDebugScreen({ supabase, session }) {
       setNeg(res);
       setDraftText(res?.draft_text ?? "");
       appendLog({ fetchNegotiation: res });
-      toast?.push?.("Negotiation fetched.");
+      notify("Negotiation fetched.");
     } catch (e) {
       appendLog({ error: e?.message || String(e) });
-      toast?.push?.(e?.message || "Failed to fetch negotiation.");
+      notify(e?.message || "Failed to fetch negotiation.");
     } finally {
       setBusy(false);
     }
@@ -337,10 +338,10 @@ export default function PartnerDebugScreen({ supabase, session }) {
       const res = await updateNegotiationDraft(id, draftText, { supabase });
       setNeg(res);
       appendLog({ updateNegotiationDraft: res });
-      toast?.push?.("Draft updated.");
+      notify("Draft updated.");
     } catch (e) {
       appendLog({ error: e?.message || String(e) });
-      toast?.push?.(e?.message || "Failed to update draft.");
+      notify(e?.message || "Failed to update draft.");
     } finally {
       setBusy(false);
     }
@@ -360,10 +361,10 @@ export default function PartnerDebugScreen({ supabase, session }) {
       await hydrateNames(ids);
 
       appendLog({ fetchNegotiationAgreements: { scene_id: id, version: n.version, rows: res } });
-      toast?.push?.("Agreements fetched.");
+      notify("Agreements fetched.");
     } catch (e) {
       appendLog({ error: e?.message || String(e) });
-      toast?.push?.(e?.message || "Failed to fetch agreements.");
+      notify(e?.message || "Failed to fetch agreements.");
     } finally {
       setBusy(false);
     }
@@ -379,11 +380,11 @@ export default function PartnerDebugScreen({ supabase, session }) {
 
       const res = await agreeToNegotiation(id, n.version, { supabase });
       appendLog({ agreeToNegotiation: res });
-      toast?.push?.("Agreed.");
+      notify("Agreed.");
       await doFetchAgreements();
     } catch (e) {
       appendLog({ error: e?.message || String(e) });
-      toast?.push?.(e?.message || "Failed to agree.");
+      notify(e?.message || "Failed to agree.");
     } finally {
       setBusy(false);
     }
@@ -399,11 +400,11 @@ export default function PartnerDebugScreen({ supabase, session }) {
 
       await unagreeToNegotiation(id, n.version, { supabase });
       appendLog({ unagreeToNegotiation: { scene_id: id, version: n.version, user_id: me.id } });
-      toast?.push?.("Un-agreed.");
+      notify("Un-agreed.");
       await doFetchAgreements();
     } catch (e) {
       appendLog({ error: e?.message || String(e) });
-      toast?.push?.(e?.message || "Failed to un-agree.");
+      notify(e?.message || "Failed to un-agree.");
     } finally {
       setBusy(false);
     }
@@ -417,7 +418,6 @@ export default function PartnerDebugScreen({ supabase, session }) {
       if (!n) throw new Error("No negotiation row found.");
       if (n.status === "locked") throw new Error("Already locked.");
 
-      // Enforce product rule: owner + all contributors must have agreed for current version.
       const required = await fetchRequiredAgreeSet(id);
       const rows = await fetchNegotiationAgreements(id, n.version, { supabase });
       const agreedSet = new Set((rows || []).map((r) => r.user_id));
@@ -434,10 +434,10 @@ export default function PartnerDebugScreen({ supabase, session }) {
       const res = await lockNegotiation(id, { lockedText, lockedByUserId: me.id }, { supabase });
       setNeg(res);
       appendLog({ lockNegotiation: res });
-      toast?.push?.("Locked.");
+      notify("Locked.");
     } catch (e) {
       appendLog({ error: e?.message || String(e) });
-      toast?.push?.(e?.message || "Failed to lock.");
+      notify(e?.message || "Failed to lock.");
     } finally {
       setBusy(false);
     }
@@ -451,11 +451,11 @@ export default function PartnerDebugScreen({ supabase, session }) {
       setNeg(res);
       setDraftText(res?.draft_text ?? "");
       appendLog({ unlockNegotiation: res });
-      toast?.push?.("Unlocked (version bumped; agreements reset).");
+      notify("Unlocked (version bumped; agreements reset).");
       setAgreements([]);
     } catch (e) {
       appendLog({ error: e?.message || String(e) });
-      toast?.push?.(e?.message || "Failed to unlock.");
+      notify(e?.message || "Failed to unlock.");
     } finally {
       setBusy(false);
     }
@@ -469,11 +469,11 @@ export default function PartnerDebugScreen({ supabase, session }) {
       if (!txt) throw new Error("Write a suggested text first.");
       const res = await createBlockSuggestion(id, blockKey, txt, { supabase });
       appendLog({ createBlockSuggestion: res });
-      toast?.push?.("Block suggestion created.");
+      notify("Block suggestion created.");
       setBlockSuggestionText("");
     } catch (e) {
       appendLog({ error: e?.message || String(e) });
-      toast?.push?.(e?.message || "Failed to create block suggestion.");
+      notify(e?.message || "Failed to create block suggestion.");
     } finally {
       setBusy(false);
     }
@@ -487,12 +487,12 @@ export default function PartnerDebugScreen({ supabase, session }) {
       if (!tuid) throw new Error("Paste tools_user_id first.");
       const res = await createToolSuggestionByUserTool(id, tuid, toolNote, { supabase });
       appendLog({ createToolSuggestionByUserTool: res });
-      toast?.push?.("Tool suggestion created (tools_user).");
+      notify("Tool suggestion created (tools_user).");
       setToolUserId("");
       setToolNote("");
     } catch (e) {
       appendLog({ error: e?.message || String(e) });
-      toast?.push?.(e?.message || "Failed to create tool suggestion.");
+      notify(e?.message || "Failed to create tool suggestion.");
     } finally {
       setBusy(false);
     }
@@ -506,12 +506,12 @@ export default function PartnerDebugScreen({ supabase, session }) {
       if (!gid) throw new Error("Paste tools_global_id first.");
       const res = await createToolSuggestionByVault(id, gid, toolNote, { supabase });
       appendLog({ createToolSuggestionByVault: res });
-      toast?.push?.("Tool suggestion created (vault).");
+      notify("Tool suggestion created (vault).");
       setToolGlobalId("");
       setToolNote("");
     } catch (e) {
       appendLog({ error: e?.message || String(e) });
-      toast?.push?.(e?.message || "Failed to create tool suggestion.");
+      notify(e?.message || "Failed to create tool suggestion.");
     } finally {
       setBusy(false);
     }
@@ -535,10 +535,10 @@ export default function PartnerDebugScreen({ supabase, session }) {
       await hydrateNames(ids);
 
       appendLog({ fetchSuggestions: { block: bs, tool: ts } });
-      toast?.push?.("Suggestions fetched.");
+      notify("Suggestions fetched.");
     } catch (e) {
       appendLog({ error: e?.message || String(e) });
-      toast?.push?.(e?.message || "Failed to fetch suggestions.");
+      notify(e?.message || "Failed to fetch suggestions.");
     } finally {
       setBusy(false);
     }
@@ -549,11 +549,11 @@ export default function PartnerDebugScreen({ supabase, session }) {
     try {
       const res = await setBlockSuggestionStatus(sugId, "accepted", { supabase });
       appendLog({ setBlockSuggestionStatus: res });
-      toast?.push?.("Block suggestion accepted.");
+      notify("Block suggestion accepted.");
       await doFetchSuggestions();
     } catch (e) {
       appendLog({ error: e?.message || String(e) });
-      toast?.push?.(e?.message || "Failed to accept.");
+      notify(e?.message || "Failed to accept.");
     } finally {
       setBusy(false);
     }
@@ -564,11 +564,11 @@ export default function PartnerDebugScreen({ supabase, session }) {
     try {
       const res = await setBlockSuggestionStatus(sugId, "rejected", { supabase });
       appendLog({ setBlockSuggestionStatus: res });
-      toast?.push?.("Block suggestion rejected.");
+      notify("Block suggestion rejected.");
       await doFetchSuggestions();
     } catch (e) {
       appendLog({ error: e?.message || String(e) });
-      toast?.push?.(e?.message || "Failed to reject.");
+      notify(e?.message || "Failed to reject.");
     } finally {
       setBusy(false);
     }
@@ -579,11 +579,11 @@ export default function PartnerDebugScreen({ supabase, session }) {
     try {
       const res = await setToolSuggestionStatus(sugId, "accepted", { supabase });
       appendLog({ setToolSuggestionStatus: res });
-      toast?.push?.("Tool suggestion accepted.");
+      notify("Tool suggestion accepted.");
       await doFetchSuggestions();
     } catch (e) {
       appendLog({ error: e?.message || String(e) });
-      toast?.push?.(e?.message || "Failed to accept.");
+      notify(e?.message || "Failed to accept.");
     } finally {
       setBusy(false);
     }
@@ -594,11 +594,11 @@ export default function PartnerDebugScreen({ supabase, session }) {
     try {
       const res = await setToolSuggestionStatus(sugId, "rejected", { supabase });
       appendLog({ setToolSuggestionStatus: res });
-      toast?.push?.("Tool suggestion rejected.");
+      notify("Tool suggestion rejected.");
       await doFetchSuggestions();
     } catch (e) {
       appendLog({ error: e?.message || String(e) });
-      toast?.push?.(e?.message || "Failed to reject.");
+      notify(e?.message || "Failed to reject.");
     } finally {
       setBusy(false);
     }
@@ -622,7 +622,7 @@ export default function PartnerDebugScreen({ supabase, session }) {
           </div>
         </div>
 
-        {/* Partner linking */}
+        {/* Partner Linking */}
         <Card>
           <div style={{ fontWeight: 900, marginBottom: 10 }}>Partner Linking</div>
 
@@ -822,6 +822,7 @@ export default function PartnerDebugScreen({ supabase, session }) {
               )}
             </div>
 
+            {/* Suggestions (unchanged) */}
             <div style={{ display: "grid", gap: 10 }}>
               <div style={{ fontWeight: 850, opacity: 0.9 }}>Suggestions</div>
 
