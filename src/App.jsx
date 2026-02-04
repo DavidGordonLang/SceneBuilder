@@ -17,6 +17,7 @@ import ActionVocabularyScreen from "./screens/profile/ActionVocabularyScreen";
 import KinkPreferencesScreen from "./screens/KinkPreferencesScreen";
 
 import ProfileScreen from "./screens/ProfileScreen";
+import PartnerDebugScreen from "./screens/profile/PartnerDebugScreen";
 
 import { fetchScenes } from "./lib/scenesApi";
 import { fetchToolVault, fetchUserTools } from "./lib/toolsApi";
@@ -377,14 +378,29 @@ function AuthedShell({ session }) {
               path="/settings/kink-preferences"
               element={<KinkPreferencesScreen supabase={supabase} session={session} mode="settings" />}
             />
-            <Route path="/settings/partners" element={<div style={{ padding: 16, opacity: 0.75 }}>Coming soon.</div>} />
+            <Route
+              path="/settings/partners"
+              element={<div style={{ padding: 16, opacity: 0.75 }}>Coming soon.</div>}
+            />
 
             {/* Profile */}
             <Route path="/profile" element={<ProfileScreen supabase={supabase} session={session} />} />
-            <Route path="/profile/kinks" element={<KinkPreferencesScreen supabase={supabase} session={session} mode="profile" />} />
+            <Route
+              path="/profile/kinks"
+              element={<KinkPreferencesScreen supabase={supabase} session={session} mode="profile" />}
+            />
+
+            {/* Debug (hidden route) */}
+            <Route
+              path="/debug/partners"
+              element={<PartnerDebugScreen supabase={supabase} session={session} />}
+            />
 
             {/* Onboarding */}
-            <Route path="/onboarding" element={<KinkPreferencesScreen supabase={supabase} session={session} mode="onboarding" />} />
+            <Route
+              path="/onboarding"
+              element={<KinkPreferencesScreen supabase={supabase} session={session} mode="onboarding" />}
+            />
 
             {/* Default */}
             <Route path="/" element={<Navigate to="/home" replace />} />
