@@ -153,9 +153,7 @@ export async function lockNegotiation(sceneId, { lockedText, lockedByUserId }, {
         locked_by_user_id: lockedByUserId || null,
       })
       .eq("scene_id", sceneId)
-      .select(
-        "scene_id,status,version,draft_text,locked_text,locked_at,locked_by_user_id,updated_at"
-      )
+      .select("scene_id,status,version,draft_text,locked_text,locked_at,locked_by_user_id,updated_at")
       .single();
 
     if (error) throw error;
@@ -347,5 +345,74 @@ export async function setToolSuggestionStatus(suggestionId, status, { supabase }
 
     if (error) throw error;
     return data;
+  });
+}
+
+/* =========================================================
+   Unlock requests (Negotiation)
+   ========================================================= */
+
+/**
+ * Participant request: asks owner to unlock a locked negotiation.
+ * RPC enforces:
+ * - negotiation exists + is locked
+ * - request stored against current version
+ * - one pending request per user per version (via partial unique index)
+ */
+export async function requestNegotiationUnlock(sceneId, reason, { supabase } = {}) {
+  return perfTime("collab.requestNegotiationUnlock", async () => {
+    const client = getClient(supabase);
+    await requireAuth(client);
+
+    const { data, error } = await client.rpc("request_negotiation_unlock", {
+      p_scene_id: sceneId,
+      p_reason: String(reason ?? ""),
+    });
+
+    if (error) throw error;
+    return data || null;
+  });
+}
+
+/**
+ * Fetch unlock requests for a scene (visible to participants via RLS).
+ */
+export async function fetchNegotiationUnlockRequests(sceneId, { supabase } = {}) {
+  return perfTime("collab.fetchNegotiationUnlockRequests", async () => {
+    const client = getClient(supabase);
+    await requireAuth(client);
+
+    const { data, error } = await client
+      .from("scene_negotiation_unlock_requests")
+      .select(
+        "id,scene_id,negotiation_version,requested_by_user_id,reason,status,created_at,updated_at,resolved_at,resolved_by_user_id"
+      )
+      .eq("scene_id", sceneId)
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+    return Array.isArray(data) ? data : [];
+  });
+}
+
+/**
+ * Owner action: dismiss or unlock-from-request.
+ * Returns:
+ * - on unlock: JSON of the updated scene_negotiation row
+ * - on dismiss: JSON { status:'dismissed', request_id }
+ */
+export async function resolveNegotiationUnlockRequest(requestId, { action, unlockReason } = {}, { supabase } = {}) {
+  return perfTime("collab.resolveNegotiationUnlockRequest", async () => {
+    const client = getClient(supabase);
+    await requireAuth(client);
+
+    const { data, error } = await client.rpc("resolve_negotiation_unlock_request", {
+      p_request_id: requestId,
+      p_action: String(action ?? ""),
+      p_unlock_reason: String(unlockReason ?? ""),
+    });
+
+    if (error) throw error;
+    return data ?? null;
   });
 }
