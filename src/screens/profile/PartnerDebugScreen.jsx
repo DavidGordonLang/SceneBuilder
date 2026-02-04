@@ -113,14 +113,26 @@ function TextArea({ value, onChange, placeholder }) {
   );
 }
 
+function shortId(id) {
+  if (!id) return "—";
+  return id.slice(0, 8) + "…";
+}
+
 export default function PartnerDebugScreen({ supabase, session }) {
   const toast = useToast();
 
   const me = useMemo(() => {
     const u = session?.user || null;
+    const name =
+      u?.user_metadata?.full_name ||
+      u?.user_metadata?.name ||
+      u?.user_metadata?.display_name ||
+      u?.email ||
+      "";
     return {
       id: u?.id || "",
       email: u?.email || "",
+      name,
     };
   }, [session]);
 
@@ -136,6 +148,9 @@ export default function PartnerDebugScreen({ supabase, session }) {
   const [draftText, setDraftText] = useState("");
   const [unlockReason, setUnlockReason] = useState("Change requested / renegotiate");
   const [agreements, setAgreements] = useState([]);
+  const [nameMap, setNameMap] = useState({}); // user_id -> display_name
+  const [requiredAgree, setRequiredAgree] = useState([]); // list of user_ids required for lock
+
   const [blockKey, setBlockKey] = useState("planning");
   const [blockSuggestionText, setBlockSuggestionText] = useState("");
   const [toolUserId, setToolUserId] = useState("");
@@ -147,6 +162,68 @@ export default function PartnerDebugScreen({ supabase, session }) {
   function appendLog(obj) {
     const line = typeof obj === "string" ? obj : JSON.stringify(obj, null, 2);
     setLog((prev) => (prev ? `${prev}\n\n${line}` : line));
+  }
+
+  function displayNameFor(uid) {
+    if (!uid) return "—";
+    return nameMap?.[uid] || shortId(uid);
+  }
+
+  async function hydrateNames(userIds) {
+    const ids = Array.from(new Set((userIds || []).filter(Boolean)));
+    if (!ids.length) return;
+
+    // Only fetch what we don't already have
+    const missing = ids.filter((id) => !nameMap[id]);
+    if (!missing.length) return;
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id, display_name")
+      .in("id", missing);
+
+    if (error) throw error;
+
+    const next = { ...(nameMap || {}) };
+    for (const row of data || []) {
+      next[row.id] = row.display_name || shortId(row.id);
+    }
+    // ensure any still-missing get shortId fallback
+    for (const id of missing) {
+      if (!next[id]) next[id] = shortId(id);
+    }
+
+    setNameMap(next);
+  }
+
+  // Required agree set = owner + all contributors in scene_shares for scene
+  async function fetchRequiredAgreeSet(scene_id) {
+    // Owner
+    const { data: sceneRow, error: sceneErr } = await supabase
+      .from("scenes")
+      .select("id, user_id")
+      .eq("id", scene_id)
+      .single();
+    if (sceneErr) throw sceneErr;
+
+    const ownerId = sceneRow?.user_id;
+
+    // Contributors
+    const { data: shares, error: shErr } = await supabase
+      .from("scene_shares")
+      .select("shared_with_user_id, role")
+      .eq("scene_id", scene_id);
+    if (shErr) throw shErr;
+
+    const contributorIds = (shares || [])
+      .filter((s) => (s.role || "") === "contributor")
+      .map((s) => s.shared_with_user_id);
+
+    const req = Array.from(new Set([ownerId, ...contributorIds].filter(Boolean)));
+    setRequiredAgree(req);
+    await hydrateNames(req);
+
+    return req;
   }
 
   // ----------------------------
@@ -256,7 +333,6 @@ export default function PartnerDebugScreen({ supabase, session }) {
     setBusy(true);
     try {
       const id = requireSceneId();
-      // app rule: don’t edit while locked (we enforce in UI too)
       if (neg?.status === "locked") throw new Error("Negotiation is locked. Owner must unlock first.");
       const res = await updateNegotiationDraft(id, draftText, { supabase });
       setNeg(res);
@@ -276,8 +352,13 @@ export default function PartnerDebugScreen({ supabase, session }) {
       const id = requireSceneId();
       const n = neg || (await fetchNegotiation(id, { supabase }));
       if (!n) throw new Error("No negotiation row found.");
+
       const res = await fetchNegotiationAgreements(id, n.version, { supabase });
       setAgreements(res);
+
+      const ids = (res || []).map((r) => r.user_id);
+      await hydrateNames(ids);
+
       appendLog({ fetchNegotiationAgreements: { scene_id: id, version: n.version, rows: res } });
       toast?.push?.("Agreements fetched.");
     } catch (e) {
@@ -295,6 +376,7 @@ export default function PartnerDebugScreen({ supabase, session }) {
       const n = neg || (await fetchNegotiation(id, { supabase }));
       if (!n) throw new Error("No negotiation row found.");
       if (n.status === "locked") throw new Error("Negotiation is locked. No need to agree.");
+
       const res = await agreeToNegotiation(id, n.version, { supabase });
       appendLog({ agreeToNegotiation: res });
       toast?.push?.("Agreed.");
@@ -302,7 +384,6 @@ export default function PartnerDebugScreen({ supabase, session }) {
     } catch (e) {
       appendLog({ error: e?.message || String(e) });
       toast?.push?.(e?.message || "Failed to agree.");
-      setBusy(false);
     } finally {
       setBusy(false);
     }
@@ -315,6 +396,7 @@ export default function PartnerDebugScreen({ supabase, session }) {
       const n = neg || (await fetchNegotiation(id, { supabase }));
       if (!n) throw new Error("No negotiation row found.");
       if (n.status === "locked") throw new Error("Negotiation is locked. Owner must unlock first.");
+
       await unagreeToNegotiation(id, n.version, { supabase });
       appendLog({ unagreeToNegotiation: { scene_id: id, version: n.version, user_id: me.id } });
       toast?.push?.("Un-agreed.");
@@ -335,9 +417,19 @@ export default function PartnerDebugScreen({ supabase, session }) {
       if (!n) throw new Error("No negotiation row found.");
       if (n.status === "locked") throw new Error("Already locked.");
 
-      // IMPORTANT: we are not verifying “all required parties agreed” yet.
-      // That check needs participant list (scene_shares) + agreements comparison.
-      // For debug, we allow manual lock so we can test status transitions.
+      // Enforce product rule: owner + all contributors must have agreed for current version.
+      const required = await fetchRequiredAgreeSet(id);
+      const rows = await fetchNegotiationAgreements(id, n.version, { supabase });
+      const agreedSet = new Set((rows || []).map((r) => r.user_id));
+
+      await hydrateNames(required);
+
+      const missing = required.filter((uid) => !agreedSet.has(uid));
+      if (missing.length) {
+        const who = missing.map((uid) => displayNameFor(uid)).join(", ");
+        throw new Error(`Cannot lock: missing agreement(s) from: ${who}`);
+      }
+
       const lockedText = String(n.draft_text ?? "");
       const res = await lockNegotiation(id, { lockedText, lockedByUserId: me.id }, { supabase });
       setNeg(res);
@@ -355,11 +447,7 @@ export default function PartnerDebugScreen({ supabase, session }) {
     setBusy(true);
     try {
       const id = requireSceneId();
-      const res = await unlockNegotiation(
-        id,
-        { unlockReason, unlockedByUserId: me.id },
-        { supabase }
-      );
+      const res = await unlockNegotiation(id, { unlockReason, unlockedByUserId: me.id }, { supabase });
       setNeg(res);
       setDraftText(res?.draft_text ?? "");
       appendLog({ unlockNegotiation: res });
@@ -439,6 +527,13 @@ export default function PartnerDebugScreen({ supabase, session }) {
       ]);
       setBlockSuggestions(bs);
       setToolSuggestions(ts);
+
+      const ids = [
+        ...(bs || []).map((r) => r.suggested_by_user_id),
+        ...(ts || []).map((r) => r.suggested_by_user_id),
+      ];
+      await hydrateNames(ids);
+
       appendLog({ fetchSuggestions: { block: bs, tool: ts } });
       toast?.push?.("Suggestions fetched.");
     } catch (e) {
@@ -527,9 +622,7 @@ export default function PartnerDebugScreen({ supabase, session }) {
           </div>
         </div>
 
-        {/* ---------------------------------
-            Partner linking (existing)
-           --------------------------------- */}
+        {/* Partner linking */}
         <Card>
           <div style={{ fontWeight: 900, marginBottom: 10 }}>Partner Linking</div>
 
@@ -600,7 +693,7 @@ export default function PartnerDebugScreen({ supabase, session }) {
                   }}
                 >
                   <div style={{ fontWeight: 900 }}>
-                    {l.status} • {l.id?.slice(0, 8)}…
+                    {l.status} • {shortId(l.id)}
                   </div>
                   <div style={{ opacity: 0.85 }}>
                     user_id:{" "}
@@ -624,9 +717,7 @@ export default function PartnerDebugScreen({ supabase, session }) {
           ) : null}
         </Card>
 
-        {/* ---------------------------------
-            Collab Debug (new)
-           --------------------------------- */}
+        {/* Collab Debug */}
         <Card>
           <div style={{ fontWeight: 900, marginBottom: 10 }}>Collab Debug</div>
 
@@ -697,7 +788,7 @@ export default function PartnerDebugScreen({ supabase, session }) {
                       }}
                     >
                       <div style={{ fontWeight: 850 }}>
-                        {a.user_id?.slice(0, 8)}… • {a.version}
+                        {displayNameFor(a.user_id)} • v{a.version}
                       </div>
                       <div style={{ opacity: 0.75 }}>
                         agreed_at: {a.agreed_at ? new Date(a.agreed_at).toLocaleString() : "—"}
@@ -719,9 +810,16 @@ export default function PartnerDebugScreen({ supabase, session }) {
                   Unlock (owner)
                 </Button>
               </div>
-              <div style={{ fontSize: 12, opacity: 0.7, lineHeight: 1.35 }}>
-                Unlock bumps version. That resets consent because agreements are per-version.
-              </div>
+
+              {requiredAgree?.length ? (
+                <div style={{ fontSize: 12, opacity: 0.7, lineHeight: 1.35 }}>
+                  Required to lock: {requiredAgree.map((uid) => displayNameFor(uid)).join(", ")}
+                </div>
+              ) : (
+                <div style={{ fontSize: 12, opacity: 0.7, lineHeight: 1.35 }}>
+                  Lock enforces: owner + all contributor participants must agree for current version.
+                </div>
+              )}
             </div>
 
             <div style={{ display: "grid", gap: 10 }}>
@@ -800,25 +898,18 @@ export default function PartnerDebugScreen({ supabase, session }) {
                           }}
                         >
                           <div style={{ fontWeight: 900 }}>
-                            {s.status} • {s.block_key} • {s.id.slice(0, 8)}…
+                            {s.status} • {s.block_key} • {shortId(s.id)}
                           </div>
                           <div style={{ opacity: 0.75 }}>
-                            by: {s.suggested_by_user_id?.slice(0, 8)}… • {new Date(s.created_at).toLocaleString()}
+                            by: {displayNameFor(s.suggested_by_user_id)} • {new Date(s.created_at).toLocaleString()}
                           </div>
                           <div style={{ marginTop: 8, opacity: 0.9, whiteSpace: "pre-wrap" }}>{s.suggested_text}</div>
 
                           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
-                            <Button
-                              onClick={() => doAcceptBlockSuggestion(s.id)}
-                              disabled={busy}
-                            >
+                            <Button onClick={() => doAcceptBlockSuggestion(s.id)} disabled={busy}>
                               Accept (owner)
                             </Button>
-                            <Button
-                              onClick={() => doRejectBlockSuggestion(s.id)}
-                              disabled={busy}
-                              tone="danger"
-                            >
+                            <Button onClick={() => doRejectBlockSuggestion(s.id)} disabled={busy} tone="danger">
                               Reject (owner)
                             </Button>
                           </div>
@@ -843,9 +934,12 @@ export default function PartnerDebugScreen({ supabase, session }) {
                           }}
                         >
                           <div style={{ fontWeight: 900 }}>
-                            {s.status} • {s.id.slice(0, 8)}…
+                            {s.status} • {shortId(s.id)}
                           </div>
-                          <div style={{ opacity: 0.85 }}>
+                          <div style={{ opacity: 0.75 }}>
+                            by: {displayNameFor(s.suggested_by_user_id)} • {new Date(s.created_at).toLocaleString()}
+                          </div>
+                          <div style={{ opacity: 0.85, marginTop: 6 }}>
                             tools_user_id:{" "}
                             <span style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" }}>
                               {s.tools_user_id || "—"}
@@ -858,22 +952,12 @@ export default function PartnerDebugScreen({ supabase, session }) {
                             </span>
                           </div>
                           {s.note ? <div style={{ opacity: 0.85, marginTop: 6 }}>note: {s.note}</div> : null}
-                          <div style={{ opacity: 0.75, marginTop: 6 }}>
-                            by: {s.suggested_by_user_id?.slice(0, 8)}… • {new Date(s.created_at).toLocaleString()}
-                          </div>
 
                           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
-                            <Button
-                              onClick={() => doAcceptToolSuggestion(s.id)}
-                              disabled={busy}
-                            >
+                            <Button onClick={() => doAcceptToolSuggestion(s.id)} disabled={busy}>
                               Accept (owner)
                             </Button>
-                            <Button
-                              onClick={() => doRejectToolSuggestion(s.id)}
-                              disabled={busy}
-                              tone="danger"
-                            >
+                            <Button onClick={() => doRejectToolSuggestion(s.id)} disabled={busy} tone="danger">
                               Reject (owner)
                             </Button>
                           </div>
