@@ -6,6 +6,7 @@ import { SmallButton } from "../components/routesUi";
 import Page from "../components/Page";
 import { useAvatarUpload } from "../hooks/useAvatarUpload";
 import { useProfile } from "../hooks/useProfile";
+import { fetchPartnerLinks } from "../lib/partnersApi";
 
 /**
  * Cache signed avatar URLs by storage path.
@@ -29,7 +30,6 @@ function readAvatarCacheFromStorage() {
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return;
 
-    // sanitize
     const next = {};
     const now = Date.now();
     for (const [k, v] of Object.entries(parsed)) {
@@ -49,9 +49,7 @@ function readAvatarCacheFromStorage() {
 
 function writeAvatarCacheToStorage() {
   try {
-    // cap size to avoid unbounded growth
     const entries = Object.entries(avatarSignedUrlCache || {});
-    // sort by newest expiry first
     entries.sort((a, b) => Number(b[1]?.expiresAtMs || 0) - Number(a[1]?.expiresAtMs || 0));
     const capped = entries.slice(0, 25);
 
@@ -59,11 +57,10 @@ function writeAvatarCacheToStorage() {
     for (const [k, v] of capped) obj[k] = v;
     localStorage.setItem(AVATAR_URL_LS_KEY, JSON.stringify(obj));
   } catch {
-    // ignore (private mode etc)
+    // ignore
   }
 }
 
-// load once at module init
 if (typeof window !== "undefined") {
   readAvatarCacheFromStorage();
 }
@@ -81,7 +78,6 @@ function setCachedAvatarUrl(path, url, ttlSeconds) {
   const key = String(path || "").trim();
   if (!key) return;
   const safeTtl = Number(ttlSeconds) > 0 ? Number(ttlSeconds) : 3600;
-  // shave a little off so we don't ride the exact expiry edge
   const expiresAtMs = Date.now() + (safeTtl - 30) * 1000;
   avatarSignedUrlCache[key] = { url: String(url || ""), expiresAtMs };
   writeAvatarCacheToStorage();
@@ -148,6 +144,63 @@ function SkeletonText({ width = "70%", height = 12 }) {
   );
 }
 
+function Card({ children, title, subtitle, right }) {
+  return (
+    <div
+      style={{
+        padding: 12,
+        borderRadius: 14,
+        border: "1px solid rgba(255,255,255,0.10)",
+        background: "rgba(255,255,255,0.03)",
+      }}
+    >
+      {(title || subtitle || right) ? (
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
+          <div style={{ display: "grid", gap: 2 }}>
+            {title ? <div style={{ fontWeight: 900 }}>{title}</div> : null}
+            {subtitle ? <div style={{ fontSize: 12, opacity: 0.65, lineHeight: 1.3 }}>{subtitle}</div> : null}
+          </div>
+          {right ? <div>{right}</div> : null}
+        </div>
+      ) : null}
+      {children}
+    </div>
+  );
+}
+
+function MiniPill({ children }) {
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        borderRadius: 999,
+        padding: "6px 10px",
+        fontSize: 12,
+        fontWeight: 750,
+        border: "1px solid rgba(255,255,255,0.12)",
+        background: "rgba(0,0,0,0.20)",
+        color: "#f3f3f7",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {children}
+    </span>
+  );
+}
+
+function shortId(id) {
+  if (!id) return "—";
+  return String(id).slice(0, 8) + "…";
+}
+
+function getOtherUserId(link, myId) {
+  if (!link || !myId) return "";
+  if (link.user_id === myId) return link.partner_user_id || "";
+  if (link.partner_user_id === myId) return link.user_id || "";
+  return link.partner_user_id || link.user_id || "";
+}
+
 export default function ProfileScreen({ session, supabase }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -169,6 +222,17 @@ export default function ProfileScreen({ session, supabase }) {
   const searchParams = new URLSearchParams(location.search || "");
   const shouldStartEditing = searchParams.get("edit") === "1";
   const [editing, setEditing] = useState(shouldStartEditing);
+
+  // Connections state
+  const [connLoading, setConnLoading] = useState(false);
+  const [connErr, setConnErr] = useState("");
+  const [connections, setConnections] = useState([]); // { link, profile, signedAvatarUrl }
+  const [kinksModal, setKinksModal] = useState(null); // { name, topKinks, placeholderOnly }
+
+  // Partner search state
+  const [partnerQuery, setPartnerQuery] = useState("");
+  const [partnerSearchBusy, setPartnerSearchBusy] = useState(false);
+  const [partnerResults, setPartnerResults] = useState([]);
 
   useEffect(() => {
     setEditing(shouldStartEditing);
@@ -213,7 +277,6 @@ export default function ProfileScreen({ session, supabase }) {
         }
       } catch (_e) {
         if (!cancelled) {
-          // Keep whatever we had if possible (prevents flicker on transient failures)
           const fallback = getCachedAvatarUrl(path);
           if (fallback) setSignedAvatarUrl(fallback);
           else setSignedAvatarUrl("");
@@ -254,7 +317,6 @@ export default function ProfileScreen({ session, supabase }) {
       setLocalOk("Saved.");
       setEditing(false);
 
-      // Strip edit params after save so refresh stays clean
       if (location.search) {
         navigate("/profile", { replace: true });
       }
@@ -274,7 +336,6 @@ export default function ProfileScreen({ session, supabase }) {
   function handleCancelEdit() {
     setLocalErr("");
     setLocalOk("");
-    // revert drafts to stored profile values
     setDisplayName(profile?.display_name || "");
     setBio(profile?.bio || "");
     setEditing(false);
@@ -318,13 +379,149 @@ export default function ProfileScreen({ session, supabase }) {
   const busy = loading || uploading || busySave;
   const showSkeleton = loading && !profile;
 
-  // Onboarding label: avoid "Not complete" flash by not showing until profile is loaded.
   const onboardingLabel = profile ? (profile.onboarding_complete ? "Complete" : "Not complete") : "";
+
+  // ---------- Connections helpers ----------
+
+  async function signAvatarForPath(path) {
+    const p = String(path || "").trim();
+    if (!p || !supabase) return "";
+
+    const cached = getCachedAvatarUrl(p);
+    if (cached) return cached;
+
+    try {
+      const ttl = 60 * 60;
+      const { data, error: sErr } = await supabase.storage.from("avatars").createSignedUrl(p, ttl);
+      if (sErr) throw sErr;
+      const url = data?.signedUrl || "";
+      if (url) setCachedAvatarUrl(p, url, ttl);
+      return url;
+    } catch {
+      return "";
+    }
+  }
+
+  async function loadConnections() {
+    if (!supabase || !userId) return;
+    setConnLoading(true);
+    setConnErr("");
+
+    try {
+      const links = await fetchPartnerLinks({ supabase });
+
+      // Keep only accepted + not revoked (defensive: depends on your schema)
+      const accepted = (links || []).filter((l) => {
+        const status = String(l.status || "").toLowerCase();
+        if (status && status !== "accepted") return false;
+        if (l.revoked_at) return false;
+        if (!l.accepted_at && status !== "accepted") return false;
+        return true;
+      });
+
+      const partnerIds = Array.from(
+        new Set(
+          accepted
+            .map((l) => getOtherUserId(l, userId))
+            .filter(Boolean)
+        )
+      );
+
+      let profilesById = {};
+      if (partnerIds.length) {
+        const { data, error: pErr } = await supabase
+          .from("profiles")
+          .select("id, display_name, bio, avatar_url")
+          .in("id", partnerIds);
+
+        if (pErr) throw pErr;
+
+        profilesById = {};
+        for (const row of data || []) profilesById[row.id] = row;
+      }
+
+      const rows = [];
+      for (const link of accepted) {
+        const otherId = getOtherUserId(link, userId);
+        const p = profilesById[otherId] || null;
+        const signed = p?.avatar_url ? await signAvatarForPath(p.avatar_url) : "";
+        rows.push({
+          link,
+          profile: p,
+          signedAvatarUrl: signed,
+          otherId,
+        });
+      }
+
+      // stable sort: by display_name, then id
+      rows.sort((a, b) => {
+        const an = String(a.profile?.display_name || "").toLowerCase();
+        const bn = String(b.profile?.display_name || "").toLowerCase();
+        if (an && bn && an !== bn) return an.localeCompare(bn);
+        return String(a.otherId || "").localeCompare(String(b.otherId || ""));
+      });
+
+      setConnections(rows);
+    } catch (e) {
+      setConnErr(e?.message || "Failed to load connections.");
+      setConnections([]);
+    } finally {
+      setConnLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadConnections();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
+
+  // ---------- Partner search (UI-only scaffold) ----------
+
+  async function doSearchPartners() {
+    const q = String(partnerQuery || "").trim();
+    if (!q || !supabase || !userId) return;
+
+    setPartnerSearchBusy(true);
+    try {
+      // NOTE: This relies on profiles SELECT being allowed by RLS.
+      // If it isn’t, we’ll replace this with a dedicated RPC/view later.
+      const { data, error: sErr } = await supabase
+        .from("profiles")
+        .select("id, display_name, bio, avatar_url")
+        .ilike("display_name", `%${q}%`)
+        .limit(10);
+
+      if (sErr) throw sErr;
+
+      const existing = new Set((connections || []).map((c) => c.otherId));
+      const cleaned = (data || [])
+        .filter((r) => r.id !== userId)
+        .filter((r) => !existing.has(r.id));
+
+      setPartnerResults(cleaned);
+    } catch (e) {
+      setPartnerResults([]);
+      setConnErr(e?.message || "Partner search failed.");
+    } finally {
+      setPartnerSearchBusy(false);
+    }
+  }
+
+  // ---------- Top kinks (read-only for now) ----------
+
+  const topKinks = useMemo(() => {
+    // Data contract we’ll ship: profiles.top_kinks is text[] (0..5).
+    // For now, if it exists it will render; if not, it stays hidden.
+    const v = profile?.top_kinks;
+    if (!v) return [];
+    if (Array.isArray(v)) return v.filter(Boolean).slice(0, 5);
+    return [];
+  }, [profile?.top_kinks]);
 
   return (
     <div>
       <Page style={{ display: "grid", gap: 14 }}>
-        {/* Contextual actions row (Profile keeps sign out; no TopBar; no back) */}
+        {/* Actions row */}
         <div
           style={{
             display: "flex",
@@ -384,6 +581,7 @@ export default function ProfileScreen({ session, supabase }) {
           </div>
         ) : null}
 
+        {/* Identity card */}
         <div
           style={{
             display: "grid",
@@ -432,7 +630,6 @@ export default function ProfileScreen({ session, supabase }) {
               </SmallButton>
             </div>
 
-            {/* Only show onboarding status once we actually have a profile row */}
             {profile ? (
               <div style={{ fontSize: 12, opacity: 0.6 }}>
                 Onboarding: <b>{onboardingLabel}</b>
@@ -443,7 +640,7 @@ export default function ProfileScreen({ session, supabase }) {
           <input ref={fileRef} type="file" accept="image/*" onChange={handleAvatarFile} style={{ display: "none" }} />
         </div>
 
-        {/* Edit fields */}
+        {/* Display fields (view/edit) */}
         {editing ? (
           <div style={{ display: "grid", gap: 12 }}>
             <Field label="Display name">
@@ -491,7 +688,208 @@ export default function ProfileScreen({ session, supabase }) {
           </div>
         )}
 
-        {/* Avoid showing the onboarding CTA until profile is loaded, otherwise it flashes */}
+        {/* Top kinks (hidden if empty in view mode) */}
+        {topKinks.length ? (
+          <Card
+            title="Top kinks"
+            subtitle="Shown to connected partners"
+            right={
+              <SmallButton asLink to="/profile/kinks" title="Edit kink preferences">
+                Edit
+              </SmallButton>
+            }
+          >
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {topKinks.map((k) => (
+                <MiniPill key={k}>{k}</MiniPill>
+              ))}
+            </div>
+          </Card>
+        ) : editing ? (
+          <Card
+            title="Top kinks"
+            subtitle="Optional. Pick up to 5 from your kink list. Hidden if empty."
+            right={
+              <SmallButton asLink to="/profile/kinks" title="Open kink list">
+                Open kink list
+              </SmallButton>
+            }
+          >
+            <div style={{ fontSize: 13, opacity: 0.75, lineHeight: 1.35 }}>
+              Coming next: you’ll be able to choose 0–5 “Top kinks” from your existing kink list and reorder them.
+              Until that’s shipped, this stays hidden in view mode when empty.
+            </div>
+          </Card>
+        ) : null}
+
+        {/* Connections */}
+        <Card
+          title="Connections"
+          subtitle="Partners you’re connected to"
+          right={
+            <SmallButton onClick={loadConnections} disabled={connLoading} title="Refresh connections">
+              {connLoading ? "Loading..." : "Refresh"}
+            </SmallButton>
+          }
+        >
+          {/* Search */}
+          <div style={{ display: "grid", gap: 8 }}>
+            <div style={{ fontSize: 12, opacity: 0.7, fontWeight: 750 }}>Find a partner</div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <Input
+                value={partnerQuery}
+                onChange={(e) => setPartnerQuery(e.target.value)}
+                placeholder="Search by display name"
+              />
+              <SmallButton onClick={doSearchPartners} disabled={partnerSearchBusy || !partnerQuery.trim()}>
+                {partnerSearchBusy ? "Searching..." : "Search"}
+              </SmallButton>
+            </div>
+
+            {partnerResults.length ? (
+              <div style={{ display: "grid", gap: 8, marginTop: 6 }}>
+                {partnerResults.map((r) => (
+                  <div
+                    key={r.id}
+                    style={{
+                      padding: 10,
+                      borderRadius: 12,
+                      border: "1px solid rgba(255,255,255,0.10)",
+                      background: "rgba(0,0,0,0.20)",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: 10,
+                      alignItems: "center",
+                    }}
+                  >
+                    <div style={{ display: "grid", gap: 2 }}>
+                      <div style={{ fontWeight: 850 }}>{r.display_name || shortId(r.id)}</div>
+                      <div style={{ fontSize: 12, opacity: 0.65 }}>{r.bio || "—"}</div>
+                    </div>
+                    <SmallButton disabled title="Connection requests are next">
+                      Connect
+                    </SmallButton>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            <div style={{ fontSize: 12, opacity: 0.6, lineHeight: 1.35 }}>
+              Note: “Connect” will become a real request/accept flow (no codes). This search may be constrained by RLS — if
+              it fails, we’ll implement a dedicated safe lookup endpoint.
+            </div>
+          </div>
+
+          <div style={{ height: 12 }} />
+
+          {/* Connected partners list */}
+          {connErr ? (
+            <div
+              style={{
+                padding: 10,
+                borderRadius: 12,
+                border: "1px solid rgba(255,80,80,0.30)",
+                background: "rgba(255,80,80,0.10)",
+                fontSize: 13,
+              }}
+            >
+              {connErr}
+            </div>
+          ) : null}
+
+          {connLoading ? (
+            <div style={{ opacity: 0.75, fontSize: 13 }}>Loading connections…</div>
+          ) : connections.length ? (
+            <div style={{ display: "grid", gap: 10 }}>
+              {connections.map((c) => {
+                const name = c.profile?.display_name || shortId(c.otherId);
+                const avatar = c.signedAvatarUrl || "";
+                const initials2 = String(name || "U").slice(0, 1).toUpperCase();
+
+                return (
+                  <div
+                    key={c.otherId}
+                    style={{
+                      padding: 10,
+                      borderRadius: 12,
+                      border: "1px solid rgba(255,255,255,0.10)",
+                      background: "rgba(0,0,0,0.20)",
+                      display: "grid",
+                      gap: 10,
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+                      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                        <div
+                          style={{
+                            width: 40,
+                            height: 40,
+                            borderRadius: 999,
+                            overflow: "hidden",
+                            border: "1px solid rgba(255,255,255,0.12)",
+                            background: "rgba(255,255,255,0.04)",
+                            display: "grid",
+                            placeItems: "center",
+                            fontWeight: 900,
+                          }}
+                        >
+                          {avatar ? (
+                            <img
+                              src={avatar}
+                              alt="Avatar"
+                              style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                            />
+                          ) : (
+                            initials2
+                          )}
+                        </div>
+
+                        <div style={{ display: "grid", gap: 2 }}>
+                          <div style={{ fontWeight: 900 }}>{name}</div>
+                          <div style={{ fontSize: 12, opacity: 0.65 }}>Connected</div>
+                        </div>
+                      </div>
+
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                        <SmallButton
+                          onClick={() => {
+                            // For now, we show a placeholder modal.
+                            // Next step: pull their kink list + top kinks respecting visibility rules.
+                            setKinksModal({
+                              name,
+                              topKinks: [],
+                              placeholderOnly: true,
+                            });
+                          }}
+                          title="View kink visibility"
+                        >
+                          View kinks
+                        </SmallButton>
+
+                        <SmallButton
+                          disabled
+                          title="Coming next: list of scenes you’ve shared with this partner"
+                        >
+                          Shared scenes
+                        </SmallButton>
+                      </div>
+                    </div>
+
+                    {c.profile?.bio ? (
+                      <div style={{ fontSize: 12, opacity: 0.7, lineHeight: 1.35 }}>{c.profile.bio}</div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div style={{ opacity: 0.75, fontSize: 13 }}>
+              No connections yet. Use search to find a partner and send a request (next step).
+            </div>
+          )}
+        </Card>
+
+        {/* Onboarding CTA */}
         {profile && !profile.onboarding_complete ? (
           <div
             style={{
@@ -513,6 +911,55 @@ export default function ProfileScreen({ session, supabase }) {
           </div>
         ) : null}
       </Page>
+
+      {/* Simple modal (kinks placeholder) */}
+      {kinksModal ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 9999,
+            background: "rgba(0,0,0,0.72)",
+            display: "grid",
+            placeItems: "center",
+            padding: 16,
+          }}
+          onClick={() => setKinksModal(null)}
+        >
+          <div
+            style={{
+              width: "100%",
+              maxWidth: 520,
+              borderRadius: 16,
+              border: "1px solid rgba(255,255,255,0.12)",
+              background: "rgba(20,20,28,0.96)",
+              padding: 14,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+              <div>
+                <div style={{ fontWeight: 950 }}>{kinksModal.name}</div>
+                <div style={{ fontSize: 12, opacity: 0.65 }}>Preferences (visibility rules apply)</div>
+              </div>
+              <SmallButton onClick={() => setKinksModal(null)}>Close</SmallButton>
+            </div>
+
+            <div style={{ height: 12 }} />
+
+            <div style={{ fontSize: 13, opacity: 0.8, lineHeight: 1.4 }}>
+              This will show their Top kinks + kink list sections once we ship:
+              <ul style={{ margin: "8px 0 0 18px", opacity: 0.85 }}>
+                <li>Visibility toggles (both sides)</li>
+                <li>Shared display of kink lists</li>
+                <li>Top 5 kinks surfaced as pills</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
