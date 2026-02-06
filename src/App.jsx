@@ -17,7 +17,6 @@ import ActionVocabularyScreen from "./screens/profile/ActionVocabularyScreen";
 import KinkPreferencesScreen from "./screens/KinkPreferencesScreen";
 
 import ProfileScreen from "./screens/ProfileScreen";
-import PartnerDebugScreen from "./screens/profile/PartnerDebugScreen";
 
 import { fetchScenes } from "./lib/scenesApi";
 import { fetchToolVault, fetchUserTools } from "./lib/toolsApi";
@@ -388,12 +387,6 @@ function AuthedShell({ session }) {
             <Route
               path="/profile/kinks"
               element={<KinkPreferencesScreen supabase={supabase} session={session} mode="profile" />}
-            />
-
-            {/* Debug (hidden route) */}
-            <Route
-              path="/debug/partners"
-              element={<PartnerDebugScreen supabase={supabase} session={session} />}
             />
 
             {/* Onboarding */}
