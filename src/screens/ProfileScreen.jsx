@@ -1,23 +1,22 @@
 // src/screens/ProfileScreen.jsx
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
-import { SmallButton } from "../components/routesUi";
 import Page from "../components/Page";
+import { SmallButton } from "../components/routesUi";
 import { useAvatarUpload } from "../hooks/useAvatarUpload";
 import { useProfile } from "../hooks/useProfile";
+import { useToast } from "../ui/ToastContext.jsx";
 import {
   acceptPartnerRequest,
   createPartnerRequest,
   fetchPartnerLinks,
+  fetchPartnerRequests,
 } from "../lib/partnersApi";
+import { supabase as defaultSupabase } from "../lib/supabaseClient";
 
-/**
- * Signed avatar URL cache (localStorage) — avoid flicker.
- */
 const AVATAR_URL_LS_KEY = "scenebuilder.avatarSignedUrlCache.v1";
 
-let avatarSignedUrlCache = {}; // [path]: { url, expiresAtMs }
+let avatarSignedUrlCache = {};
 
 function readAvatarCacheFromStorage() {
   try {
@@ -57,7 +56,9 @@ function writeAvatarCacheToStorage() {
   }
 }
 
-if (typeof window !== "undefined") readAvatarCacheFromStorage();
+if (typeof window !== "undefined") {
+  readAvatarCacheFromStorage();
+}
 
 function getCachedAvatarUrl(path) {
   const key = String(path || "").trim();
@@ -75,30 +76,6 @@ function setCachedAvatarUrl(path, url, ttlSeconds) {
   const expiresAtMs = Date.now() + (safeTtl - 30) * 1000;
   avatarSignedUrlCache[key] = { url: String(url || ""), expiresAtMs };
   writeAvatarCacheToStorage();
-}
-
-function Card({ children, title, subtitle, right }) {
-  return (
-    <div
-      style={{
-        padding: 12,
-        borderRadius: 14,
-        border: "1px solid rgba(255,255,255,0.10)",
-        background: "rgba(255,255,255,0.03)",
-      }}
-    >
-      {(title || subtitle || right) ? (
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
-          <div style={{ display: "grid", gap: 2 }}>
-            {title ? <div style={{ fontWeight: 900 }}>{title}</div> : null}
-            {subtitle ? <div style={{ fontSize: 12, opacity: 0.65, lineHeight: 1.3 }}>{subtitle}</div> : null}
-          </div>
-          {right ? <div>{right}</div> : null}
-        </div>
-      ) : null}
-      {children}
-    </div>
-  );
 }
 
 function Field({ label, children, hint }) {
@@ -149,6 +126,45 @@ function TextArea(props) {
   );
 }
 
+function SkeletonText({ width = "70%", height = 12 }) {
+  return (
+    <div
+      style={{
+        width,
+        height,
+        borderRadius: 999,
+        background: "rgba(255,255,255,0.07)",
+      }}
+    />
+  );
+}
+
+function Card({ children, title, subtitle, right }) {
+  return (
+    <div
+      style={{
+        padding: 12,
+        borderRadius: 14,
+        border: "1px solid rgba(255,255,255,0.10)",
+        background: "rgba(255,255,255,0.03)",
+      }}
+    >
+      {title || subtitle || right ? (
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
+          <div style={{ display: "grid", gap: 2 }}>
+            {title ? <div style={{ fontWeight: 900 }}>{title}</div> : null}
+            {subtitle ? (
+              <div style={{ fontSize: 12, opacity: 0.65, lineHeight: 1.3 }}>{subtitle}</div>
+            ) : null}
+          </div>
+          {right ? <div>{right}</div> : null}
+        </div>
+      ) : null}
+      {children}
+    </div>
+  );
+}
+
 function MiniPill({ children }) {
   return (
     <span
@@ -182,55 +198,48 @@ function getOtherUserId(link, myId) {
   return link.partner_user_id || link.user_id || "";
 }
 
-function normalizeUsername(v) {
-  // allow mixed case, 0-9, underscore. No spaces.
-  return String(v || "").replace(/\s+/g, "");
-}
-
-function validateUsername(v) {
-  const s = normalizeUsername(v);
-  if (!s) return { ok: true, msg: "" }; // allow empty (not set yet)
-  if (s.length < 3) return { ok: false, msg: "Min 3 characters." };
-  if (s.length > 24) return { ok: false, msg: "Max 24 characters." };
-  if (!/^[A-Za-z0-9_]+$/.test(s)) return { ok: false, msg: "Only A–Z a–z 0–9 and underscore." };
-  return { ok: true, msg: "" };
+function getClient(supabase) {
+  return supabase || defaultSupabase;
 }
 
 export default function ProfileScreen({ session, supabase }) {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const userId = session?.user?.id;
+  const toast = useToast();
+  const notify = (message, opts) => {
+    try {
+      toast?.showToast?.(message, opts);
+    } catch {
+      // ignore
+    }
+  };
 
-  const { profile, loading, error, updateProfile } = useProfile({ supabase, userId });
-  const { uploadAvatar, uploading } = useAvatarUpload({ supabase, userId });
+  const client = getClient(supabase);
+
+  const userId = session?.user?.id;
+  const { profile, loading, error, updateProfile } = useProfile({ supabase: client, userId });
+  const { uploadAvatar, uploading } = useAvatarUpload({ supabase: client, userId });
 
   const fileRef = useRef(null);
 
-  const [editing, setEditing] = useState(false);
+  const [displayName, setDisplayName] = useState("");
+  const [bio, setBio] = useState("");
+  const [signedAvatarUrl, setSignedAvatarUrl] = useState("");
   const [busySave, setBusySave] = useState(false);
   const [localErr, setLocalErr] = useState("");
   const [localOk, setLocalOk] = useState("");
 
-  const [displayName, setDisplayName] = useState("");
-  const [bio, setBio] = useState("");
-  const [username, setUsername] = useState("");
+  const [editing, setEditing] = useState(false);
 
-  const [signedAvatarUrl, setSignedAvatarUrl] = useState("");
-
-  // Connections
+  // Connections state
   const [connLoading, setConnLoading] = useState(false);
   const [connErr, setConnErr] = useState("");
-  const [acceptedConnections, setAcceptedConnections] = useState([]); // enriched
-  const [incomingRequests, setIncomingRequests] = useState([]); // partner_links rows
+  const [acceptedConnections, setAcceptedConnections] = useState([]); // { link, profile, signedAvatarUrl, otherId }
+  const [kinksModal, setKinksModal] = useState(null);
 
-  // Partner search (username)
+  // Partner search state
   const [partnerQuery, setPartnerQuery] = useState("");
   const [partnerSearchBusy, setPartnerSearchBusy] = useState(false);
   const [partnerResults, setPartnerResults] = useState([]);
-
-  // Username availability
-  const [usernameBusy, setUsernameBusy] = useState(false);
-  const [usernameStatus, setUsernameStatus] = useState(""); // "Available" / "Taken" / error
+  const [partnerSearchNote, setPartnerSearchNote] = useState("");
 
   const initials = useMemo(() => {
     const base = (profile?.display_name || session?.user?.email || "U").trim();
@@ -240,22 +249,13 @@ export default function ProfileScreen({ session, supabase }) {
   useEffect(() => {
     setDisplayName(profile?.display_name || "");
     setBio(profile?.bio || "");
-    setUsername(profile?.username || "");
-  }, [profile?.display_name, profile?.bio, profile?.username]);
+  }, [profile?.display_name, profile?.bio]);
 
-  // Start edit if /profile?edit=1
-  useEffect(() => {
-    const sp = new URLSearchParams(location.search || "");
-    const shouldStartEditing = sp.get("edit") === "1";
-    setEditing(shouldStartEditing);
-  }, [location.search]);
-
-  // Signed avatar URL: use cache immediately, refresh if needed.
   useEffect(() => {
     let cancelled = false;
 
     async function run(path) {
-      if (!supabase) return;
+      if (!client) return;
 
       const cached = getCachedAvatarUrl(path);
       if (cached) {
@@ -265,7 +265,7 @@ export default function ProfileScreen({ session, supabase }) {
 
       try {
         const ttl = 60 * 60;
-        const { data, error: sErr } = await supabase.storage.from("avatars").createSignedUrl(path, ttl);
+        const { data, error: sErr } = await client.storage.from("avatars").createSignedUrl(path, ttl);
         if (sErr) throw sErr;
 
         const nextUrl = data?.signedUrl || "";
@@ -280,7 +280,8 @@ export default function ProfileScreen({ session, supabase }) {
       } catch {
         if (!cancelled) {
           const fallback = getCachedAvatarUrl(path);
-          setSignedAvatarUrl(fallback || "");
+          if (fallback) setSignedAvatarUrl(fallback);
+          else setSignedAvatarUrl("");
         }
       }
     }
@@ -294,13 +295,34 @@ export default function ProfileScreen({ session, supabase }) {
     }
 
     run(path);
+
     return () => {
       cancelled = true;
     };
-  }, [supabase, profile?.avatar_url]);
+  }, [client, profile?.avatar_url]);
 
   async function signOut() {
-    await supabase.auth.signOut();
+    await client.auth.signOut();
+  }
+
+  async function handleSave() {
+    setLocalErr("");
+    setLocalOk("");
+    setBusySave(true);
+
+    try {
+      await updateProfile({
+        display_name: (displayName || "").slice(0, 120),
+        bio: (bio || "").slice(0, 140),
+      });
+
+      setLocalOk("Saved.");
+      setEditing(false);
+    } catch (e) {
+      setLocalErr(e?.message || "Save failed.");
+    } finally {
+      setBusySave(false);
+    }
   }
 
   function handleStartEdit() {
@@ -314,51 +336,7 @@ export default function ProfileScreen({ session, supabase }) {
     setLocalOk("");
     setDisplayName(profile?.display_name || "");
     setBio(profile?.bio || "");
-    setUsername(profile?.username || "");
     setEditing(false);
-
-    if (location.search) navigate("/profile", { replace: true });
-  }
-
-  async function handleSave() {
-    setLocalErr("");
-    setLocalOk("");
-    setBusySave(true);
-
-    try {
-      const uname = normalizeUsername(username);
-      const v = validateUsername(uname);
-      if (!v.ok) throw new Error(v.msg);
-
-      // If username is set, check availability via RPC.
-      // Requires SQL in this message to be installed.
-      if (uname && uname !== (profile?.username || "")) {
-        setUsernameBusy(true);
-        setUsernameStatus("");
-        const { data, error: uErr } = await supabase.rpc("is_username_available", {
-          p_username: uname,
-        });
-        if (uErr) throw uErr;
-        if (!data) throw new Error("Username is already taken.");
-      }
-
-      await updateProfile({
-        display_name: (displayName || "").slice(0, 120),
-        bio: (bio || "").slice(0, 140),
-        username: uname || null,
-      });
-
-      setLocalOk("Saved.");
-      setEditing(false);
-      setUsernameStatus("");
-
-      if (location.search) navigate("/profile", { replace: true });
-    } catch (e) {
-      setLocalErr(e?.message || "Save failed.");
-    } finally {
-      setBusySave(false);
-      setUsernameBusy(false);
-    }
   }
 
   function handlePickAvatar() {
@@ -379,7 +357,7 @@ export default function ProfileScreen({ session, supabase }) {
       await updateProfile({ avatar_url: path });
 
       const ttl = 60 * 60;
-      const { data } = await supabase.storage.from("avatars").createSignedUrl(path, ttl);
+      const { data } = await client.storage.from("avatars").createSignedUrl(path, ttl);
       const nextUrl = data?.signedUrl || "";
       setSignedAvatarUrl(nextUrl);
       if (nextUrl) setCachedAvatarUrl(path, nextUrl, ttl);
@@ -392,16 +370,19 @@ export default function ProfileScreen({ session, supabase }) {
     }
   }
 
+  const busy = loading || uploading || busySave;
+  const showSkeleton = loading && !profile;
+
   async function signAvatarForPath(path) {
     const p = String(path || "").trim();
-    if (!p || !supabase) return "";
+    if (!p || !client) return "";
 
     const cached = getCachedAvatarUrl(p);
     if (cached) return cached;
 
     try {
       const ttl = 60 * 60;
-      const { data, error: sErr } = await supabase.storage.from("avatars").createSignedUrl(p, ttl);
+      const { data, error: sErr } = await client.storage.from("avatars").createSignedUrl(p, ttl);
       if (sErr) throw sErr;
       const url = data?.signedUrl || "";
       if (url) setCachedAvatarUrl(p, url, ttl);
@@ -412,44 +393,36 @@ export default function ProfileScreen({ session, supabase }) {
   }
 
   async function loadConnections() {
-    if (!supabase || !userId) return;
+    if (!client || !userId) return;
     setConnLoading(true);
     setConnErr("");
 
     try {
-      const links = await fetchPartnerLinks({ supabase });
+      const links = await fetchPartnerLinks({ supabase: client });
 
-      const accepted = (links || []).filter((l) => String(l.status || "").toLowerCase() === "accepted" && !l.revoked_at);
-      const pending = (links || []).filter((l) => String(l.status || "").toLowerCase() === "pending" && !l.revoked_at);
-
-      // incoming = pending where I am NOT the initiator
-      const incoming = pending.filter((l) => l.initiated_by_id !== userId);
-      setIncomingRequests(incoming);
+      const accepted = (links || []).filter((l) => {
+        const status = String(l.status || "").toLowerCase();
+        if (status && status !== "accepted") return false;
+        if (l.revoked_at) return false;
+        if (!l.accepted_at && status !== "accepted") return false;
+        return true;
+      });
 
       const partnerIds = Array.from(
-        new Set(
-          accepted
-            .map((l) => getOtherUserId(l, userId))
-            .filter(Boolean)
-        )
+        new Set(accepted.map((l) => getOtherUserId(l, userId)).filter(Boolean))
       );
 
-      // profiles are RLS-locked; we fetch via the RPC search only when searching.
-      // For connections list, we can still show “Unknown” until we add a safe lookup RPC by ids later.
-      // BUT: because you already want to show kink stuff later, we WILL add that safe lookup next.
-      //
-      // For now, keep a best-effort attempt: try selecting by ids; if RLS blocks, fall back.
       let profilesById = {};
       if (partnerIds.length) {
-        const { data, error: pErr } = await supabase
+        const { data, error: pErr } = await client
           .from("profiles")
-          .select("id, username, display_name, bio, avatar_url")
+          .select("id, display_name, bio, avatar_url")
           .in("id", partnerIds);
 
-        if (!pErr) {
-          profilesById = {};
-          for (const row of data || []) profilesById[row.id] = row;
-        }
+        if (pErr) throw pErr;
+
+        profilesById = {};
+        for (const row of data || []) profilesById[row.id] = row;
       }
 
       const rows = [];
@@ -466,8 +439,8 @@ export default function ProfileScreen({ session, supabase }) {
       }
 
       rows.sort((a, b) => {
-        const an = String(a.profile?.username || a.profile?.display_name || "").toLowerCase();
-        const bn = String(b.profile?.username || b.profile?.display_name || "").toLowerCase();
+        const an = String(a.profile?.display_name || "").toLowerCase();
+        const bn = String(b.profile?.display_name || "").toLowerCase();
         if (an && bn && an !== bn) return an.localeCompare(bn);
         return String(a.otherId || "").localeCompare(String(b.otherId || ""));
       });
@@ -476,7 +449,6 @@ export default function ProfileScreen({ session, supabase }) {
     } catch (e) {
       setConnErr(e?.message || "Failed to load connections.");
       setAcceptedConnections([]);
-      setIncomingRequests([]);
     } finally {
       setConnLoading(false);
     }
@@ -489,13 +461,12 @@ export default function ProfileScreen({ session, supabase }) {
 
   async function doSearchPartners() {
     const q = String(partnerQuery || "").trim();
-    if (!q || !supabase || !userId) return;
+    if (!q || !client || !userId) return;
 
     setPartnerSearchBusy(true);
-    setConnErr("");
+    setPartnerSearchNote("");
     try {
-      // Requires SQL RPC installed
-      const { data, error: sErr } = await supabase.rpc("search_profiles_by_username", {
+      const { data, error: sErr } = await client.rpc("search_profiles_by_username", {
         p_query: q,
         p_limit: 10,
       });
@@ -503,87 +474,24 @@ export default function ProfileScreen({ session, supabase }) {
       if (sErr) throw sErr;
 
       const existing = new Set((acceptedConnections || []).map((c) => c.otherId));
-      const cleaned = (data || [])
-        .filter((r) => r.id !== userId)
-        .filter((r) => !existing.has(r.id));
+      const cleaned = (data || []).filter((r) => r.id !== userId).filter((r) => !existing.has(r.id));
 
       setPartnerResults(cleaned);
+
+      if (!cleaned.length) {
+        if (Array.isArray(data) && data.length) {
+          setPartnerSearchNote("No new people to connect — you’re already connected to the matches found.");
+        } else {
+          setPartnerSearchNote("No matches found.");
+        }
+      }
     } catch (e) {
       setPartnerResults([]);
-      setConnErr(e?.message || "Partner search failed.");
+      setPartnerSearchNote(e?.message || "Partner search failed.");
     } finally {
       setPartnerSearchBusy(false);
     }
   }
-
-  async function doRequestConnect(targetUserId) {
-    if (!targetUserId) return;
-    setConnErr("");
-    setLocalOk("");
-    setLocalErr("");
-
-    try {
-      await createPartnerRequest(targetUserId, { supabase });
-      setLocalOk("Request sent.");
-      setPartnerResults([]);
-      setPartnerQuery("");
-      await loadConnections();
-    } catch (e) {
-      setConnErr(e?.message || "Failed to send request.");
-    }
-  }
-
-  async function doAcceptRequest(linkId) {
-    if (!linkId) return;
-    setConnErr("");
-    setLocalOk("");
-    setLocalErr("");
-
-    try {
-      await acceptPartnerRequest(linkId, { supabase });
-      setLocalOk("Connected.");
-      await loadConnections();
-    } catch (e) {
-      setConnErr(e?.message || "Failed to accept request.");
-    }
-  }
-
-  async function checkUsernameNow() {
-    const uname = normalizeUsername(username);
-    const v = validateUsername(uname);
-    if (!v.ok) {
-      setUsernameStatus(v.msg);
-      return;
-    }
-    if (!uname) {
-      setUsernameStatus("");
-      return;
-    }
-
-    setUsernameBusy(true);
-    setUsernameStatus("");
-    try {
-      const { data, error: uErr } = await supabase.rpc("is_username_available", {
-        p_username: uname,
-      });
-      if (uErr) throw uErr;
-
-      // If unchanged from current, treat as ok
-      if (uname === (profile?.username || "")) {
-        setUsernameStatus("✓ Looks good (unchanged).");
-      } else if (data) {
-        setUsernameStatus("✓ Available.");
-      } else {
-        setUsernameStatus("Taken.");
-      }
-    } catch (e) {
-      setUsernameStatus(e?.message || "Could not check availability.");
-    } finally {
-      setUsernameBusy(false);
-    }
-  }
-
-  const busy = loading || uploading || busySave;
 
   const topKinks = useMemo(() => {
     const v = profile?.top_kinks;
@@ -595,16 +503,7 @@ export default function ProfileScreen({ session, supabase }) {
   return (
     <div>
       <Page style={{ display: "grid", gap: 14 }}>
-        {/* Actions row */}
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 10,
-            flexWrap: "wrap",
-          }}
-        >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
             {!editing ? (
               <SmallButton onClick={handleStartEdit} disabled={busy} title="Edit profile">
@@ -656,117 +555,107 @@ export default function ProfileScreen({ session, supabase }) {
         ) : null}
 
         {/* Identity */}
-        <Card
-          title="Profile"
-          subtitle="Your identity + connections live here"
-          right={
-            <SmallButton asLink to="/profile/kinks" title="Edit kink preferences">
-              Kink preferences
-            </SmallButton>
-          }
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "96px 1fr",
+            gap: 14,
+            alignItems: "center",
+            padding: 12,
+            borderRadius: 14,
+            border: "1px solid rgba(255,255,255,0.10)",
+            background: "rgba(255,255,255,0.03)",
+          }}
         >
-          <div style={{ display: "grid", gridTemplateColumns: "96px 1fr", gap: 14, alignItems: "center" }}>
-            <div
-              style={{
-                width: 96,
-                height: 96,
-                borderRadius: 999,
-                border: "1px solid rgba(255,255,255,0.12)",
-                background: "rgba(255,255,255,0.04)",
-                overflow: "hidden",
-                display: "grid",
-                placeItems: "center",
-                fontSize: 28,
-                fontWeight: 900,
-              }}
-            >
-              {signedAvatarUrl ? (
-                <img src={signedAvatarUrl} alt="Avatar" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          <div
+            style={{
+              width: 96,
+              height: 96,
+              borderRadius: 999,
+              border: "1px solid rgba(255,255,255,0.12)",
+              background: "rgba(255,255,255,0.04)",
+              overflow: "hidden",
+              display: "grid",
+              placeItems: "center",
+              fontSize: 28,
+              fontWeight: 900,
+            }}
+          >
+            {signedAvatarUrl ? (
+              <img src={signedAvatarUrl} alt="Avatar" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            ) : (
+              initials
+            )}
+          </div>
+
+          <div style={{ display: "grid", gap: 8 }}>
+            <div style={{ fontSize: 13, opacity: 0.75 }}>
+              Signed in as <b>{session?.user?.email}</b>
+            </div>
+
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <SmallButton onClick={handlePickAvatar} disabled={busy} title="Change avatar">
+                {uploading ? "Uploading..." : "Change avatar"}
+              </SmallButton>
+
+              <SmallButton asLink to="/profile/kinks" title="Edit kink preferences">
+                Kink preferences
+              </SmallButton>
+            </div>
+          </div>
+
+          <input ref={fileRef} type="file" accept="image/*" onChange={handleAvatarFile} style={{ display: "none" }} />
+        </div>
+
+        {/* Display fields */}
+        {editing ? (
+          <div style={{ display: "grid", gap: 12 }}>
+            <Field label="Display name">
+              <Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="e.g. David" maxLength={120} />
+            </Field>
+
+            <Field label="Short bio" hint={`${(bio || "").length}/140`}>
+              <TextArea value={bio} onChange={(e) => setBio(e.target.value)} placeholder="Optional. Max 140 characters." maxLength={140} />
+            </Field>
+          </div>
+        ) : (
+          <div style={{ display: "grid", gap: 10, opacity: 0.9 }}>
+            <div>
+              <div style={{ fontSize: 12, opacity: 0.7, fontWeight: 700 }}>Display name</div>
+              {showSkeleton ? (
+                <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
+                  <SkeletonText width="55%" />
+                </div>
               ) : (
-                initials
+                <div style={{ marginTop: 4 }}>{profile?.display_name || "—"}</div>
               )}
             </div>
 
-            <div style={{ display: "grid", gap: 8 }}>
-              <div style={{ fontSize: 13, opacity: 0.75 }}>
-                Signed in as <b>{session?.user?.email}</b>
-              </div>
-
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <SmallButton onClick={handlePickAvatar} disabled={busy} title="Change avatar">
-                  {uploading ? "Uploading..." : "Change avatar"}
-                </SmallButton>
-              </div>
-            </div>
-
-            <input ref={fileRef} type="file" accept="image/*" onChange={handleAvatarFile} style={{ display: "none" }} />
-          </div>
-
-          <div style={{ height: 12 }} />
-
-          {/* Fields */}
-          {editing ? (
-            <div style={{ display: "grid", gap: 12 }}>
-              <Field label="Username" hint="A–Z a–z 0–9 underscore. 3–24 chars. Used for search + connections.">
-                <div style={{ display: "grid", gap: 8 }}>
-                  <Input
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    placeholder="e.g. DavidGordon_1"
-                    maxLength={24}
-                    autoCapitalize="none"
-                    autoCorrect="off"
-                  />
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                    <SmallButton onClick={checkUsernameNow} disabled={usernameBusy}>
-                      {usernameBusy ? "Checking..." : "Check availability"}
-                    </SmallButton>
-                    {usernameStatus ? <div style={{ fontSize: 12, opacity: 0.75 }}>{usernameStatus}</div> : null}
-                  </div>
+            <div>
+              <div style={{ fontSize: 12, opacity: 0.7, fontWeight: 700 }}>Bio</div>
+              {showSkeleton ? (
+                <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
+                  <SkeletonText width="88%" height={10} />
+                  <SkeletonText width="76%" height={10} />
                 </div>
-              </Field>
-
-              <Field label="Display name">
-                <Input
-                  value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
-                  placeholder="e.g. David"
-                  maxLength={120}
-                />
-              </Field>
-
-              <Field label="Short bio" hint={`${(bio || "").length}/140`}>
-                <TextArea
-                  value={bio}
-                  onChange={(e) => setBio(e.target.value)}
-                  placeholder="Optional. Max 140 characters."
-                  maxLength={140}
-                />
-              </Field>
-            </div>
-          ) : (
-            <div style={{ display: "grid", gap: 10, opacity: 0.92 }}>
-              <div>
-                <div style={{ fontSize: 12, opacity: 0.7, fontWeight: 700 }}>Username</div>
-                <div style={{ marginTop: 4 }}>{profile?.username || "—"}</div>
-              </div>
-
-              <div>
-                <div style={{ fontSize: 12, opacity: 0.7, fontWeight: 700 }}>Display name</div>
-                <div style={{ marginTop: 4 }}>{profile?.display_name || "—"}</div>
-              </div>
-
-              <div>
-                <div style={{ fontSize: 12, opacity: 0.7, fontWeight: 700 }}>Bio</div>
+              ) : (
                 <div style={{ marginTop: 4, opacity: 0.9 }}>{profile?.bio || "—"}</div>
-              </div>
+              )}
             </div>
-          )}
-        </Card>
+          </div>
+        )}
 
-        {/* Top kinks (placeholder until list ships) */}
+        {/* Top kinks */}
         {topKinks.length ? (
-          <Card title="Top kinks" subtitle="Shown to connected partners">
+          <Card
+            title="Top kinks"
+            subtitle="Shown to connected partners"
+            right={
+              <SmallButton asLink to="/profile/kinks" title="Edit kink preferences">
+                Edit
+              </SmallButton>
+            }
+          >
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {topKinks.map((k) => (
                 <MiniPill key={k}>{k}</MiniPill>
@@ -774,15 +663,7 @@ export default function ProfileScreen({ session, supabase }) {
             </div>
           </Card>
         ) : (
-          <Card
-            title="Top kinks"
-            subtitle="Optional. Hidden if empty."
-            right={
-              <SmallButton asLink to="/profile/kinks" title="Open kink preferences">
-                Open
-              </SmallButton>
-            }
-          >
+          <Card title="Top kinks" subtitle="Optional. Hidden if empty." right={<SmallButton asLink to="/profile/kinks">Open</SmallButton>}>
             <div style={{ fontSize: 13, opacity: 0.75, lineHeight: 1.35 }}>
               Next: pick 0–5 “Top kinks” from your kink list. For now this section is just a placeholder.
             </div>
@@ -799,64 +680,13 @@ export default function ProfileScreen({ session, supabase }) {
             </SmallButton>
           }
         >
-          {connErr ? (
-            <div
-              style={{
-                padding: 10,
-                borderRadius: 12,
-                border: "1px solid rgba(255,80,80,0.30)",
-                background: "rgba(255,80,80,0.10)",
-                fontSize: 13,
-                marginBottom: 10,
-              }}
-            >
-              {connErr}
-            </div>
-          ) : null}
-
-          {/* Incoming requests */}
-          {incomingRequests.length ? (
-            <div style={{ display: "grid", gap: 10, marginBottom: 14 }}>
-              <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 850 }}>Incoming requests</div>
-              {incomingRequests.map((r) => {
-                const otherId = getOtherUserId(r, userId);
-                return (
-                  <div
-                    key={r.id}
-                    style={{
-                      padding: 10,
-                      borderRadius: 12,
-                      border: "1px solid rgba(255,255,255,0.10)",
-                      background: "rgba(0,0,0,0.20)",
-                      display: "flex",
-                      justifyContent: "space-between",
-                      gap: 10,
-                      alignItems: "center",
-                    }}
-                  >
-                    <div style={{ display: "grid", gap: 2 }}>
-                      <div style={{ fontWeight: 850 }}>Request</div>
-                      <div style={{ fontSize: 12, opacity: 0.7 }}>
-                        From user: <span style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" }}>{shortId(otherId)}</span>
-                      </div>
-                    </div>
-                    <SmallButton onClick={() => doAcceptRequest(r.id)}>Accept</SmallButton>
-                  </div>
-                );
-              })}
-            </div>
-          ) : null}
-
-          {/* Search */}
           <div style={{ display: "grid", gap: 8 }}>
             <div style={{ fontSize: 12, opacity: 0.7, fontWeight: 750 }}>Find by username</div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
               <Input
                 value={partnerQuery}
-                onChange={(e) => setPartnerQuery(e.target.value)}
+                onChange={(e) => (setPartnerQuery(e.target.value), setPartnerSearchNote(""), setPartnerResults([]))}
                 placeholder="Search usernames (e.g. David)"
-                autoCapitalize="none"
-                autoCorrect="off"
               />
               <SmallButton onClick={doSearchPartners} disabled={partnerSearchBusy || !partnerQuery.trim()}>
                 {partnerSearchBusy ? "Searching..." : "Search"}
@@ -880,38 +710,48 @@ export default function ProfileScreen({ session, supabase }) {
                     }}
                   >
                     <div style={{ display: "grid", gap: 2 }}>
-                      <div style={{ fontWeight: 850 }}>
-                        {r.username ? `@${r.username}` : shortId(r.id)}{" "}
-                        <span style={{ opacity: 0.7, fontWeight: 700 }}>
-                          {r.display_name ? `• ${r.display_name}` : ""}
-                        </span>
-                      </div>
+                      <div style={{ fontWeight: 850 }}>{r.username || r.display_name || shortId(r.id)}</div>
                       <div style={{ fontSize: 12, opacity: 0.65 }}>{r.bio || "—"}</div>
                     </div>
-                    <SmallButton onClick={() => doRequestConnect(r.id)}>Connect</SmallButton>
+                    <SmallButton disabled title="Connection requests are next">
+                      Connect
+                    </SmallButton>
                   </div>
                 ))}
               </div>
             ) : null}
 
-            <div style={{ fontSize: 12, opacity: 0.6, lineHeight: 1.35, marginTop: 6 }}>
+            {partnerSearchNote ? (
+              <div style={{ fontSize: 12, opacity: 0.75, lineHeight: 1.35 }}>{partnerSearchNote}</div>
+            ) : null}
+
+            <div style={{ fontSize: 12, opacity: 0.6, lineHeight: 1.35 }}>
               Note: this uses a safe RPC (search by username) so we don’t weaken profiles RLS.
             </div>
           </div>
 
-          <div style={{ height: 14 }} />
+          <div style={{ height: 12 }} />
 
-          {/* Accepted list */}
+          {connErr ? (
+            <div
+              style={{
+                padding: 10,
+                borderRadius: 12,
+                border: "1px solid rgba(255,80,80,0.30)",
+                background: "rgba(255,80,80,0.10)",
+                fontSize: 13,
+              }}
+            >
+              {connErr}
+            </div>
+          ) : null}
+
           {connLoading ? (
             <div style={{ opacity: 0.75, fontSize: 13 }}>Loading connections…</div>
           ) : acceptedConnections.length ? (
             <div style={{ display: "grid", gap: 10 }}>
-              <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 850 }}>Connected</div>
               {acceptedConnections.map((c) => {
-                const name = c.profile?.username
-                  ? `@${c.profile.username}`
-                  : c.profile?.display_name || shortId(c.otherId);
-
+                const name = c.profile?.display_name || shortId(c.otherId);
                 const avatar = c.signedAvatarUrl || "";
                 const initials2 = String(name || "U").slice(0, 1).toUpperCase();
 
@@ -956,7 +796,13 @@ export default function ProfileScreen({ session, supabase }) {
                       </div>
                     </div>
 
-                    <SmallButton asLink to="/profile/kinks" title="Kinks are visible to partners once list ships">
+                    <SmallButton
+                      onClick={() => {
+                        setKinksModal({ name, topKinks: [], placeholderOnly: true });
+                        notify("Kinks view is placeholder for now.");
+                      }}
+                      title="View kink visibility"
+                    >
                       View kinks
                     </SmallButton>
                   </div>
@@ -964,12 +810,53 @@ export default function ProfileScreen({ session, supabase }) {
               })}
             </div>
           ) : (
-            <div style={{ opacity: 0.75, fontSize: 13 }}>
-              No connections yet. Search by username and send a request.
-            </div>
+            <div style={{ opacity: 0.75, fontSize: 13 }}>No connections yet.</div>
           )}
         </Card>
       </Page>
+
+      {kinksModal ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 9999,
+            background: "rgba(0,0,0,0.72)",
+            display: "grid",
+            placeItems: "center",
+            padding: 16,
+          }}
+          onClick={() => setKinksModal(null)}
+        >
+          <div
+            style={{
+              width: "100%",
+              maxWidth: 520,
+              borderRadius: 16,
+              border: "1px solid rgba(255,255,255,0.12)",
+              background: "rgba(20,20,28,0.96)",
+              padding: 14,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+              <div>
+                <div style={{ fontWeight: 950 }}>{kinksModal.name}</div>
+                <div style={{ fontSize: 12, opacity: 0.65 }}>Preferences (visibility rules apply)</div>
+              </div>
+              <SmallButton onClick={() => setKinksModal(null)}>Close</SmallButton>
+            </div>
+
+            <div style={{ height: 12 }} />
+
+            <div style={{ fontSize: 13, opacity: 0.8, lineHeight: 1.4 }}>
+              Placeholder: this will show their kink list once we ship it.
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
