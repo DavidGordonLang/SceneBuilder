@@ -1,22 +1,32 @@
 // src/screens/ProfileScreen.jsx
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import Page from "../components/Page";
+import { useLocation, useNavigate } from "react-router-dom";
 import { SmallButton } from "../components/routesUi";
+import Page from "../components/Page";
 import { useAvatarUpload } from "../hooks/useAvatarUpload";
 import { useProfile } from "../hooks/useProfile";
-import { useToast } from "../ui/ToastContext.jsx";
 import {
   acceptPartnerRequest,
   createPartnerRequest,
   fetchPartnerLinks,
-  fetchPartnerRequests,
+  revokePartnerLink,
 } from "../lib/partnersApi";
-import { supabase as defaultSupabase } from "../lib/supabaseClient";
+
+/**
+ * Cache signed avatar URLs by storage path.
+ * Avoids re-fetch + flicker every time Profile tab mounts.
+ *
+ * Enhancement:
+ * - persist the signed URL cache in localStorage so first open after reload
+ *   can be instant (as long as the signed URL hasn't expired).
+ */
 
 const AVATAR_URL_LS_KEY = "scenebuilder.avatarSignedUrlCache.v1";
 
-let avatarSignedUrlCache = {};
+let avatarSignedUrlCache = {
+  // [path]: { url, expiresAtMs }
+};
 
 function readAvatarCacheFromStorage() {
   try {
@@ -149,13 +159,11 @@ function Card({ children, title, subtitle, right }) {
         background: "rgba(255,255,255,0.03)",
       }}
     >
-      {title || subtitle || right ? (
+      {(title || subtitle || right) ? (
         <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
           <div style={{ display: "grid", gap: 2 }}>
             {title ? <div style={{ fontWeight: 900 }}>{title}</div> : null}
-            {subtitle ? (
-              <div style={{ fontSize: 12, opacity: 0.65, lineHeight: 1.3 }}>{subtitle}</div>
-            ) : null}
+            {subtitle ? <div style={{ fontSize: 12, opacity: 0.65, lineHeight: 1.3 }}>{subtitle}</div> : null}
           </div>
           {right ? <div>{right}</div> : null}
         </div>
@@ -198,64 +206,88 @@ function getOtherUserId(link, myId) {
   return link.partner_user_id || link.user_id || "";
 }
 
-function getClient(supabase) {
-  return supabase || defaultSupabase;
+function isAccepted(link) {
+  const s = String(link?.status || "").toLowerCase();
+  if (link?.revoked_at) return false;
+  if (s === "accepted") return true;
+  // defensive
+  return Boolean(link?.accepted_at) && s !== "pending";
+}
+
+function isPending(link) {
+  const s = String(link?.status || "").toLowerCase();
+  if (link?.revoked_at) return false;
+  return s === "pending";
 }
 
 export default function ProfileScreen({ session, supabase }) {
-  const toast = useToast();
-  const notify = (message, opts) => {
-    try {
-      toast?.showToast?.(message, opts);
-    } catch {
-      // ignore
-    }
-  };
-
-  const client = getClient(supabase);
+  const navigate = useNavigate();
+  const location = useLocation();
 
   const userId = session?.user?.id;
-  const { profile, loading, error, updateProfile } = useProfile({ supabase: client, userId });
-  const { uploadAvatar, uploading } = useAvatarUpload({ supabase: client, userId });
+  const { profile, loading, error, updateProfile } = useProfile({ supabase, userId });
+  const { uploadAvatar, uploading } = useAvatarUpload({ supabase, userId });
 
   const fileRef = useRef(null);
 
+  const [username, setUsername] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [bio, setBio] = useState("");
   const [signedAvatarUrl, setSignedAvatarUrl] = useState("");
+
   const [busySave, setBusySave] = useState(false);
   const [localErr, setLocalErr] = useState("");
   const [localOk, setLocalOk] = useState("");
 
-  const [editing, setEditing] = useState(false);
+  // View vs Edit mode
+  const searchParams = new URLSearchParams(location.search || "");
+  const shouldStartEditing = searchParams.get("edit") === "1";
+  const [editing, setEditing] = useState(shouldStartEditing);
+
+  // Username availability
+  const [usernameBusy, setUsernameBusy] = useState(false);
+  const [usernameStatus, setUsernameStatus] = useState(""); // "", "available", "taken", "invalid"
+  const [usernameStatusMsg, setUsernameStatusMsg] = useState("");
 
   // Connections state
   const [connLoading, setConnLoading] = useState(false);
   const [connErr, setConnErr] = useState("");
-  const [acceptedConnections, setAcceptedConnections] = useState([]); // { link, profile, signedAvatarUrl, otherId }
-  const [kinksModal, setKinksModal] = useState(null);
+  const [connOk, setConnOk] = useState("");
+  const [connections, setConnections] = useState([]); // { link, profile, signedAvatarUrl, otherId }
+
+  // Partner requests state
+  const [incomingRequests, setIncomingRequests] = useState([]);
+  const [outgoingRequests, setOutgoingRequests] = useState([]);
 
   // Partner search state
   const [partnerQuery, setPartnerQuery] = useState("");
   const [partnerSearchBusy, setPartnerSearchBusy] = useState(false);
   const [partnerResults, setPartnerResults] = useState([]);
-  const [partnerSearchNote, setPartnerSearchNote] = useState("");
 
-  const initials = useMemo(() => {
-    const base = (profile?.display_name || session?.user?.email || "U").trim();
-    return base.slice(0, 1).toUpperCase();
-  }, [profile?.display_name, session?.user?.email]);
+  // Kinks modal placeholder
+  const [kinksModal, setKinksModal] = useState(null);
 
   useEffect(() => {
+    setEditing(shouldStartEditing);
+  }, [shouldStartEditing]);
+
+  const initials = useMemo(() => {
+    const base = (profile?.display_name || profile?.username || session?.user?.email || "U").trim();
+    return base.slice(0, 1).toUpperCase();
+  }, [profile?.display_name, profile?.username, session?.user?.email]);
+
+  useEffect(() => {
+    setUsername(profile?.username || "");
     setDisplayName(profile?.display_name || "");
     setBio(profile?.bio || "");
-  }, [profile?.display_name, profile?.bio]);
+  }, [profile?.username, profile?.display_name, profile?.bio]);
 
+  // Signed avatar URL: use cache immediately, refresh only if needed.
   useEffect(() => {
     let cancelled = false;
 
     async function run(path) {
-      if (!client) return;
+      if (!supabase) return;
 
       const cached = getCachedAvatarUrl(path);
       if (cached) {
@@ -265,7 +297,7 @@ export default function ProfileScreen({ session, supabase }) {
 
       try {
         const ttl = 60 * 60;
-        const { data, error: sErr } = await client.storage.from("avatars").createSignedUrl(path, ttl);
+        const { data, error: sErr } = await supabase.storage.from("avatars").createSignedUrl(path, ttl);
         if (sErr) throw sErr;
 
         const nextUrl = data?.signedUrl || "";
@@ -277,7 +309,7 @@ export default function ProfileScreen({ session, supabase }) {
             setSignedAvatarUrl("");
           }
         }
-      } catch {
+      } catch (_e) {
         if (!cancelled) {
           const fallback = getCachedAvatarUrl(path);
           if (fallback) setSignedAvatarUrl(fallback);
@@ -299,10 +331,10 @@ export default function ProfileScreen({ session, supabase }) {
     return () => {
       cancelled = true;
     };
-  }, [client, profile?.avatar_url]);
+  }, [supabase, profile?.avatar_url]);
 
   async function signOut() {
-    await client.auth.signOut();
+    await supabase.auth.signOut();
   }
 
   async function handleSave() {
@@ -312,12 +344,17 @@ export default function ProfileScreen({ session, supabase }) {
 
     try {
       await updateProfile({
+        username: (username || "").slice(0, 24),
         display_name: (displayName || "").slice(0, 120),
         bio: (bio || "").slice(0, 140),
       });
 
       setLocalOk("Saved.");
       setEditing(false);
+
+      if (location.search) {
+        navigate("/profile", { replace: true });
+      }
     } catch (e) {
       setLocalErr(e?.message || "Save failed.");
     } finally {
@@ -334,9 +371,14 @@ export default function ProfileScreen({ session, supabase }) {
   function handleCancelEdit() {
     setLocalErr("");
     setLocalOk("");
+    setUsername(profile?.username || "");
     setDisplayName(profile?.display_name || "");
     setBio(profile?.bio || "");
     setEditing(false);
+
+    if (location.search) {
+      navigate("/profile", { replace: true });
+    }
   }
 
   function handlePickAvatar() {
@@ -357,7 +399,7 @@ export default function ProfileScreen({ session, supabase }) {
       await updateProfile({ avatar_url: path });
 
       const ttl = 60 * 60;
-      const { data } = await client.storage.from("avatars").createSignedUrl(path, ttl);
+      const { data } = await supabase.storage.from("avatars").createSignedUrl(path, ttl);
       const nextUrl = data?.signedUrl || "";
       setSignedAvatarUrl(nextUrl);
       if (nextUrl) setCachedAvatarUrl(path, nextUrl, ttl);
@@ -373,16 +415,20 @@ export default function ProfileScreen({ session, supabase }) {
   const busy = loading || uploading || busySave;
   const showSkeleton = loading && !profile;
 
+  const onboardingLabel = profile ? (profile.onboarding_complete ? "Complete" : "Not complete") : "";
+
+  // ---------- Connections helpers ----------
+
   async function signAvatarForPath(path) {
     const p = String(path || "").trim();
-    if (!p || !client) return "";
+    if (!p || !supabase) return "";
 
     const cached = getCachedAvatarUrl(p);
     if (cached) return cached;
 
     try {
       const ttl = 60 * 60;
-      const { data, error: sErr } = await client.storage.from("avatars").createSignedUrl(p, ttl);
+      const { data, error: sErr } = await supabase.storage.from("avatars").createSignedUrl(p, ttl);
       if (sErr) throw sErr;
       const url = data?.signedUrl || "";
       if (url) setCachedAvatarUrl(p, url, ttl);
@@ -392,41 +438,62 @@ export default function ProfileScreen({ session, supabase }) {
     }
   }
 
+  async function fetchPartnerProfilesByIds(ids) {
+    const list = Array.from(new Set((ids || []).filter(Boolean)));
+    if (!supabase || !userId || !list.length) return {};
+
+    // Safe RPC (SECURITY DEFINER) that only returns profiles for users you are actually connected to.
+    const { data, error: rErr } = await supabase.rpc("fetch_partner_profiles_by_ids", { p_ids: list });
+    if (rErr) throw rErr;
+
+    const map = {};
+    for (const row of data || []) {
+      map[row.id] = row;
+    }
+    return map;
+  }
+
   async function loadConnections() {
-    if (!client || !userId) return;
+    if (!supabase || !userId) return;
     setConnLoading(true);
     setConnErr("");
+    setConnOk("");
 
     try {
-      const links = await fetchPartnerLinks({ supabase: client });
+      const links = await fetchPartnerLinks({ supabase });
 
-      const accepted = (links || []).filter((l) => {
-        const status = String(l.status || "").toLowerCase();
-        if (status && status !== "accepted") return false;
-        if (l.revoked_at) return false;
-        if (!l.accepted_at && status !== "accepted") return false;
-        return true;
-      });
+      const acceptedConnections = (links || []).filter((l) => isAccepted(l));
+      const incoming = (links || []).filter((l) => isPending(l) && l.partner_user_id === userId);
+      const outgoing = (links || []).filter((l) => isPending(l) && l.user_id === userId);
+
+      setIncomingRequests(incoming);
+      setOutgoingRequests(outgoing);
 
       const partnerIds = Array.from(
-        new Set(accepted.map((l) => getOtherUserId(l, userId)).filter(Boolean))
+        new Set(
+          acceptedConnections
+            .map((l) => getOtherUserId(l, userId))
+            .filter(Boolean)
+        )
       );
 
+      const reqIds = Array.from(
+        new Set(
+          [...incoming, ...outgoing]
+            .map((l) => getOtherUserId(l, userId))
+            .filter(Boolean)
+        )
+      );
+
+      const allProfileIds = Array.from(new Set([...partnerIds, ...reqIds].filter(Boolean)));
+
       let profilesById = {};
-      if (partnerIds.length) {
-        const { data, error: pErr } = await client
-          .from("profiles")
-          .select("id, display_name, bio, avatar_url")
-          .in("id", partnerIds);
-
-        if (pErr) throw pErr;
-
-        profilesById = {};
-        for (const row of data || []) profilesById[row.id] = row;
+      if (allProfileIds.length) {
+        profilesById = await fetchPartnerProfilesByIds(allProfileIds);
       }
 
       const rows = [];
-      for (const link of accepted) {
+      for (const link of acceptedConnections) {
         const otherId = getOtherUserId(link, userId);
         const p = profilesById[otherId] || null;
         const signed = p?.avatar_url ? await signAvatarForPath(p.avatar_url) : "";
@@ -439,16 +506,18 @@ export default function ProfileScreen({ session, supabase }) {
       }
 
       rows.sort((a, b) => {
-        const an = String(a.profile?.display_name || "").toLowerCase();
-        const bn = String(b.profile?.display_name || "").toLowerCase();
+        const an = String(a.profile?.username || a.profile?.display_name || "").toLowerCase();
+        const bn = String(b.profile?.username || b.profile?.display_name || "").toLowerCase();
         if (an && bn && an !== bn) return an.localeCompare(bn);
         return String(a.otherId || "").localeCompare(String(b.otherId || ""));
       });
 
-      setAcceptedConnections(rows);
+      setConnections(rows);
     } catch (e) {
       setConnErr(e?.message || "Failed to load connections.");
-      setAcceptedConnections([]);
+      setConnections([]);
+      setIncomingRequests([]);
+      setOutgoingRequests([]);
     } finally {
       setConnLoading(false);
     }
@@ -459,40 +528,88 @@ export default function ProfileScreen({ session, supabase }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
+  async function handleRemoveConnection(linkId) {
+    if (!supabase || !linkId) return;
+    setConnErr("");
+    setConnOk("");
+
+    try {
+      await revokePartnerLink(String(linkId), { supabase });
+      setConnOk("Connection removed.");
+      await loadConnections();
+    } catch (e) {
+      setConnErr(e?.message || "Failed to remove connection.");
+    }
+  }
+
+  // ---------- Partner search ----------
+
   async function doSearchPartners() {
     const q = String(partnerQuery || "").trim();
-    if (!q || !client || !userId) return;
+    if (!q || !supabase || !userId) return;
 
     setPartnerSearchBusy(true);
-    setPartnerSearchNote("");
+    setConnErr("");
+    setConnOk("");
+
     try {
-      const { data, error: sErr } = await client.rpc("search_profiles_by_username", {
+      const { data, error: sErr } = await supabase.rpc("search_profiles_by_username", {
         p_query: q,
         p_limit: 10,
       });
 
       if (sErr) throw sErr;
 
-      const existing = new Set((acceptedConnections || []).map((c) => c.otherId));
-      const cleaned = (data || []).filter((r) => r.id !== userId).filter((r) => !existing.has(r.id));
+      const existing = new Set((connections || []).map((c) => c.otherId));
+      const existingPending = new Set(
+        [...incomingRequests, ...outgoingRequests].map((l) => getOtherUserId(l, userId)).filter(Boolean)
+      );
+
+      const cleaned = (data || [])
+        .filter((r) => r.id !== userId)
+        .filter((r) => !existing.has(r.id))
+        .filter((r) => !existingPending.has(r.id));
 
       setPartnerResults(cleaned);
-
-      if (!cleaned.length) {
-        if (Array.isArray(data) && data.length) {
-          setPartnerSearchNote("No new people to connect — you’re already connected to the matches found.");
-        } else {
-          setPartnerSearchNote("No matches found.");
-        }
-      }
     } catch (e) {
       setPartnerResults([]);
-      setPartnerSearchNote(e?.message || "Partner search failed.");
+      setConnErr(e?.message || "Partner search failed.");
     } finally {
       setPartnerSearchBusy(false);
     }
   }
 
+  async function sendRequest(partnerUserId) {
+    if (!supabase || !partnerUserId) return;
+    setConnErr("");
+    setConnOk("");
+
+    try {
+      await createPartnerRequest(partnerUserId, { supabase });
+      setConnOk("Request sent.");
+      setPartnerResults([]);
+      setPartnerQuery("");
+      await loadConnections();
+    } catch (e) {
+      setConnErr(e?.message || "Failed to send request.");
+    }
+  }
+
+  async function acceptRequest(linkId) {
+    if (!supabase || !linkId) return;
+    setConnErr("");
+    setConnOk("");
+
+    try {
+      await acceptPartnerRequest(linkId, { supabase });
+      setConnOk("Connected.");
+      await loadConnections();
+    } catch (e) {
+      setConnErr(e?.message || "Failed to accept request.");
+    }
+  }
+
+  // ---------- Top kinks (placeholder) ----------
   const topKinks = useMemo(() => {
     const v = profile?.top_kinks;
     if (!v) return [];
@@ -503,7 +620,16 @@ export default function ProfileScreen({ session, supabase }) {
   return (
     <div>
       <Page style={{ display: "grid", gap: 14 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        {/* Actions row */}
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 10,
+            flexWrap: "wrap",
+          }}
+        >
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
             {!editing ? (
               <SmallButton onClick={handleStartEdit} disabled={busy} title="Edit profile">
@@ -554,7 +680,7 @@ export default function ProfileScreen({ session, supabase }) {
           </div>
         ) : null}
 
-        {/* Identity */}
+        {/* Identity card */}
         <div
           style={{
             display: "grid",
@@ -602,24 +728,63 @@ export default function ProfileScreen({ session, supabase }) {
                 Kink preferences
               </SmallButton>
             </div>
+
+            {profile ? (
+              <div style={{ fontSize: 12, opacity: 0.6 }}>
+                Onboarding: <b>{onboardingLabel}</b>
+              </div>
+            ) : null}
           </div>
 
           <input ref={fileRef} type="file" accept="image/*" onChange={handleAvatarFile} style={{ display: "none" }} />
         </div>
 
-        {/* Display fields */}
+        {/* Display fields (view/edit) */}
         {editing ? (
           <div style={{ display: "grid", gap: 12 }}>
+            <Field
+              label="Username"
+              hint="Letters A–Z, a–z, 0–9, underscore. Unique. Used for search."
+            >
+              <Input
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="e.g. David_01"
+                maxLength={24}
+              />
+            </Field>
+
             <Field label="Display name">
-              <Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="e.g. David" maxLength={120} />
+              <Input
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                placeholder="e.g. David"
+                maxLength={120}
+              />
             </Field>
 
             <Field label="Short bio" hint={`${(bio || "").length}/140`}>
-              <TextArea value={bio} onChange={(e) => setBio(e.target.value)} placeholder="Optional. Max 140 characters." maxLength={140} />
+              <TextArea
+                value={bio}
+                onChange={(e) => setBio(e.target.value)}
+                placeholder="Optional. Max 140 characters."
+                maxLength={140}
+              />
             </Field>
           </div>
         ) : (
           <div style={{ display: "grid", gap: 10, opacity: 0.9 }}>
+            <div>
+              <div style={{ fontSize: 12, opacity: 0.7, fontWeight: 700 }}>Username</div>
+              {showSkeleton ? (
+                <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
+                  <SkeletonText width="45%" />
+                </div>
+              ) : (
+                <div style={{ marginTop: 4 }}>{profile?.username || "—"}</div>
+              )}
+            </div>
+
             <div>
               <div style={{ fontSize: 12, opacity: 0.7, fontWeight: 700 }}>Display name</div>
               {showSkeleton ? (
@@ -645,7 +810,7 @@ export default function ProfileScreen({ session, supabase }) {
           </div>
         )}
 
-        {/* Top kinks */}
+        {/* Top kinks (hidden if empty in view mode) */}
         {topKinks.length ? (
           <Card
             title="Top kinks"
@@ -680,12 +845,43 @@ export default function ProfileScreen({ session, supabase }) {
             </SmallButton>
           }
         >
+          {connErr ? (
+            <div
+              style={{
+                padding: 10,
+                borderRadius: 12,
+                border: "1px solid rgba(255,80,80,0.30)",
+                background: "rgba(255,80,80,0.10)",
+                fontSize: 13,
+                marginBottom: 10,
+              }}
+            >
+              {connErr}
+            </div>
+          ) : null}
+
+          {connOk ? (
+            <div
+              style={{
+                padding: 10,
+                borderRadius: 12,
+                border: "1px solid rgba(120,255,170,0.25)",
+                background: "rgba(120,255,170,0.08)",
+                fontSize: 13,
+                marginBottom: 10,
+              }}
+            >
+              {connOk}
+            </div>
+          ) : null}
+
+          {/* Search */}
           <div style={{ display: "grid", gap: 8 }}>
             <div style={{ fontSize: 12, opacity: 0.7, fontWeight: 750 }}>Find by username</div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
               <Input
                 value={partnerQuery}
-                onChange={(e) => (setPartnerQuery(e.target.value), setPartnerSearchNote(""), setPartnerResults([]))}
+                onChange={(e) => setPartnerQuery(e.target.value)}
                 placeholder="Search usernames (e.g. David)"
               />
               <SmallButton onClick={doSearchPartners} disabled={partnerSearchBusy || !partnerQuery.trim()}>
@@ -710,19 +906,19 @@ export default function ProfileScreen({ session, supabase }) {
                     }}
                   >
                     <div style={{ display: "grid", gap: 2 }}>
-                      <div style={{ fontWeight: 850 }}>{r.username || r.display_name || shortId(r.id)}</div>
-                      <div style={{ fontSize: 12, opacity: 0.65 }}>{r.bio || "—"}</div>
+                      <div style={{ fontWeight: 850 }}>{r.username || shortId(r.id)}</div>
+                      <div style={{ fontSize: 12, opacity: 0.65 }}>{r.display_name || "—"}</div>
                     </div>
-                    <SmallButton disabled title="Connection requests are next">
+                    <SmallButton onClick={() => sendRequest(r.id)} title="Send connection request">
                       Connect
                     </SmallButton>
                   </div>
                 ))}
               </div>
-            ) : null}
-
-            {partnerSearchNote ? (
-              <div style={{ fontSize: 12, opacity: 0.75, lineHeight: 1.35 }}>{partnerSearchNote}</div>
+            ) : partnerQuery.trim() ? (
+              <div style={{ fontSize: 12, opacity: 0.7, lineHeight: 1.35 }}>
+                No new people to connect — you’re already connected to the matches found.
+              </div>
             ) : null}
 
             <div style={{ fontSize: 12, opacity: 0.6, lineHeight: 1.35 }}>
@@ -732,32 +928,15 @@ export default function ProfileScreen({ session, supabase }) {
 
           <div style={{ height: 12 }} />
 
-          {connErr ? (
-            <div
-              style={{
-                padding: 10,
-                borderRadius: 12,
-                border: "1px solid rgba(255,80,80,0.30)",
-                background: "rgba(255,80,80,0.10)",
-                fontSize: 13,
-              }}
-            >
-              {connErr}
-            </div>
-          ) : null}
-
-          {connLoading ? (
-            <div style={{ opacity: 0.75, fontSize: 13 }}>Loading connections…</div>
-          ) : acceptedConnections.length ? (
-            <div style={{ display: "grid", gap: 10 }}>
-              {acceptedConnections.map((c) => {
-                const name = c.profile?.display_name || shortId(c.otherId);
-                const avatar = c.signedAvatarUrl || "";
-                const initials2 = String(name || "U").slice(0, 1).toUpperCase();
-
+          {/* Incoming requests */}
+          {incomingRequests.length ? (
+            <div style={{ display: "grid", gap: 8 }}>
+              <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 800 }}>Incoming requests</div>
+              {incomingRequests.map((l) => {
+                const otherId = getOtherUserId(l, userId);
                 return (
                   <div
-                    key={c.otherId}
+                    key={l.id}
                     style={{
                       padding: 10,
                       borderRadius: 12,
@@ -769,52 +948,100 @@ export default function ProfileScreen({ session, supabase }) {
                       alignItems: "center",
                     }}
                   >
-                    <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                      <div
-                        style={{
-                          width: 40,
-                          height: 40,
-                          borderRadius: 999,
-                          overflow: "hidden",
-                          border: "1px solid rgba(255,255,255,0.12)",
-                          background: "rgba(255,255,255,0.04)",
-                          display: "grid",
-                          placeItems: "center",
-                          fontWeight: 900,
-                        }}
-                      >
-                        {avatar ? (
-                          <img src={avatar} alt="Avatar" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                        ) : (
-                          initials2
-                        )}
-                      </div>
-
-                      <div style={{ display: "grid", gap: 2 }}>
-                        <div style={{ fontWeight: 900 }}>{name}</div>
-                        <div style={{ fontSize: 12, opacity: 0.65 }}>Connected</div>
-                      </div>
-                    </div>
-
-                    <SmallButton
-                      onClick={() => {
-                        setKinksModal({ name, topKinks: [], placeholderOnly: true });
-                        notify("Kinks view is placeholder for now.");
-                      }}
-                      title="View kink visibility"
-                    >
-                      View kinks
+                    <div style={{ fontWeight: 850 }}>Request from {shortId(otherId)}</div>
+                    <SmallButton onClick={() => acceptRequest(l.id)} title="Accept connection request">
+                      Accept
                     </SmallButton>
                   </div>
                 );
               })}
             </div>
-          ) : (
-            <div style={{ opacity: 0.75, fontSize: 13 }}>No connections yet.</div>
-          )}
+          ) : null}
+
+          {incomingRequests.length ? <div style={{ height: 12 }} /> : null}
+
+          {/* Connected */}
+          <div style={{ display: "grid", gap: 10 }}>
+            <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 800 }}>Connected</div>
+
+            {connLoading ? (
+              <div style={{ opacity: 0.75, fontSize: 13 }}>Loading connections…</div>
+            ) : connections.length ? (
+              <div style={{ display: "grid", gap: 10 }}>
+                {connections.map((c) => {
+                  const name = c.profile?.username || c.profile?.display_name || shortId(c.otherId);
+                  const avatar = c.signedAvatarUrl || "";
+                  const initials2 = String(name || "U").slice(0, 1).toUpperCase();
+
+                  return (
+                    <div
+                      key={c.otherId}
+                      style={{
+                        padding: 10,
+                        borderRadius: 12,
+                        border: "1px solid rgba(255,255,255,0.10)",
+                        background: "rgba(0,0,0,0.20)",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        gap: 10,
+                        alignItems: "center",
+                      }}
+                    >
+                      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                        <div
+                          style={{
+                            width: 40,
+                            height: 40,
+                            borderRadius: 999,
+                            overflow: "hidden",
+                            border: "1px solid rgba(255,255,255,0.12)",
+                            background: "rgba(255,255,255,0.04)",
+                            display: "grid",
+                            placeItems: "center",
+                            fontWeight: 900,
+                          }}
+                        >
+                          {avatar ? (
+                            <img
+                              src={avatar}
+                              alt="Avatar"
+                              style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                            />
+                          ) : (
+                            initials2
+                          )}
+                        </div>
+
+                        <div style={{ display: "grid", gap: 2 }}>
+                          <div style={{ fontWeight: 900 }}>{name}</div>
+                          <div style={{ fontSize: 12, opacity: 0.65 }}>Connected</div>
+                        </div>
+                      </div>
+
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                        <SmallButton asLink to="/profile/kinks" title="Kinks are visible to partners once list ships">
+                          View kinks
+                        </SmallButton>
+                        <SmallButton
+                          tone="danger"
+                          onClick={() => handleRemoveConnection(c.link?.id)}
+                          title="Remove connection"
+                        >
+                          Remove
+                        </SmallButton>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div style={{ opacity: 0.75, fontSize: 13 }}>No connections yet.</div>
+            )}
+          </div>
         </Card>
       </Page>
 
+      {/* Simple modal (kinks placeholder) */}
       {kinksModal ? (
         <div
           role="dialog"
@@ -852,7 +1079,12 @@ export default function ProfileScreen({ session, supabase }) {
             <div style={{ height: 12 }} />
 
             <div style={{ fontSize: 13, opacity: 0.8, lineHeight: 1.4 }}>
-              Placeholder: this will show their kink list once we ship it.
+              This will show their Top kinks + kink list sections once we ship:
+              <ul style={{ margin: "8px 0 0 18px", opacity: 0.85 }}>
+                <li>Visibility toggles (both sides)</li>
+                <li>Shared display of kink lists</li>
+                <li>Top 5 kinks surfaced as pills</li>
+              </ul>
             </div>
           </div>
         </div>
