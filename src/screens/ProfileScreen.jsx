@@ -13,15 +13,6 @@ import {
   revokePartnerLink,
 } from "../lib/partnersApi";
 
-/**
- * Cache signed avatar URLs by storage path.
- * Avoids re-fetch + flicker every time Profile tab mounts.
- *
- * Enhancement:
- * - persist the signed URL cache in localStorage so first open after reload
- *   can be instant (as long as the signed URL hasn't expired).
- */
-
 const AVATAR_URL_LS_KEY = "scenebuilder.avatarSignedUrlCache.v1";
 
 let avatarSignedUrlCache = {
@@ -159,7 +150,7 @@ function Card({ children, title, subtitle, right }) {
         background: "rgba(255,255,255,0.03)",
       }}
     >
-      {title || subtitle || right ? (
+      {(title || subtitle || right) ? (
         <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
           <div style={{ display: "grid", gap: 2 }}>
             {title ? <div style={{ fontWeight: 900 }}>{title}</div> : null}
@@ -212,7 +203,6 @@ function isAccepted(link) {
   const s = String(link?.status || "").toLowerCase();
   if (link?.revoked_at) return false;
   if (s === "accepted") return true;
-  // defensive
   return Boolean(link?.accepted_at) && s !== "pending";
 }
 
@@ -228,6 +218,22 @@ function getNiceNameFromProfile(p, fallbackId) {
   if (u) return u;
   if (dn) return dn;
   return shortId(fallbackId);
+}
+
+function isParticipant(link, myId) {
+  if (!link || !myId) return false;
+  return link.user_id === myId || link.partner_user_id === myId;
+}
+
+// KEY FIX: classify incoming/outgoing by who initiated, not row orientation.
+function isIncomingPending(link, myId) {
+  if (!isPending(link) || !isParticipant(link, myId)) return false;
+  return String(link.initiated_by_id || "") !== String(myId || "");
+}
+
+function isOutgoingPending(link, myId) {
+  if (!isPending(link) || !isParticipant(link, myId)) return false;
+  return String(link.initiated_by_id || "") === String(myId || "");
 }
 
 export default function ProfileScreen({ session, supabase }) {
@@ -249,29 +255,24 @@ export default function ProfileScreen({ session, supabase }) {
   const [localErr, setLocalErr] = useState("");
   const [localOk, setLocalOk] = useState("");
 
-  // View vs Edit mode
   const searchParams = new URLSearchParams(location.search || "");
   const shouldStartEditing = searchParams.get("edit") === "1";
   const [editing, setEditing] = useState(shouldStartEditing);
 
-  // Connections state
   const [connLoading, setConnLoading] = useState(false);
   const [connErr, setConnErr] = useState("");
   const [connOk, setConnOk] = useState("");
-  const [connections, setConnections] = useState([]); // { link, profile, signedAvatarUrl, otherId }
-  const [partnerProfilesById, setPartnerProfilesById] = useState({}); // { [id]: profileRow }
+  const [connections, setConnections] = useState([]);
+  const [partnerProfilesById, setPartnerProfilesById] = useState({});
 
-  // Partner requests state
   const [incomingRequests, setIncomingRequests] = useState([]);
   const [outgoingRequests, setOutgoingRequests] = useState([]);
 
-  // Partner search state
   const [partnerQuery, setPartnerQuery] = useState("");
   const [partnerSearchBusy, setPartnerSearchBusy] = useState(false);
   const [partnerResults, setPartnerResults] = useState([]);
-  const [partnerSearchRawCount, setPartnerSearchRawCount] = useState(null); // null until searched
+  const [partnerSearchRawCount, setPartnerSearchRawCount] = useState(null);
 
-  // Kinks modal placeholder
   const [kinksModal, setKinksModal] = useState(null);
 
   useEffect(() => {
@@ -289,7 +290,6 @@ export default function ProfileScreen({ session, supabase }) {
     setBio(profile?.bio || "");
   }, [profile?.username, profile?.display_name, profile?.bio]);
 
-  // Signed avatar URL: use cache immediately, refresh only if needed.
   useEffect(() => {
     let cancelled = false;
 
@@ -316,7 +316,7 @@ export default function ProfileScreen({ session, supabase }) {
             setSignedAvatarUrl("");
           }
         }
-      } catch (_e) {
+      } catch {
         if (!cancelled) {
           const fallback = getCachedAvatarUrl(path);
           if (fallback) setSignedAvatarUrl(fallback);
@@ -424,8 +424,6 @@ export default function ProfileScreen({ session, supabase }) {
 
   const onboardingLabel = profile ? (profile.onboarding_complete ? "Complete" : "Not complete") : "";
 
-  // ---------- Connections helpers ----------
-
   async function signAvatarForPath(path) {
     const p = String(path || "").trim();
     if (!p || !supabase) return "";
@@ -470,28 +468,27 @@ export default function ProfileScreen({ session, supabase }) {
 
       const acceptedConnections = (links || []).filter((l) => isAccepted(l));
 
-      // Orientation-proof requests:
-      const pending = (links || []).filter((l) => isPending(l));
-
-      // Outgoing = I initiated it (works regardless of user_id/partner_user_id orientation)
-      const outgoing = pending.filter((l) => l.initiated_by_id === userId);
-
-      // Incoming = someone else initiated it AND I'm one of the two users
-      const incoming = pending.filter(
-        (l) =>
-          l.initiated_by_id !== userId &&
-          (l.user_id === userId || l.partner_user_id === userId)
-      );
+      // KEY FIX: pending buckets by initiated_by_id
+      const incoming = (links || []).filter((l) => isIncomingPending(l, userId));
+      const outgoing = (links || []).filter((l) => isOutgoingPending(l, userId));
 
       setIncomingRequests(incoming);
       setOutgoingRequests(outgoing);
 
       const partnerIds = Array.from(
-        new Set(acceptedConnections.map((l) => getOtherUserId(l, userId)).filter(Boolean))
+        new Set(
+          acceptedConnections
+            .map((l) => getOtherUserId(l, userId))
+            .filter(Boolean)
+        )
       );
 
       const reqIds = Array.from(
-        new Set([...incoming, ...outgoing].map((l) => getOtherUserId(l, userId)).filter(Boolean))
+        new Set(
+          [...incoming, ...outgoing]
+            .map((l) => getOtherUserId(l, userId))
+            .filter(Boolean)
+        )
       );
 
       const allProfileIds = Array.from(new Set([...partnerIds, ...reqIds].filter(Boolean)));
@@ -552,8 +549,6 @@ export default function ProfileScreen({ session, supabase }) {
       setConnErr(e?.message || "Failed to remove connection.");
     }
   }
-
-  // ---------- Partner search ----------
 
   async function doSearchPartners() {
     const q = String(partnerQuery || "").trim();
@@ -626,7 +621,6 @@ export default function ProfileScreen({ session, supabase }) {
     }
   }
 
-  // ---------- Top kinks (placeholder) ----------
   const topKinks = useMemo(() => {
     const v = profile?.top_kinks;
     if (!v) return [];
@@ -637,7 +631,6 @@ export default function ProfileScreen({ session, supabase }) {
   return (
     <div>
       <Page style={{ display: "grid", gap: 14 }}>
-        {/* Actions row */}
         <div
           style={{
             display: "flex",
@@ -697,7 +690,6 @@ export default function ProfileScreen({ session, supabase }) {
           </div>
         ) : null}
 
-        {/* Identity card */}
         <div
           style={{
             display: "grid",
@@ -725,11 +717,7 @@ export default function ProfileScreen({ session, supabase }) {
             }}
           >
             {signedAvatarUrl ? (
-              <img
-                src={signedAvatarUrl}
-                alt="Avatar"
-                style={{ width: "100%", height: "100%", objectFit: "cover" }}
-              />
+              <img src={signedAvatarUrl} alt="Avatar" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
             ) : (
               initials
             )}
@@ -760,7 +748,6 @@ export default function ProfileScreen({ session, supabase }) {
           <input ref={fileRef} type="file" accept="image/*" onChange={handleAvatarFile} style={{ display: "none" }} />
         </div>
 
-        {/* Display fields (view/edit) */}
         {editing ? (
           <div style={{ display: "grid", gap: 12 }}>
             <Field label="Username" hint="Letters A–Z, a–z, 0–9, underscore. Unique. Used for search.">
@@ -828,7 +815,6 @@ export default function ProfileScreen({ session, supabase }) {
           </div>
         )}
 
-        {/* Top kinks */}
         {topKinks.length ? (
           <Card
             title="Top kinks"
@@ -857,7 +843,6 @@ export default function ProfileScreen({ session, supabase }) {
           </Card>
         )}
 
-        {/* Connections */}
         <Card
           title="Connections"
           subtitle="Search by username, send requests, accept requests"
@@ -897,7 +882,6 @@ export default function ProfileScreen({ session, supabase }) {
             </div>
           ) : null}
 
-          {/* Search */}
           <div style={{ display: "grid", gap: 8 }}>
             <div style={{ fontSize: 12, opacity: 0.7, fontWeight: 750 }}>Find by username</div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
@@ -952,7 +936,6 @@ export default function ProfileScreen({ session, supabase }) {
 
           <div style={{ height: 12 }} />
 
-          {/* Incoming requests */}
           {incomingRequests.length ? (
             <div style={{ display: "grid", gap: 8 }}>
               <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 800 }}>Incoming requests</div>
@@ -960,6 +943,9 @@ export default function ProfileScreen({ session, supabase }) {
                 const otherId = getOtherUserId(l, userId);
                 const p = partnerProfilesById?.[otherId] || null;
                 const nice = getNiceNameFromProfile(p, otherId);
+
+                // Defensive: only show Accept if you are NOT the initiator
+                const canAccept = String(l.initiated_by_id || "") !== String(userId || "");
 
                 return (
                   <div
@@ -981,9 +967,13 @@ export default function ProfileScreen({ session, supabase }) {
                         {p?.display_name ? p.display_name : p?.username ? "—" : shortId(otherId)}
                       </div>
                     </div>
-                    <SmallButton onClick={() => acceptRequest(l.id)} title="Accept connection request">
-                      Accept
-                    </SmallButton>
+                    {canAccept ? (
+                      <SmallButton onClick={() => acceptRequest(l.id)} title="Accept connection request">
+                        Accept
+                      </SmallButton>
+                    ) : (
+                      <MiniPill>Waiting</MiniPill>
+                    )}
                   </div>
                 );
               })}
@@ -992,7 +982,6 @@ export default function ProfileScreen({ session, supabase }) {
 
           {incomingRequests.length ? <div style={{ height: 12 }} /> : null}
 
-          {/* Outgoing requests */}
           {outgoingRequests.length ? (
             <div style={{ display: "grid", gap: 8 }}>
               <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 800 }}>Outgoing requests</div>
@@ -1030,7 +1019,6 @@ export default function ProfileScreen({ session, supabase }) {
 
           {outgoingRequests.length ? <div style={{ height: 12 }} /> : null}
 
-          {/* Connected */}
           <div style={{ display: "grid", gap: 10 }}>
             <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 800 }}>Connected</div>
 
@@ -1116,7 +1104,6 @@ export default function ProfileScreen({ session, supabase }) {
         </Card>
       </Page>
 
-      {/* Simple modal (kinks placeholder) */}
       {kinksModal ? (
         <div
           role="dialog"
