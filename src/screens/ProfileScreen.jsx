@@ -220,6 +220,14 @@ function isPending(link) {
   return s === "pending";
 }
 
+function getNiceNameFromProfile(p, fallbackId) {
+  const u = String(p?.username || "").trim();
+  const dn = String(p?.display_name || "").trim();
+  if (u) return u;
+  if (dn) return dn;
+  return shortId(fallbackId);
+}
+
 export default function ProfileScreen({ session, supabase }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -244,16 +252,12 @@ export default function ProfileScreen({ session, supabase }) {
   const shouldStartEditing = searchParams.get("edit") === "1";
   const [editing, setEditing] = useState(shouldStartEditing);
 
-  // Username availability
-  const [usernameBusy, setUsernameBusy] = useState(false);
-  const [usernameStatus, setUsernameStatus] = useState(""); // "", "available", "taken", "invalid"
-  const [usernameStatusMsg, setUsernameStatusMsg] = useState("");
-
   // Connections state
   const [connLoading, setConnLoading] = useState(false);
   const [connErr, setConnErr] = useState("");
   const [connOk, setConnOk] = useState("");
   const [connections, setConnections] = useState([]); // { link, profile, signedAvatarUrl, otherId }
+  const [partnerProfilesById, setPartnerProfilesById] = useState({}); // { [id]: profileRow }
 
   // Partner requests state
   const [incomingRequests, setIncomingRequests] = useState([]);
@@ -263,6 +267,7 @@ export default function ProfileScreen({ session, supabase }) {
   const [partnerQuery, setPartnerQuery] = useState("");
   const [partnerSearchBusy, setPartnerSearchBusy] = useState(false);
   const [partnerResults, setPartnerResults] = useState([]);
+  const [partnerSearchRawCount, setPartnerSearchRawCount] = useState(null); // null until searched
 
   // Kinks modal placeholder
   const [kinksModal, setKinksModal] = useState(null);
@@ -442,7 +447,6 @@ export default function ProfileScreen({ session, supabase }) {
     const list = Array.from(new Set((ids || []).filter(Boolean)));
     if (!supabase || !userId || !list.length) return {};
 
-    // Safe RPC (SECURITY DEFINER) that only returns profiles for users you are actually connected to.
     const { data, error: rErr } = await supabase.rpc("fetch_partner_profiles_by_ids", { p_ids: list });
     if (rErr) throw rErr;
 
@@ -491,6 +495,7 @@ export default function ProfileScreen({ session, supabase }) {
       if (allProfileIds.length) {
         profilesById = await fetchPartnerProfilesByIds(allProfileIds);
       }
+      setPartnerProfilesById(profilesById);
 
       const rows = [];
       for (const link of acceptedConnections) {
@@ -518,6 +523,7 @@ export default function ProfileScreen({ session, supabase }) {
       setConnections([]);
       setIncomingRequests([]);
       setOutgoingRequests([]);
+      setPartnerProfilesById({});
     } finally {
       setConnLoading(false);
     }
@@ -551,6 +557,7 @@ export default function ProfileScreen({ session, supabase }) {
     setPartnerSearchBusy(true);
     setConnErr("");
     setConnOk("");
+    setPartnerSearchRawCount(null);
 
     try {
       const { data, error: sErr } = await supabase.rpc("search_profiles_by_username", {
@@ -560,12 +567,15 @@ export default function ProfileScreen({ session, supabase }) {
 
       if (sErr) throw sErr;
 
+      const raw = Array.isArray(data) ? data : [];
+      setPartnerSearchRawCount(raw.length);
+
       const existing = new Set((connections || []).map((c) => c.otherId));
       const existingPending = new Set(
         [...incomingRequests, ...outgoingRequests].map((l) => getOtherUserId(l, userId)).filter(Boolean)
       );
 
-      const cleaned = (data || [])
+      const cleaned = raw
         .filter((r) => r.id !== userId)
         .filter((r) => !existing.has(r.id))
         .filter((r) => !existingPending.has(r.id));
@@ -573,6 +583,7 @@ export default function ProfileScreen({ session, supabase }) {
       setPartnerResults(cleaned);
     } catch (e) {
       setPartnerResults([]);
+      setPartnerSearchRawCount(null);
       setConnErr(e?.message || "Partner search failed.");
     } finally {
       setPartnerSearchBusy(false);
@@ -589,6 +600,7 @@ export default function ProfileScreen({ session, supabase }) {
       setConnOk("Request sent.");
       setPartnerResults([]);
       setPartnerQuery("");
+      setPartnerSearchRawCount(null);
       await loadConnections();
     } catch (e) {
       setConnErr(e?.message || "Failed to send request.");
@@ -742,10 +754,7 @@ export default function ProfileScreen({ session, supabase }) {
         {/* Display fields (view/edit) */}
         {editing ? (
           <div style={{ display: "grid", gap: 12 }}>
-            <Field
-              label="Username"
-              hint="Letters A–Z, a–z, 0–9, underscore. Unique. Used for search."
-            >
+            <Field label="Username" hint="Letters A–Z, a–z, 0–9, underscore. Unique. Used for search.">
               <Input
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
@@ -810,7 +819,7 @@ export default function ProfileScreen({ session, supabase }) {
           </div>
         )}
 
-        {/* Top kinks (hidden if empty in view mode) */}
+        {/* Top kinks */}
         {topKinks.length ? (
           <Card
             title="Top kinks"
@@ -917,7 +926,9 @@ export default function ProfileScreen({ session, supabase }) {
               </div>
             ) : partnerQuery.trim() ? (
               <div style={{ fontSize: 12, opacity: 0.7, lineHeight: 1.35 }}>
-                No new people to connect — you’re already connected to the matches found.
+                {partnerSearchRawCount === 0
+                  ? "No matches found."
+                  : "No new people to connect — already connected or a request is pending."}
               </div>
             ) : null}
 
@@ -934,6 +945,9 @@ export default function ProfileScreen({ session, supabase }) {
               <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 800 }}>Incoming requests</div>
               {incomingRequests.map((l) => {
                 const otherId = getOtherUserId(l, userId);
+                const p = partnerProfilesById?.[otherId] || null;
+                const nice = getNiceNameFromProfile(p, otherId);
+
                 return (
                   <div
                     key={l.id}
@@ -948,7 +962,12 @@ export default function ProfileScreen({ session, supabase }) {
                       alignItems: "center",
                     }}
                   >
-                    <div style={{ fontWeight: 850 }}>Request from {shortId(otherId)}</div>
+                    <div style={{ display: "grid", gap: 2 }}>
+                      <div style={{ fontWeight: 850 }}>Request from {nice}</div>
+                      <div style={{ fontSize: 12, opacity: 0.65 }}>
+                        {p?.display_name ? p.display_name : p?.username ? "—" : shortId(otherId)}
+                      </div>
+                    </div>
                     <SmallButton onClick={() => acceptRequest(l.id)} title="Accept connection request">
                       Accept
                     </SmallButton>
@@ -959,6 +978,44 @@ export default function ProfileScreen({ session, supabase }) {
           ) : null}
 
           {incomingRequests.length ? <div style={{ height: 12 }} /> : null}
+
+          {/* Outgoing requests */}
+          {outgoingRequests.length ? (
+            <div style={{ display: "grid", gap: 8 }}>
+              <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 800 }}>Outgoing requests</div>
+              {outgoingRequests.map((l) => {
+                const otherId = getOtherUserId(l, userId);
+                const p = partnerProfilesById?.[otherId] || null;
+                const nice = getNiceNameFromProfile(p, otherId);
+
+                return (
+                  <div
+                    key={l.id}
+                    style={{
+                      padding: 10,
+                      borderRadius: 12,
+                      border: "1px solid rgba(255,255,255,0.10)",
+                      background: "rgba(0,0,0,0.20)",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: 10,
+                      alignItems: "center",
+                    }}
+                  >
+                    <div style={{ display: "grid", gap: 2 }}>
+                      <div style={{ fontWeight: 850 }}>Pending to {nice}</div>
+                      <div style={{ fontSize: 12, opacity: 0.65 }}>Waiting for acceptance</div>
+                    </div>
+                    <SmallButton tone="danger" onClick={() => handleRemoveConnection(l.id)} title="Cancel request">
+                      Cancel
+                    </SmallButton>
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
+
+          {outgoingRequests.length ? <div style={{ height: 12 }} /> : null}
 
           {/* Connected */}
           <div style={{ display: "grid", gap: 10 }}>
@@ -1019,7 +1076,12 @@ export default function ProfileScreen({ session, supabase }) {
                       </div>
 
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                        <SmallButton asLink to="/profile/kinks" title="Kinks are visible to partners once list ships">
+                        <SmallButton
+                          onClick={() => {
+                            setKinksModal({ name });
+                          }}
+                          title="View kink visibility"
+                        >
                           View kinks
                         </SmallButton>
                         <SmallButton
