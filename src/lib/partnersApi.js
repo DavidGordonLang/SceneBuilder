@@ -157,7 +157,11 @@ export async function revokePartnerLink(linkId, { supabase } = {}) {
 
     const { data, error } = await client
       .from("partner_links")
-      .update({ revoked_at: new Date().toISOString() })
+      .update({
+        revoked_at: new Date().toISOString(),
+        status: "revoked",
+        accepted_at: null,
+      })
       .eq("id", linkId)
       .select("id,user_id,partner_user_id,initiated_by_id,status,initiated_at,accepted_at,revoked_at,created_at,updated_at")
       .single();
