@@ -159,11 +159,13 @@ function Card({ children, title, subtitle, right }) {
         background: "rgba(255,255,255,0.03)",
       }}
     >
-      {(title || subtitle || right) ? (
+      {title || subtitle || right ? (
         <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
           <div style={{ display: "grid", gap: 2 }}>
             {title ? <div style={{ fontWeight: 900 }}>{title}</div> : null}
-            {subtitle ? <div style={{ fontSize: 12, opacity: 0.65, lineHeight: 1.3 }}>{subtitle}</div> : null}
+            {subtitle ? (
+              <div style={{ fontSize: 12, opacity: 0.65, lineHeight: 1.3 }}>{subtitle}</div>
+            ) : null}
           </div>
           {right ? <div>{right}</div> : null}
         </div>
@@ -467,26 +469,29 @@ export default function ProfileScreen({ session, supabase }) {
       const links = await fetchPartnerLinks({ supabase });
 
       const acceptedConnections = (links || []).filter((l) => isAccepted(l));
-      const incoming = (links || []).filter((l) => isPending(l) && l.partner_user_id === userId);
-      const outgoing = (links || []).filter((l) => isPending(l) && l.user_id === userId);
+
+      // Orientation-proof requests:
+      const pending = (links || []).filter((l) => isPending(l));
+
+      // Outgoing = I initiated it (works regardless of user_id/partner_user_id orientation)
+      const outgoing = pending.filter((l) => l.initiated_by_id === userId);
+
+      // Incoming = someone else initiated it AND I'm one of the two users
+      const incoming = pending.filter(
+        (l) =>
+          l.initiated_by_id !== userId &&
+          (l.user_id === userId || l.partner_user_id === userId)
+      );
 
       setIncomingRequests(incoming);
       setOutgoingRequests(outgoing);
 
       const partnerIds = Array.from(
-        new Set(
-          acceptedConnections
-            .map((l) => getOtherUserId(l, userId))
-            .filter(Boolean)
-        )
+        new Set(acceptedConnections.map((l) => getOtherUserId(l, userId)).filter(Boolean))
       );
 
       const reqIds = Array.from(
-        new Set(
-          [...incoming, ...outgoing]
-            .map((l) => getOtherUserId(l, userId))
-            .filter(Boolean)
-        )
+        new Set([...incoming, ...outgoing].map((l) => getOtherUserId(l, userId)).filter(Boolean))
       );
 
       const allProfileIds = Array.from(new Set([...partnerIds, ...reqIds].filter(Boolean)));
@@ -720,7 +725,11 @@ export default function ProfileScreen({ session, supabase }) {
             }}
           >
             {signedAvatarUrl ? (
-              <img src={signedAvatarUrl} alt="Avatar" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              <img
+                src={signedAvatarUrl}
+                alt="Avatar"
+                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+              />
             ) : (
               initials
             )}
@@ -837,7 +846,11 @@ export default function ProfileScreen({ session, supabase }) {
             </div>
           </Card>
         ) : (
-          <Card title="Top kinks" subtitle="Optional. Hidden if empty." right={<SmallButton asLink to="/profile/kinks">Open</SmallButton>}>
+          <Card
+            title="Top kinks"
+            subtitle="Optional. Hidden if empty."
+            right={<SmallButton asLink to="/profile/kinks">Open</SmallButton>}
+          >
             <div style={{ fontSize: 13, opacity: 0.75, lineHeight: 1.35 }}>
               Next: pick 0–5 “Top kinks” from your kink list. For now this section is just a placeholder.
             </div>
