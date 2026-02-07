@@ -1,3 +1,4 @@
+// src/lib/partnersApi.js
 import { supabase as defaultSupabase } from "./supabaseClient";
 import { perfTime } from "./perf";
 
@@ -46,6 +47,10 @@ async function findExistingLink(client, uid, partnerUserId) {
 /**
  * Request a partner link (no codes).
  * If a link already exists (even revoked), we revive it instead of inserting a duplicate.
+ *
+ * IMPORTANT:
+ * - initiated_by_id is immutable in DB (trigger). So we never change it on revive.
+ * - Outgoing/incoming should be determined in UI using initiated_by_id, not row orientation.
  */
 export async function createPartnerRequest(partnerUserId, { supabase } = {}) {
   return perfTime("partners.createPartnerRequest", async () => {
@@ -57,31 +62,27 @@ export async function createPartnerRequest(partnerUserId, { supabase } = {}) {
 
     const now = new Date().toISOString();
 
-    // 1) If link exists in either direction, update it back to pending
     const existing = await findExistingLink(client, uid, partnerUserId);
 
     if (existing?.id) {
+      // Revive without changing initiated_by_id (immutable)
       const { data, error } = await client
         .from("partner_links")
         .update({
           status: "pending",
-          initiated_by_id: uid,
           initiated_at: now,
           accepted_at: null,
           revoked_at: null,
-          // updated_at should be auto, but we don’t rely on it.
         })
         .eq("id", existing.id)
-        .select(
-          "id,user_id,partner_user_id,initiated_by_id,status,initiated_at,accepted_at,revoked_at,created_at,updated_at"
-        )
+        .select("id,user_id,partner_user_id,initiated_by_id,status,initiated_at,accepted_at,revoked_at,created_at,updated_at")
         .single();
 
       if (error) throw error;
       return data;
     }
 
-    // 2) Otherwise, create new
+    // New row: initiated_by_id set once at creation time (allowed)
     const { data, error } = await client
       .from("partner_links")
       .insert([
@@ -101,10 +102,6 @@ export async function createPartnerRequest(partnerUserId, { supabase } = {}) {
   });
 }
 
-/**
- * Accept a partner request.
- * Either party can accept as long as RLS allows.
- */
 export async function acceptPartnerRequest(linkId, { supabase } = {}) {
   return perfTime("partners.acceptPartnerRequest", async () => {
     const client = getClient(supabase);
@@ -117,7 +114,7 @@ export async function acceptPartnerRequest(linkId, { supabase } = {}) {
       .update({
         status: "accepted",
         accepted_at: now,
-        revoked_at: null, // defensive: accept should mean "active"
+        revoked_at: null,
       })
       .eq("id", linkId)
       .select("id,user_id,partner_user_id,initiated_by_id,status,initiated_at,accepted_at,revoked_at,created_at,updated_at")
@@ -128,9 +125,6 @@ export async function acceptPartnerRequest(linkId, { supabase } = {}) {
   });
 }
 
-/**
- * Fetch partner links visible to current user (RLS).
- */
 export async function fetchPartnerLinks({ supabase } = {}) {
   return perfTime("partners.fetchPartnerLinks", async () => {
     const client = getClient(supabase);
@@ -146,10 +140,6 @@ export async function fetchPartnerLinks({ supabase } = {}) {
   });
 }
 
-/**
- * Revoke (remove) a connection.
- * Either party can revoke; we set revoked_at.
- */
 export async function revokePartnerLink(linkId, { supabase } = {}) {
   return perfTime("partners.revokePartnerLink", async () => {
     const client = getClient(supabase);
