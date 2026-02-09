@@ -284,11 +284,15 @@ export default function ProfileScreen({ session, supabase }) {
     return base.slice(0, 1).toUpperCase();
   }, [profile?.display_name, profile?.username, session?.user?.email]);
 
+  // ✅ FIX: Do NOT overwrite draft edits while editing.
+  // Avatar uploads refresh the profile row, which would otherwise stomp unsaved inputs.
   useEffect(() => {
+    if (editing) return;
+
     setUsername(profile?.username || "");
     setDisplayName(profile?.display_name || "");
     setBio(profile?.bio || "");
-  }, [profile?.username, profile?.display_name, profile?.bio]);
+  }, [editing, profile?.username, profile?.display_name, profile?.bio]);
 
   useEffect(() => {
     let cancelled = false;
