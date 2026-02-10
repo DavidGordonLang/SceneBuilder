@@ -1,5 +1,3 @@
-// src/components/profile/ProfileDetailsCard.jsx
-
 import React from "react";
 
 function Field({ label, children, hint }) {
