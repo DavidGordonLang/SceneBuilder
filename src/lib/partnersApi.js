@@ -17,6 +17,9 @@ function normalizeUuid(v) {
   return String(v || "").trim().toLowerCase();
 }
 
+const LINK_SELECT =
+  "id,user_id,partner_user_id,initiated_by_id,status,initiated_at,accepted_at,revoked_at,created_at,updated_at";
+
 async function findExistingLink(client, uid, partnerUserId) {
   const a = normalizeUuid(uid);
   const b = normalizeUuid(partnerUserId);
@@ -25,7 +28,7 @@ async function findExistingLink(client, uid, partnerUserId) {
   // Try direct orientation first (common case), then reversed.
   const { data: d1, error: e1 } = await client
     .from("partner_links")
-    .select("id,user_id,partner_user_id,initiated_by_id,status,initiated_at,accepted_at,revoked_at,created_at,updated_at")
+    .select(LINK_SELECT)
     .eq("user_id", uid)
     .eq("partner_user_id", partnerUserId)
     .maybeSingle();
@@ -35,7 +38,7 @@ async function findExistingLink(client, uid, partnerUserId) {
 
   const { data: d2, error: e2 } = await client
     .from("partner_links")
-    .select("id,user_id,partner_user_id,initiated_by_id,status,initiated_at,accepted_at,revoked_at,created_at,updated_at")
+    .select(LINK_SELECT)
     .eq("user_id", partnerUserId)
     .eq("partner_user_id", uid)
     .maybeSingle();
@@ -46,10 +49,14 @@ async function findExistingLink(client, uid, partnerUserId) {
 
 /**
  * Request a partner link (no codes).
- * If a link already exists (even revoked), we revive it instead of inserting a duplicate.
+ *
+ * SECURITY INTENT:
+ * - "Accepted" can only be done by the NON-initiator (enforced by RLS).
+ * - "Cancel pending" can only be done by the initiator (enforced by RLS).
+ * - Revoked links should not be "revived" by UPDATE because that can preserve old initiator
+ *   and/or hit stricter RLS paths. Instead: create a fresh pending row.
  *
  * IMPORTANT:
- * - initiated_by_id is immutable in DB (trigger). So we never change it on revive.
  * - Outgoing/incoming should be determined in UI using initiated_by_id, not row orientation.
  */
 export async function createPartnerRequest(partnerUserId, { supabase } = {}) {
@@ -64,25 +71,29 @@ export async function createPartnerRequest(partnerUserId, { supabase } = {}) {
 
     const existing = await findExistingLink(client, uid, partnerUserId);
 
-    if (existing?.id) {
-      // Revive without changing initiated_by_id (immutable)
-      const { data, error } = await client
-        .from("partner_links")
-        .update({
-          status: "pending",
-          initiated_at: now,
-          accepted_at: null,
-          revoked_at: null,
-        })
-        .eq("id", existing.id)
-        .select("id,user_id,partner_user_id,initiated_by_id,status,initiated_at,accepted_at,revoked_at,created_at,updated_at")
-        .single();
+    // If there is an active link (pending/accepted) that is NOT revoked, do not create a new one.
+    if (existing?.id && !existing?.revoked_at) {
+      const status = String(existing.status || "").toLowerCase();
 
-      if (error) throw error;
-      return data;
+      if (status === "accepted") {
+        throw new Error("You are already connected.");
+      }
+
+      if (status === "pending") {
+        // If I'm the initiator, it's already outgoing; if not, it's incoming.
+        if (normalizeUuid(existing.initiated_by_id) === normalizeUuid(uid)) {
+          throw new Error("Request already sent.");
+        }
+        throw new Error("You already have an incoming request from this user.");
+      }
+
+      // Unknown status but not revoked — safest: refuse rather than mutate.
+      throw new Error("A connection already exists.");
     }
 
-    // New row: initiated_by_id set once at creation time (allowed)
+    // If the previous relationship is revoked (or no row exists), create a NEW pending row.
+    // The partial unique index only applies when revoked_at IS NULL and status in (pending, accepted),
+    // so creating a new row is safe and keeps initiated_by_id correct for this attempt.
     const { data, error } = await client
       .from("partner_links")
       .insert([
@@ -92,12 +103,15 @@ export async function createPartnerRequest(partnerUserId, { supabase } = {}) {
           initiated_by_id: uid,
           status: "pending",
           initiated_at: now,
+          accepted_at: null,
+          revoked_at: null,
         },
       ])
-      .select("id,user_id,partner_user_id,initiated_by_id,status,initiated_at,accepted_at,revoked_at,created_at,updated_at")
-      .single();
+      .select(LINK_SELECT)
+      .maybeSingle();
 
     if (error) throw error;
+    if (!data?.id) throw new Error("Failed to create request.");
     return data;
   });
 }
@@ -109,6 +123,8 @@ export async function acceptPartnerRequest(linkId, { supabase } = {}) {
 
     const now = new Date().toISOString();
 
+    // Under strict RLS, this UPDATE may affect 0 rows (e.g., initiator trying to accept).
+    // Using .single() will throw "Cannot coerce..." when 0 rows are returned.
     const { data, error } = await client
       .from("partner_links")
       .update({
@@ -117,10 +133,13 @@ export async function acceptPartnerRequest(linkId, { supabase } = {}) {
         revoked_at: null,
       })
       .eq("id", linkId)
-      .select("id,user_id,partner_user_id,initiated_by_id,status,initiated_at,accepted_at,revoked_at,created_at,updated_at")
-      .single();
+      .select(LINK_SELECT)
+      .maybeSingle();
 
     if (error) throw error;
+    if (!data?.id) {
+      throw new Error("Not allowed to accept this request (or it no longer exists).");
+    }
     return data;
   });
 }
@@ -130,10 +149,9 @@ export async function fetchPartnerLinks({ supabase } = {}) {
     const client = getClient(supabase);
     await requireAuth(client);
 
-    const { data, error } = await client
-      .from("partner_links")
-      .select("id,user_id,partner_user_id,initiated_by_id,status,initiated_at,accepted_at,revoked_at,created_at,updated_at")
-      .order("updated_at", { ascending: false });
+    const { data, error } = await client.from("partner_links").select(LINK_SELECT).order("updated_at", {
+      ascending: false,
+    });
 
     if (error) throw error;
     return Array.isArray(data) ? data : [];
@@ -145,6 +163,8 @@ export async function revokePartnerLink(linkId, { supabase } = {}) {
     const client = getClient(supabase);
     await requireAuth(client);
 
+    // Under strict RLS, this UPDATE may affect 0 rows (e.g., non-initiator trying to cancel pending).
+    // Use maybeSingle + explicit message so we don't crash with "Cannot coerce..."
     const { data, error } = await client
       .from("partner_links")
       .update({
@@ -153,10 +173,13 @@ export async function revokePartnerLink(linkId, { supabase } = {}) {
         accepted_at: null,
       })
       .eq("id", linkId)
-      .select("id,user_id,partner_user_id,initiated_by_id,status,initiated_at,accepted_at,revoked_at,created_at,updated_at")
-      .single();
+      .select(LINK_SELECT)
+      .maybeSingle();
 
     if (error) throw error;
+    if (!data?.id) {
+      throw new Error("Not allowed to cancel/revoke this connection (or it no longer exists).");
+    }
     return data;
   });
 }
