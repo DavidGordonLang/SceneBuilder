@@ -1,5 +1,3 @@
-// src/lib/avatarSignedUrlCache.js
-
 const AVATAR_URL_LS_KEY = "scenebuilder.avatarSignedUrlCache.v1";
 
 let avatarSignedUrlCache = {
