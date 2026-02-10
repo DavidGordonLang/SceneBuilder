@@ -11,6 +11,7 @@ import TopKinksCard from "../components/profile/TopKinksCard";
 import ProfileHeaderCard from "../components/profile/ProfileHeaderCard";
 import ProfileDetailsCard from "../components/profile/ProfileDetailsCard";
 import ProfileActionsBar from "../components/profile/ProfileActionsBar";
+import ProfileAlerts from "../components/profile/ProfileAlerts";
 
 export default function ProfileScreen({ session, supabase }) {
   const navigate = useNavigate();
@@ -126,33 +127,7 @@ export default function ProfileScreen({ session, supabase }) {
           onSignOut={signOut}
         />
 
-        {error || localErr ? (
-          <div
-            style={{
-              padding: 10,
-              borderRadius: 10,
-              border: "1px solid rgba(255,80,80,0.35)",
-              background: "rgba(255,80,80,0.10)",
-              fontSize: 13,
-            }}
-          >
-            {localErr || error}
-          </div>
-        ) : null}
-
-        {localOk ? (
-          <div
-            style={{
-              padding: 10,
-              borderRadius: 10,
-              border: "1px solid rgba(120,255,170,0.25)",
-              background: "rgba(120,255,170,0.08)",
-              fontSize: 13,
-            }}
-          >
-            {localOk}
-          </div>
-        ) : null}
+        <ProfileAlerts error={error} localErr={localErr} localOk={localOk} />
 
         <ProfileHeaderCard
           supabase={supabase}
