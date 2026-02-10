@@ -6,78 +6,9 @@ import { SmallButton } from "../components/routesUi";
 import Page from "../components/Page";
 import { useAvatarUpload } from "../hooks/useAvatarUpload";
 import { useProfile } from "../hooks/useProfile";
-import {
-  acceptPartnerRequest,
-  createPartnerRequest,
-  fetchPartnerLinks,
-  revokePartnerLink,
-} from "../lib/partnersApi";
-
-const AVATAR_URL_LS_KEY = "scenebuilder.avatarSignedUrlCache.v1";
-
-let avatarSignedUrlCache = {
-  // [path]: { url, expiresAtMs }
-};
-
-function readAvatarCacheFromStorage() {
-  try {
-    const raw = localStorage.getItem(AVATAR_URL_LS_KEY);
-    if (!raw) return;
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return;
-
-    const next = {};
-    const now = Date.now();
-    for (const [k, v] of Object.entries(parsed)) {
-      const path = String(k || "").trim();
-      if (!path) continue;
-      const url = String(v?.url || "");
-      const expiresAtMs = Number(v?.expiresAtMs || 0);
-      if (!url || !expiresAtMs) continue;
-      if (expiresAtMs <= now) continue;
-      next[path] = { url, expiresAtMs };
-    }
-    avatarSignedUrlCache = next;
-  } catch {
-    // ignore
-  }
-}
-
-function writeAvatarCacheToStorage() {
-  try {
-    const entries = Object.entries(avatarSignedUrlCache || {});
-    entries.sort((a, b) => Number(b[1]?.expiresAtMs || 0) - Number(a[1]?.expiresAtMs || 0));
-    const capped = entries.slice(0, 25);
-
-    const obj = {};
-    for (const [k, v] of capped) obj[k] = v;
-    localStorage.setItem(AVATAR_URL_LS_KEY, JSON.stringify(obj));
-  } catch {
-    // ignore
-  }
-}
-
-if (typeof window !== "undefined") {
-  readAvatarCacheFromStorage();
-}
-
-function getCachedAvatarUrl(path) {
-  const key = String(path || "").trim();
-  if (!key) return "";
-  const hit = avatarSignedUrlCache[key];
-  if (!hit?.url || !hit?.expiresAtMs) return "";
-  if (Date.now() >= hit.expiresAtMs) return "";
-  return hit.url;
-}
-
-function setCachedAvatarUrl(path, url, ttlSeconds) {
-  const key = String(path || "").trim();
-  if (!key) return;
-  const safeTtl = Number(ttlSeconds) > 0 ? Number(ttlSeconds) : 3600;
-  const expiresAtMs = Date.now() + (safeTtl - 30) * 1000;
-  avatarSignedUrlCache[key] = { url: String(url || ""), expiresAtMs };
-  writeAvatarCacheToStorage();
-}
+import { useSignedAvatarUrl } from "../hooks/useSignedAvatarUrl";
+import { usePartnerConnections } from "../hooks/usePartnerConnections";
+import { setCachedAvatarUrl } from "../lib/avatarSignedUrlCache";
 
 function Field({ label, children, hint }) {
   return (
@@ -187,55 +118,6 @@ function MiniPill({ children }) {
   );
 }
 
-function shortId(id) {
-  if (!id) return "—";
-  return String(id).slice(0, 8) + "…";
-}
-
-function getOtherUserId(link, myId) {
-  if (!link || !myId) return "";
-  if (link.user_id === myId) return link.partner_user_id || "";
-  if (link.partner_user_id === myId) return link.user_id || "";
-  return link.partner_user_id || link.user_id || "";
-}
-
-function isAccepted(link) {
-  const s = String(link?.status || "").toLowerCase();
-  if (link?.revoked_at) return false;
-  if (s === "accepted") return true;
-  return Boolean(link?.accepted_at) && s !== "pending";
-}
-
-function isPending(link) {
-  const s = String(link?.status || "").toLowerCase();
-  if (link?.revoked_at) return false;
-  return s === "pending";
-}
-
-function getNiceNameFromProfile(p, fallbackId) {
-  const u = String(p?.username || "").trim();
-  const dn = String(p?.display_name || "").trim();
-  if (u) return u;
-  if (dn) return dn;
-  return shortId(fallbackId);
-}
-
-function isParticipant(link, myId) {
-  if (!link || !myId) return false;
-  return link.user_id === myId || link.partner_user_id === myId;
-}
-
-// KEY FIX: classify incoming/outgoing by who initiated, not row orientation.
-function isIncomingPending(link, myId) {
-  if (!isPending(link) || !isParticipant(link, myId)) return false;
-  return String(link.initiated_by_id || "") !== String(myId || "");
-}
-
-function isOutgoingPending(link, myId) {
-  if (!isPending(link) || !isParticipant(link, myId)) return false;
-  return String(link.initiated_by_id || "") === String(myId || "");
-}
-
 export default function ProfileScreen({ session, supabase }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -249,7 +131,6 @@ export default function ProfileScreen({ session, supabase }) {
   const [username, setUsername] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [bio, setBio] = useState("");
-  const [signedAvatarUrl, setSignedAvatarUrl] = useState("");
 
   const [busySave, setBusySave] = useState(false);
   const [localErr, setLocalErr] = useState("");
@@ -259,21 +140,14 @@ export default function ProfileScreen({ session, supabase }) {
   const shouldStartEditing = searchParams.get("edit") === "1";
   const [editing, setEditing] = useState(shouldStartEditing);
 
-  const [connLoading, setConnLoading] = useState(false);
-  const [connErr, setConnErr] = useState("");
-  const [connOk, setConnOk] = useState("");
-  const [connections, setConnections] = useState([]);
-  const [partnerProfilesById, setPartnerProfilesById] = useState({});
-
-  const [incomingRequests, setIncomingRequests] = useState([]);
-  const [outgoingRequests, setOutgoingRequests] = useState([]);
-
-  const [partnerQuery, setPartnerQuery] = useState("");
-  const [partnerSearchBusy, setPartnerSearchBusy] = useState(false);
-  const [partnerResults, setPartnerResults] = useState([]);
-  const [partnerSearchRawCount, setPartnerSearchRawCount] = useState(null);
-
   const [kinksModal, setKinksModal] = useState(null);
+
+  const { signedAvatarUrl, setSignedAvatarUrl } = useSignedAvatarUrl({
+    supabase,
+    path: profile?.avatar_url,
+  });
+
+  const partners = usePartnerConnections({ supabase, userId });
 
   useEffect(() => {
     setEditing(shouldStartEditing);
@@ -285,7 +159,6 @@ export default function ProfileScreen({ session, supabase }) {
   }, [profile?.display_name, profile?.username, session?.user?.email]);
 
   // ✅ FIX: Do NOT overwrite draft edits while editing.
-  // Avatar uploads refresh the profile row, which would otherwise stomp unsaved inputs.
   useEffect(() => {
     if (editing) return;
 
@@ -295,54 +168,9 @@ export default function ProfileScreen({ session, supabase }) {
   }, [editing, profile?.username, profile?.display_name, profile?.bio]);
 
   useEffect(() => {
-    let cancelled = false;
-
-    async function run(path) {
-      if (!supabase) return;
-
-      const cached = getCachedAvatarUrl(path);
-      if (cached) {
-        setSignedAvatarUrl(cached);
-        return;
-      }
-
-      try {
-        const ttl = 60 * 60;
-        const { data, error: sErr } = await supabase.storage.from("avatars").createSignedUrl(path, ttl);
-        if (sErr) throw sErr;
-
-        const nextUrl = data?.signedUrl || "";
-        if (!cancelled) {
-          if (nextUrl) {
-            setSignedAvatarUrl(nextUrl);
-            setCachedAvatarUrl(path, nextUrl, ttl);
-          } else {
-            setSignedAvatarUrl("");
-          }
-        }
-      } catch {
-        if (!cancelled) {
-          const fallback = getCachedAvatarUrl(path);
-          if (fallback) setSignedAvatarUrl(fallback);
-          else setSignedAvatarUrl("");
-        }
-      }
-    }
-
-    const path = String(profile?.avatar_url || "").trim();
-    if (!path) {
-      setSignedAvatarUrl("");
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    run(path);
-
-    return () => {
-      cancelled = true;
-    };
-  }, [supabase, profile?.avatar_url]);
+    partners.loadConnections();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
 
   async function signOut() {
     await supabase.auth.signOut();
@@ -427,203 +255,6 @@ export default function ProfileScreen({ session, supabase }) {
   const showSkeleton = loading && !profile;
 
   const onboardingLabel = profile ? (profile.onboarding_complete ? "Complete" : "Not complete") : "";
-
-  async function signAvatarForPath(path) {
-    const p = String(path || "").trim();
-    if (!p || !supabase) return "";
-
-    const cached = getCachedAvatarUrl(p);
-    if (cached) return cached;
-
-    try {
-      const ttl = 60 * 60;
-      const { data, error: sErr } = await supabase.storage.from("avatars").createSignedUrl(p, ttl);
-      if (sErr) throw sErr;
-      const url = data?.signedUrl || "";
-      if (url) setCachedAvatarUrl(p, url, ttl);
-      return url;
-    } catch {
-      return "";
-    }
-  }
-
-  async function fetchPartnerProfilesByIds(ids) {
-    const list = Array.from(new Set((ids || []).filter(Boolean)));
-    if (!supabase || !userId || !list.length) return {};
-
-    const { data, error: rErr } = await supabase.rpc("fetch_partner_profiles_by_ids", { p_ids: list });
-    if (rErr) throw rErr;
-
-    const map = {};
-    for (const row of data || []) {
-      map[row.id] = row;
-    }
-    return map;
-  }
-
-  async function loadConnections() {
-    if (!supabase || !userId) return;
-    setConnLoading(true);
-    setConnErr("");
-    setConnOk("");
-
-    try {
-      const links = await fetchPartnerLinks({ supabase });
-
-      const acceptedConnections = (links || []).filter((l) => isAccepted(l));
-
-      // KEY FIX: pending buckets by initiated_by_id
-      const incoming = (links || []).filter((l) => isIncomingPending(l, userId));
-      const outgoing = (links || []).filter((l) => isOutgoingPending(l, userId));
-
-      setIncomingRequests(incoming);
-      setOutgoingRequests(outgoing);
-
-      const partnerIds = Array.from(
-        new Set(
-          acceptedConnections
-            .map((l) => getOtherUserId(l, userId))
-            .filter(Boolean)
-        )
-      );
-
-      const reqIds = Array.from(
-        new Set(
-          [...incoming, ...outgoing]
-            .map((l) => getOtherUserId(l, userId))
-            .filter(Boolean)
-        )
-      );
-
-      const allProfileIds = Array.from(new Set([...partnerIds, ...reqIds].filter(Boolean)));
-
-      let profilesById = {};
-      if (allProfileIds.length) {
-        profilesById = await fetchPartnerProfilesByIds(allProfileIds);
-      }
-      setPartnerProfilesById(profilesById);
-
-      const rows = [];
-      for (const link of acceptedConnections) {
-        const otherId = getOtherUserId(link, userId);
-        const p = profilesById[otherId] || null;
-        const signed = p?.avatar_url ? await signAvatarForPath(p.avatar_url) : "";
-        rows.push({
-          link,
-          profile: p,
-          signedAvatarUrl: signed,
-          otherId,
-        });
-      }
-
-      rows.sort((a, b) => {
-        const an = String(a.profile?.username || a.profile?.display_name || "").toLowerCase();
-        const bn = String(b.profile?.username || b.profile?.display_name || "").toLowerCase();
-        if (an && bn && an !== bn) return an.localeCompare(bn);
-        return String(a.otherId || "").localeCompare(String(b.otherId || ""));
-      });
-
-      setConnections(rows);
-    } catch (e) {
-      setConnErr(e?.message || "Failed to load connections.");
-      setConnections([]);
-      setIncomingRequests([]);
-      setOutgoingRequests([]);
-      setPartnerProfilesById({});
-    } finally {
-      setConnLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    loadConnections();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId]);
-
-  async function handleRemoveConnection(linkId) {
-    if (!supabase || !linkId) return;
-    setConnErr("");
-    setConnOk("");
-
-    try {
-      await revokePartnerLink(String(linkId), { supabase });
-      setConnOk("Connection removed.");
-      await loadConnections();
-    } catch (e) {
-      setConnErr(e?.message || "Failed to remove connection.");
-    }
-  }
-
-  async function doSearchPartners() {
-    const q = String(partnerQuery || "").trim();
-    if (!q || !supabase || !userId) return;
-
-    setPartnerSearchBusy(true);
-    setConnErr("");
-    setConnOk("");
-    setPartnerSearchRawCount(null);
-
-    try {
-      const { data, error: sErr } = await supabase.rpc("search_profiles_by_username", {
-        p_query: q,
-        p_limit: 10,
-      });
-
-      if (sErr) throw sErr;
-
-      const raw = Array.isArray(data) ? data : [];
-      setPartnerSearchRawCount(raw.length);
-
-      const existing = new Set((connections || []).map((c) => c.otherId));
-      const existingPending = new Set(
-        [...incomingRequests, ...outgoingRequests].map((l) => getOtherUserId(l, userId)).filter(Boolean)
-      );
-
-      const cleaned = raw
-        .filter((r) => r.id !== userId)
-        .filter((r) => !existing.has(r.id))
-        .filter((r) => !existingPending.has(r.id));
-
-      setPartnerResults(cleaned);
-    } catch (e) {
-      setPartnerResults([]);
-      setPartnerSearchRawCount(null);
-      setConnErr(e?.message || "Partner search failed.");
-    } finally {
-      setPartnerSearchBusy(false);
-    }
-  }
-
-  async function sendRequest(partnerUserId) {
-    if (!supabase || !partnerUserId) return;
-    setConnErr("");
-    setConnOk("");
-
-    try {
-      await createPartnerRequest(partnerUserId, { supabase });
-      setConnOk("Request sent.");
-      setPartnerResults([]);
-      setPartnerQuery("");
-      setPartnerSearchRawCount(null);
-      await loadConnections();
-    } catch (e) {
-      setConnErr(e?.message || "Failed to send request.");
-    }
-  }
-
-  async function acceptRequest(linkId) {
-    if (!supabase || !linkId) return;
-    setConnErr("");
-    setConnOk("");
-
-    try {
-      await acceptPartnerRequest(linkId, { supabase });
-      setConnOk("Connected.");
-      await loadConnections();
-    } catch (e) {
-      setConnErr(e?.message || "Failed to accept request.");
-    }
-  }
 
   const topKinks = useMemo(() => {
     const v = profile?.top_kinks;
@@ -851,12 +482,12 @@ export default function ProfileScreen({ session, supabase }) {
           title="Connections"
           subtitle="Search by username, send requests, accept requests"
           right={
-            <SmallButton onClick={loadConnections} disabled={connLoading} title="Refresh connections">
-              {connLoading ? "Loading..." : "Refresh"}
+            <SmallButton onClick={partners.loadConnections} disabled={partners.connLoading} title="Refresh connections">
+              {partners.connLoading ? "Loading..." : "Refresh"}
             </SmallButton>
           }
         >
-          {connErr ? (
+          {partners.connErr ? (
             <div
               style={{
                 padding: 10,
@@ -867,11 +498,11 @@ export default function ProfileScreen({ session, supabase }) {
                 marginBottom: 10,
               }}
             >
-              {connErr}
+              {partners.connErr}
             </div>
           ) : null}
 
-          {connOk ? (
+          {partners.connOk ? (
             <div
               style={{
                 padding: 10,
@@ -882,7 +513,7 @@ export default function ProfileScreen({ session, supabase }) {
                 marginBottom: 10,
               }}
             >
-              {connOk}
+              {partners.connOk}
             </div>
           ) : null}
 
@@ -890,18 +521,21 @@ export default function ProfileScreen({ session, supabase }) {
             <div style={{ fontSize: 12, opacity: 0.7, fontWeight: 750 }}>Find by username</div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
               <Input
-                value={partnerQuery}
-                onChange={(e) => setPartnerQuery(e.target.value)}
+                value={partners.partnerQuery}
+                onChange={(e) => partners.setPartnerQuery(e.target.value)}
                 placeholder="Search usernames (e.g. David)"
               />
-              <SmallButton onClick={doSearchPartners} disabled={partnerSearchBusy || !partnerQuery.trim()}>
-                {partnerSearchBusy ? "Searching..." : "Search"}
+              <SmallButton
+                onClick={partners.doSearchPartners}
+                disabled={partners.partnerSearchBusy || !partners.partnerQuery.trim()}
+              >
+                {partners.partnerSearchBusy ? "Searching..." : "Search"}
               </SmallButton>
             </div>
 
-            {partnerResults.length ? (
+            {partners.partnerResults.length ? (
               <div style={{ display: "grid", gap: 8, marginTop: 6 }}>
-                {partnerResults.map((r) => (
+                {partners.partnerResults.map((r) => (
                   <div
                     key={r.id}
                     style={{
@@ -916,18 +550,18 @@ export default function ProfileScreen({ session, supabase }) {
                     }}
                   >
                     <div style={{ display: "grid", gap: 2 }}>
-                      <div style={{ fontWeight: 850 }}>{r.username || shortId(r.id)}</div>
+                      <div style={{ fontWeight: 850 }}>{r.username || partners.helpers.shortId(r.id)}</div>
                       <div style={{ fontSize: 12, opacity: 0.65 }}>{r.display_name || "—"}</div>
                     </div>
-                    <SmallButton onClick={() => sendRequest(r.id)} title="Send connection request">
+                    <SmallButton onClick={() => partners.sendRequest(r.id)} title="Send connection request">
                       Connect
                     </SmallButton>
                   </div>
                 ))}
               </div>
-            ) : partnerQuery.trim() ? (
+            ) : partners.partnerQuery.trim() ? (
               <div style={{ fontSize: 12, opacity: 0.7, lineHeight: 1.35 }}>
-                {partnerSearchRawCount === 0
+                {partners.partnerSearchRawCount === 0
                   ? "No matches found."
                   : "No new people to connect — already connected or a request is pending."}
               </div>
@@ -940,15 +574,14 @@ export default function ProfileScreen({ session, supabase }) {
 
           <div style={{ height: 12 }} />
 
-          {incomingRequests.length ? (
+          {partners.incomingRequests.length ? (
             <div style={{ display: "grid", gap: 8 }}>
               <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 800 }}>Incoming requests</div>
-              {incomingRequests.map((l) => {
-                const otherId = getOtherUserId(l, userId);
-                const p = partnerProfilesById?.[otherId] || null;
-                const nice = getNiceNameFromProfile(p, otherId);
+              {partners.incomingRequests.map((l) => {
+                const otherId = partners.helpers.getOtherUserId(l, userId);
+                const p = partners.partnerProfilesById?.[otherId] || null;
+                const nice = partners.helpers.getNiceNameFromProfile(p, otherId);
 
-                // Defensive: only show Accept if you are NOT the initiator
                 const canAccept = String(l.initiated_by_id || "") !== String(userId || "");
 
                 return (
@@ -968,11 +601,11 @@ export default function ProfileScreen({ session, supabase }) {
                     <div style={{ display: "grid", gap: 2 }}>
                       <div style={{ fontWeight: 850 }}>Request from {nice}</div>
                       <div style={{ fontSize: 12, opacity: 0.65 }}>
-                        {p?.display_name ? p.display_name : p?.username ? "—" : shortId(otherId)}
+                        {p?.display_name ? p.display_name : p?.username ? "—" : partners.helpers.shortId(otherId)}
                       </div>
                     </div>
                     {canAccept ? (
-                      <SmallButton onClick={() => acceptRequest(l.id)} title="Accept connection request">
+                      <SmallButton onClick={() => partners.acceptRequest(l.id)} title="Accept connection request">
                         Accept
                       </SmallButton>
                     ) : (
@@ -984,15 +617,15 @@ export default function ProfileScreen({ session, supabase }) {
             </div>
           ) : null}
 
-          {incomingRequests.length ? <div style={{ height: 12 }} /> : null}
+          {partners.incomingRequests.length ? <div style={{ height: 12 }} /> : null}
 
-          {outgoingRequests.length ? (
+          {partners.outgoingRequests.length ? (
             <div style={{ display: "grid", gap: 8 }}>
               <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 800 }}>Outgoing requests</div>
-              {outgoingRequests.map((l) => {
-                const otherId = getOtherUserId(l, userId);
-                const p = partnerProfilesById?.[otherId] || null;
-                const nice = getNiceNameFromProfile(p, otherId);
+              {partners.outgoingRequests.map((l) => {
+                const otherId = partners.helpers.getOtherUserId(l, userId);
+                const p = partners.partnerProfilesById?.[otherId] || null;
+                const nice = partners.helpers.getNiceNameFromProfile(p, otherId);
 
                 return (
                   <div
@@ -1012,7 +645,11 @@ export default function ProfileScreen({ session, supabase }) {
                       <div style={{ fontWeight: 850 }}>Pending to {nice}</div>
                       <div style={{ fontSize: 12, opacity: 0.65 }}>Waiting for acceptance</div>
                     </div>
-                    <SmallButton tone="danger" onClick={() => handleRemoveConnection(l.id)} title="Cancel request">
+                    <SmallButton
+                      tone="danger"
+                      onClick={() => partners.revokeLink(l.id, "Request cancelled.")}
+                      title="Cancel request"
+                    >
                       Cancel
                     </SmallButton>
                   </div>
@@ -1021,17 +658,17 @@ export default function ProfileScreen({ session, supabase }) {
             </div>
           ) : null}
 
-          {outgoingRequests.length ? <div style={{ height: 12 }} /> : null}
+          {partners.outgoingRequests.length ? <div style={{ height: 12 }} /> : null}
 
           <div style={{ display: "grid", gap: 10 }}>
             <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 800 }}>Connected</div>
 
-            {connLoading ? (
+            {partners.connLoading ? (
               <div style={{ opacity: 0.75, fontSize: 13 }}>Loading connections…</div>
-            ) : connections.length ? (
+            ) : partners.connections.length ? (
               <div style={{ display: "grid", gap: 10 }}>
-                {connections.map((c) => {
-                  const name = c.profile?.username || c.profile?.display_name || shortId(c.otherId);
+                {partners.connections.map((c) => {
+                  const name = c.profile?.username || c.profile?.display_name || partners.helpers.shortId(c.otherId);
                   const avatar = c.signedAvatarUrl || "";
                   const initials2 = String(name || "U").slice(0, 1).toUpperCase();
 
@@ -1091,7 +728,7 @@ export default function ProfileScreen({ session, supabase }) {
                         </SmallButton>
                         <SmallButton
                           tone="danger"
-                          onClick={() => handleRemoveConnection(c.link?.id)}
+                          onClick={() => partners.revokeLink(c.link?.id, "Connection removed.")}
                           title="Remove connection"
                         >
                           Remove
