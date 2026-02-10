@@ -10,6 +10,7 @@ import KinksPreviewModal from "../components/profile/KinksPreviewModal";
 import TopKinksCard from "../components/profile/TopKinksCard";
 import ProfileHeaderCard from "../components/profile/ProfileHeaderCard";
 import ProfileDetailsCard from "../components/profile/ProfileDetailsCard";
+import ProfileActionsBar from "../components/profile/ProfileActionsBar";
 
 export default function ProfileScreen({ session, supabase }) {
   const navigate = useNavigate();
@@ -114,36 +115,16 @@ export default function ProfileScreen({ session, supabase }) {
   return (
     <div>
       <Page style={{ display: "grid", gap: 14 }}>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 10,
-            flexWrap: "wrap",
-          }}
-        >
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-            {!editing ? (
-              <SmallButton onClick={handleStartEdit} disabled={busy} title="Edit profile">
-                Edit
-              </SmallButton>
-            ) : (
-              <>
-                <SmallButton onClick={handleCancelEdit} disabled={busy} title="Cancel editing">
-                  Cancel
-                </SmallButton>
-                <SmallButton onClick={handleSave} disabled={busy} title="Save changes">
-                  {busySave ? "Saving..." : "Save"}
-                </SmallButton>
-              </>
-            )}
-          </div>
-
-          <SmallButton tone="danger" onClick={signOut} title="Sign out">
-            Sign out
-          </SmallButton>
-        </div>
+        <ProfileActionsBar
+          SmallButton={SmallButton}
+          editing={editing}
+          busy={busy}
+          busySave={busySave}
+          onStartEdit={handleStartEdit}
+          onCancelEdit={handleCancelEdit}
+          onSave={handleSave}
+          onSignOut={signOut}
+        />
 
         {error || localErr ? (
           <div
