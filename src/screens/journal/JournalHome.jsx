@@ -205,11 +205,20 @@ function KebabMenu({ open, onEdit, onDelete }) {
   if (!open) return null;
 
   return (
-    <div style={boxStyle} role="menu">
+    <div
+      style={boxStyle}
+      role="menu"
+      onMouseDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+    >
       <button
         type="button"
         role="menuitem"
-        onClick={onEdit}
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation();
+          onEdit?.();
+        }}
         style={{
           width: "100%",
           textAlign: "left",
@@ -227,7 +236,11 @@ function KebabMenu({ open, onEdit, onDelete }) {
       <button
         type="button"
         role="menuitem"
-        onClick={onDelete}
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete?.();
+        }}
         style={{
           width: "100%",
           textAlign: "left",
@@ -393,9 +406,8 @@ export default function JournalHome({ supabase, session }) {
       if (editing?.id) {
         const updated = await updateJournalEntry({
           supabase,
-          userId,
           id: editing.id,
-          ...payload,
+          patch: payload,
         });
         const next = (entries || []).map((e) => (e.id === editing.id ? updated : e));
         setEntries(next);
@@ -405,7 +417,7 @@ export default function JournalHome({ supabase, session }) {
         const created = await createJournalEntry({
           supabase,
           userId,
-          ...payload,
+          entry: payload,
         });
         const next = [created, ...(entries || [])];
         setEntries(next);
