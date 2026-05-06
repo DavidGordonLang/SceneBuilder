@@ -5,6 +5,7 @@ import { ToastProvider } from "./ui/ToastContext.jsx";
 
 import ScenesHome from "./screens/scenes/ScenesHome";
 import SceneCreate from "./screens/scenes/SceneCreate";
+import SceneView from "./screens/scenes/SceneView";
 import SceneEdit from "./screens/scenes/SceneEdit";
 
 import ToolsHome from "./screens/tools/ToolsHome";
@@ -444,7 +445,7 @@ function AuthedShell({ session }) {
             {/* Scenes */}
             <Route path="/scenes" element={<ScenesHome supabase={supabase} session={session} />} />
             <Route path="/scenes/new" element={<SceneCreate supabase={supabase} session={session} />} />
-            <Route path="/scenes/:id" element={<Navigate to="/scenes" replace />} />
+            <Route path="/scenes/:id" element={<SceneView />} />
             <Route path="/scenes/:id/edit" element={<SceneEdit supabase={supabase} session={session} />} />
 
             {/* Tools */}
