@@ -63,6 +63,23 @@ function ToolRow({ tool }) {
   );
 }
 
+function sectionsFromBlocks(blocks) {
+  const arr = Array.isArray(blocks) ? blocks : [];
+  if (!arr.length) return [];
+  return arr
+    .slice()
+    .sort((a, b) => (a?.sort_order ?? 0) - (b?.sort_order ?? 0))
+    .map((b) => ({
+      title: String(b?.title || "").trim() || "Stage",
+      body: String(b?.body || ""),
+      duration_minutes:
+        b?.duration_minutes === null || b?.duration_minutes === undefined
+          ? null
+          : Number(b.duration_minutes),
+    }))
+    .filter((s) => s.title && (s.body || "").trim().length > 0);
+}
+
 function KebabMenu({ open, onToggle, onEdit, onDelete, busy }) {
   const ref = useRef(null);
 
@@ -142,7 +159,7 @@ function KebabMenu({ open, onToggle, onEdit, onDelete, busy }) {
 export default function SceneView() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const toast = useToast();
+  const { showToast } = useToast();
 
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
@@ -191,14 +208,18 @@ export default function SceneView() {
         if (error) throw error;
       }
       {
+        const { error } = await supabase.from("scene_blocks").delete().eq("scene_id", scene.id);
+        if (error) throw error;
+      }
+      {
         const { error } = await supabase.from("scenes").delete().eq("id", scene.id);
         if (error) throw error;
       }
 
-      toast.show("Scene deleted.");
+      showToast("Scene deleted.");
       navigate("/scenes");
     } catch (e) {
-      toast.show(e?.message || "Could not delete scene.");
+      showToast(e?.message || "Could not delete scene.");
     } finally {
       setBusy(false);
     }
@@ -223,9 +244,10 @@ export default function SceneView() {
         };
       })
       .filter((t) => t?.id) ?? [];
+  const sections = sectionsFromBlocks(scene?.scene_blocks);
 
   return (
-    <div>
+    <div style={{ minHeight: "100vh" }}>
       <Page
         style={{
           display: "flex",
@@ -283,6 +305,45 @@ export default function SceneView() {
                   </div>
                 ) : null}
               </div>
+            </Card>
+
+            <Card>
+              <div style={{ fontWeight: 900, marginBottom: 10 }}>Scene plan</div>
+              {sections.length ? (
+                <div style={{ display: "grid", gap: 10 }}>
+                  {sections.map((sec, idx) => (
+                    <div
+                      key={`${sec.title}-${idx}`}
+                      style={{
+                        padding: 10,
+                        borderRadius: 14,
+                        background: "rgba(255,255,255,0.03)",
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                        <div style={{ fontWeight: 850, fontSize: 13 }}>{sec.title}</div>
+                        {sec.duration_minutes ? (
+                          <div style={{ fontSize: 12, opacity: 0.6 }}>{sec.duration_minutes} min</div>
+                        ) : null}
+                      </div>
+                      {sec.body ? (
+                        <div
+                          style={{
+                            marginTop: 6,
+                            whiteSpace: "pre-wrap",
+                            lineHeight: 1.4,
+                            opacity: 0.9,
+                          }}
+                        >
+                          {sec.body}
+                        </div>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ opacity: 0.65, fontSize: 12 }}>No stages filled yet.</div>
+              )}
             </Card>
 
             <Card>
