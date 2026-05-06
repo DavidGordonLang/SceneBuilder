@@ -95,6 +95,56 @@ function SkeletonCard() {
   );
 }
 
+function DeleteSceneModal({ open, saving, onCancel, onConfirm }) {
+  if (!open) return null;
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 9999,
+        background: "rgba(0,0,0,0.72)",
+        display: "grid",
+        placeItems: "center",
+        padding: 16,
+      }}
+      onClick={saving ? undefined : onCancel}
+    >
+      <div
+        style={{
+          width: "100%",
+          maxWidth: 420,
+          borderRadius: 16,
+          border: "1px solid rgba(255,255,255,0.12)",
+          background: "rgba(20,20,28,0.96)",
+          padding: 14,
+          boxShadow: "0 24px 70px rgba(0,0,0,0.45)",
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ display: "grid", gap: 8 }}>
+          <div style={{ fontWeight: 950 }}>Delete scene?</div>
+          <div style={{ fontSize: 13, opacity: 0.78, lineHeight: 1.4 }}>
+            This will permanently delete this scene, including its plan, participants, and tools. This cannot be undone.
+          </div>
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
+          <SmallButton onClick={onCancel} disabled={saving}>
+            Cancel
+          </SmallButton>
+          <SmallButton onClick={onConfirm} disabled={saving}>
+            {saving ? "Deleting..." : "Delete"}
+          </SmallButton>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ScenesHome() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -108,6 +158,7 @@ export default function ScenesHome() {
 
   const [openScenes, setOpenScenes] = useState(() => new Set());
   const [details, setDetails] = useState(() => scenesHomeCache.details || {});
+  const [pendingDeleteScene, setPendingDeleteScene] = useState(null);
 
   const showInitialSkeleton = loading && !hasCache && scenes.length === 0;
 
@@ -255,10 +306,7 @@ export default function ScenesHome() {
     }
   }
 
-  async function deleteScene(sceneId, title) {
-    const ok = window.confirm(`Delete "${title}"? This cannot be undone.`);
-    if (!ok) return;
-
+  async function deleteScene(sceneId) {
     setBusy(true);
     setErr("");
     try {
@@ -283,6 +331,7 @@ export default function ScenesHome() {
       });
 
       await reload({ silent: true });
+      setPendingDeleteScene(null);
     } catch (e) {
       setErr(e?.message || "Could not delete scene.");
     } finally {
@@ -487,7 +536,7 @@ export default function ScenesHome() {
                           disabled={busy}
                           onClick={(e) => {
                             e.stopPropagation();
-                            deleteScene(s.id, s.title);
+                            setPendingDeleteScene(s);
                           }}
                         >
                           Delete
@@ -501,6 +550,13 @@ export default function ScenesHome() {
           })}
         </div>
       </Page>
+
+      <DeleteSceneModal
+        open={Boolean(pendingDeleteScene)}
+        saving={busy}
+        onCancel={() => setPendingDeleteScene(null)}
+        onConfirm={() => deleteScene(pendingDeleteScene?.id)}
+      />
     </div>
   );
 }

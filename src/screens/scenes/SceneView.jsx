@@ -156,6 +156,56 @@ function KebabMenu({ open, onToggle, onEdit, onDelete, busy }) {
   );
 }
 
+function DeleteSceneModal({ open, saving, onCancel, onConfirm }) {
+  if (!open) return null;
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 9999,
+        background: "rgba(0,0,0,0.72)",
+        display: "grid",
+        placeItems: "center",
+        padding: 16,
+      }}
+      onClick={saving ? undefined : onCancel}
+    >
+      <div
+        style={{
+          width: "100%",
+          maxWidth: 420,
+          borderRadius: 16,
+          border: "1px solid rgba(255,255,255,0.12)",
+          background: "rgba(20,20,28,0.96)",
+          padding: 14,
+          boxShadow: "0 24px 70px rgba(0,0,0,0.45)",
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ display: "grid", gap: 8 }}>
+          <div style={{ fontWeight: 950 }}>Delete scene?</div>
+          <div style={{ fontSize: 13, opacity: 0.78, lineHeight: 1.4 }}>
+            This will permanently delete this scene, including its plan, participants, and tools. This cannot be undone.
+          </div>
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
+          <SmallButton onClick={onCancel} disabled={saving}>
+            Cancel
+          </SmallButton>
+          <SmallButton onClick={onConfirm} disabled={saving}>
+            {saving ? "Deleting..." : "Delete"}
+          </SmallButton>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function SceneView() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -165,6 +215,7 @@ export default function SceneView() {
   const [err, setErr] = useState("");
   const [scene, setScene] = useState(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -191,8 +242,6 @@ export default function SceneView() {
 
   async function handleDelete() {
     if (!scene?.id) return;
-    const ok = window.confirm("Delete this scene? This cannot be undone.");
-    if (!ok) return;
 
     setBusy(true);
     try {
@@ -216,6 +265,7 @@ export default function SceneView() {
         if (error) throw error;
       }
 
+      setDeleteModalOpen(false);
       showToast("Scene deleted.");
       navigate("/scenes");
     } catch (e) {
@@ -268,7 +318,7 @@ export default function SceneView() {
           open={menuOpen}
           onToggle={setMenuOpen}
           onEdit={() => navigate(`/scenes/${id}/edit`)}
-          onDelete={handleDelete}
+          onDelete={() => setDeleteModalOpen(true)}
           busy={busy}
         />
       </Page>
@@ -374,6 +424,13 @@ export default function SceneView() {
           </div>
         )}
       </Page>
+
+      <DeleteSceneModal
+        open={deleteModalOpen}
+        saving={busy}
+        onCancel={() => setDeleteModalOpen(false)}
+        onConfirm={handleDelete}
+      />
     </div>
   );
 }
