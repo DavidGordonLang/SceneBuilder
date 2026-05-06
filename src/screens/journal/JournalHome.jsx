@@ -259,6 +259,56 @@ function KebabMenu({ open, onEdit, onDelete }) {
   );
 }
 
+function DeleteEntryModal({ open, saving, onCancel, onConfirm }) {
+  if (!open) return null;
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 9999,
+        background: "rgba(0,0,0,0.72)",
+        display: "grid",
+        placeItems: "center",
+        padding: 16,
+      }}
+      onClick={saving ? undefined : onCancel}
+    >
+      <div
+        style={{
+          width: "100%",
+          maxWidth: 420,
+          borderRadius: 16,
+          border: "1px solid rgba(255,255,255,0.12)",
+          background: "rgba(20,20,28,0.96)",
+          padding: 14,
+          boxShadow: "0 24px 70px rgba(0,0,0,0.45)",
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ display: "grid", gap: 8 }}>
+          <div style={{ fontWeight: 950 }}>Delete journal entry?</div>
+          <div style={{ fontSize: 13, opacity: 0.78, lineHeight: 1.4 }}>
+            This will permanently delete this journal entry. This cannot be undone.
+          </div>
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
+          <SmallButton onClick={onCancel} disabled={saving}>
+            Cancel
+          </SmallButton>
+          <SmallButton onClick={onConfirm} disabled={saving}>
+            {saving ? "Deleting..." : "Delete"}
+          </SmallButton>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function JournalHome({ supabase, session }) {
   const { showToast } = useToast();
   const navigate = useNavigate();
@@ -274,6 +324,7 @@ export default function JournalHome({ supabase, session }) {
   const [entries, setEntries] = useState(() => (Array.isArray(cachedForUser) ? cachedForUser : []));
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState(null);
+  const [pendingDeleteEntry, setPendingDeleteEntry] = useState(null);
   const handledEditStateRef = useRef(false);
 
   const [openEntryId, setOpenEntryId] = useState(null);
@@ -434,9 +485,7 @@ export default function JournalHome({ supabase, session }) {
   }
 
   async function handleDelete(id) {
-    if (!userId) return;
-    const ok = window.confirm("Delete this entry? This cannot be undone.");
-    if (!ok) return;
+    if (!userId || !id) return;
 
     setSaving(true);
     setErr("");
@@ -448,6 +497,7 @@ export default function JournalHome({ supabase, session }) {
       persistCache(next);
 
       setMenuOpenForId(null);
+      setPendingDeleteEntry(null);
       if (openEntryId === id) setOpenEntryId(null);
 
       showToast("Deleted.");
@@ -618,7 +668,10 @@ export default function JournalHome({ supabase, session }) {
                                 setEditing(e);
                                 setOpenEntryId(null);
                               }}
-                              onDelete={() => handleDelete(e.id)}
+                              onDelete={() => {
+                                setMenuOpenForId(null);
+                                setPendingDeleteEntry(e);
+                              }}
                             />
                           </div>
                         </div>
@@ -631,6 +684,13 @@ export default function JournalHome({ supabase, session }) {
           ))}
         </div>
       </Page>
+
+      <DeleteEntryModal
+        open={Boolean(pendingDeleteEntry)}
+        saving={saving}
+        onCancel={() => setPendingDeleteEntry(null)}
+        onConfirm={() => handleDelete(pendingDeleteEntry?.id)}
+      />
     </div>
   );
 }
