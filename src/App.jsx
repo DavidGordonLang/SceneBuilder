@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { NavLink, Route, Routes, Navigate, useLocation } from "react-router-dom";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { NavLink, Route, Routes, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { supabase } from "./lib/supabaseClient";
 import { ToastProvider } from "./ui/ToastContext.jsx";
 
@@ -138,6 +138,8 @@ function PillLink({ to, label, end = false }) {
   );
 }
 
+let authCallbackExchangePromise = null;
+
 function MinimalAuthScreen() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -148,7 +150,7 @@ function MinimalAuthScreen() {
     try {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
-        options: { redirectTo: window.location.origin },
+        options: { redirectTo: `${window.location.origin}/auth/callback` },
       });
       if (error) throw error;
     } catch (e) {
@@ -206,6 +208,91 @@ function MinimalAuthScreen() {
         >
           {busy ? "Opening Google…" : "Continue with Google"}
         </button>
+      </div>
+    </div>
+  );
+}
+
+function AuthCallback() {
+  const navigate = useNavigate();
+  const hasRunRef = useRef(false);
+  const [err, setErr] = useState("");
+  const [status, setStatus] = useState("Finishing sign-in...");
+
+  useEffect(() => {
+    let alive = true;
+    const timeoutId = window.setTimeout(() => {
+      if (!alive) return;
+      setErr("Sign-in is taking too long. Please try again from the sign-in screen.");
+    }, 15000);
+
+    async function exchangeCode() {
+      if (hasRunRef.current) return;
+      hasRunRef.current = true;
+
+      const params = new URLSearchParams(window.location.search || "");
+      const code = params.get("code");
+
+      try {
+        if (code) {
+          setStatus("Exchanging sign-in code...");
+          if (!authCallbackExchangePromise) {
+            authCallbackExchangePromise = supabase.auth.exchangeCodeForSession(code);
+          }
+
+          const { error } = await authCallbackExchangePromise;
+          if (error) throw error;
+          if (!alive) return;
+          navigate("/scenes", { replace: true });
+          return;
+        }
+
+        setStatus("Checking existing session...");
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (!alive) return;
+
+        if (session) {
+          navigate("/scenes", { replace: true });
+          return;
+        }
+
+        setErr("Missing auth callback code.");
+      } catch (e) {
+        authCallbackExchangePromise = null;
+        if (!alive) return;
+        const message = e?.message || "Sign-in callback failed.";
+        const errorStatus = e?.status || e?.cause?.status || null;
+        setErr(errorStatus ? `${message} (status ${errorStatus})` : message);
+      }
+    }
+
+    exchangeCode();
+
+    return () => {
+      alive = false;
+      window.clearTimeout(timeoutId);
+    };
+  }, [navigate]);
+
+  return (
+    <div style={{ minHeight: "100vh", padding: 16, display: "grid", placeItems: "center" }}>
+      <div
+        style={{
+          width: "100%",
+          maxWidth: 520,
+          borderRadius: 16,
+          border: err ? "1px solid rgba(255,80,80,0.30)" : "1px solid rgba(255,255,255,0.10)",
+          background: err ? "rgba(255,80,80,0.08)" : "rgba(255,255,255,0.03)",
+          padding: 16,
+          color: "#f3f3f7",
+        }}
+      >
+        <div style={{ fontSize: 22, fontWeight: 900, marginBottom: 8 }}>SceneBuilder</div>
+        <div style={{ opacity: 0.8, lineHeight: 1.4 }}>
+          {err || status}
+        </div>
       </div>
     </div>
   );
@@ -469,6 +556,7 @@ export default function App() {
   return (
     <ToastProvider>
       <Routes>
+        <Route path="/auth/callback" element={<AuthCallback />} />
         {!session ? (
           <>
             <Route path="/auth" element={<MinimalAuthScreen />} />

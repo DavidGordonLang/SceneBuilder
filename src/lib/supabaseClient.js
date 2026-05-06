@@ -14,7 +14,7 @@ export const supabase = createClient(supabaseUrl ?? "", supabaseAnonKey ?? "", {
     // Critical for mobile reliability
     persistSession: true,
     autoRefreshToken: true,
-    detectSessionInUrl: true,
+    detectSessionInUrl: false,
 
     // Force modern SPA auth flow going forward.
     // Even if Supabase returns hash tokens, we’ll still handle them via getSessionFromUrl.
