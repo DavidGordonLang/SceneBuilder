@@ -337,7 +337,7 @@ async function bootstrapPrefetch({ supabase, session }) {
     fetchJournalEntries({ supabase, userId: uid, limit: 80 }),
     supabase
       .from("profiles")
-      .select("id, display_name, bio, avatar_url, onboarding_complete")
+      .select("id, username, display_name, bio, avatar_url, onboarding_complete")
       .eq("id", uid)
       .single(),
   ]);

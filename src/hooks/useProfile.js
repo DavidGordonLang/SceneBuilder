@@ -27,7 +27,7 @@ export function useProfile({ supabase, userId }) {
       try {
         const { data, error: qErr } = await supabase
           .from("profiles")
-          .select("id, display_name, bio, avatar_url, onboarding_complete")
+          .select("id, username, display_name, bio, avatar_url, onboarding_complete")
           .eq("id", userId)
           .single();
 
