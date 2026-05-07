@@ -437,7 +437,7 @@ function AuthedShell({ session }) {
       ) : null}
 
       {/* Content */}
-      <div style={{ paddingBottom: showShell ? 74 : 0 }}>
+      <div style={{ paddingBottom: showShell ? "calc(96px + env(safe-area-inset-bottom, 0px))" : 0 }}>
         <ErrorBoundary>
           <Routes>
             <Route path="/home" element={<HomeRedirect />} />
@@ -498,7 +498,7 @@ function AuthedShell({ session }) {
             right: 0,
             bottom: 0,
             zIndex: 60,
-            padding: "10px 12px",
+            padding: "10px 12px calc(10px + env(safe-area-inset-bottom, 0px))",
             borderTop: "1px solid rgba(255,255,255,0.08)",
             background: "rgba(0,0,0,0.55)",
             backdropFilter: "blur(10px)",
